@@ -16,15 +16,8 @@ module.exports = defineConfig({
   },
   modules: [
     {
+      // System payment provider (COD) auto-registers as pp_system_default.
       resolve: "@medusajs/medusa/payment",
-      options: {
-        providers: [
-          {
-            resolve: "@medusajs/payment/providers/system",
-            id: "pp_system_default",
-          },
-        ],
-      },
     },
     {
       resolve: "@medusajs/medusa/fulfillment",
