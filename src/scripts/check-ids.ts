@@ -21,9 +21,9 @@ export default async function checkIds({ container }: ExecArgs) {
   const stockLocationService = container.resolve(Modules.STOCK_LOCATION);
   const salesChannelService = container.resolve(Modules.SALES_CHANNEL);
 
-  const regions = await regionService.listRegions();
-  const stockLocations = await stockLocationService.listStockLocations();
-  const salesChannels = await salesChannelService.listSalesChannels();
+  const regions = await regionService.listRegions({});
+  const stockLocations = await stockLocationService.listStockLocations({});
+  const salesChannels = await salesChannelService.listSalesChannels({});
 
   logger.info("\n=== REGIONS ===");
   regions.forEach((r: any) => {
