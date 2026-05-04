@@ -20,11 +20,37 @@ export default async function setupShipping({ container }: ExecArgs) {
 
   const fulfillmentModuleService = container.resolve(Modules.FULFILLMENT);
   const regionModuleService = container.resolve(Modules.REGION);
+  const stockLocationModuleService = container.resolve(Modules.STOCK_LOCATION);
+  const salesChannelModuleService = container.resolve(Modules.SALES_CHANNEL);
   const remoteLink = container.resolve("remoteLink" as any) as any;
 
-  const REGION_ID = "reg_01KN0AAX4FA592Q3HAY93W1AHV";
-  const STOCK_LOCATION_ID = "sloc_01KN48PYHQ0DTXXN2N0JWZSAYV";
-  const SALES_CHANNEL_ID = "sc_01KN07JKHRN9DP25TM5S664C5W";
+  const REGION_CURRENCY = "mur";
+  const STOCK_LOCATION_NAME = process.env.SETUP_SHIPPING_STOCK_LOCATION_NAME || "European Warehouse";
+  const SALES_CHANNEL_NAME = process.env.SETUP_SHIPPING_SALES_CHANNEL_NAME || "Default Sales Channel";
+
+  logger.info("Resolving region, stock location, and sales channel...");
+  const [region] = await regionModuleService.listRegions({ currency_code: REGION_CURRENCY });
+  if (!region) {
+    throw new Error(`No region found with currency_code=${REGION_CURRENCY}`);
+  }
+
+  const [stockLocation] = await stockLocationModuleService.listStockLocations({
+    name: STOCK_LOCATION_NAME,
+  });
+  if (!stockLocation) {
+    throw new Error(`No stock location found with name="${STOCK_LOCATION_NAME}"`);
+  }
+
+  const [salesChannel] = await salesChannelModuleService.listSalesChannels({
+    name: SALES_CHANNEL_NAME,
+  });
+  if (!salesChannel) {
+    throw new Error(`No sales channel found with name="${SALES_CHANNEL_NAME}"`);
+  }
+
+  logger.info(`Using region: ${region.id} (${region.name})`);
+  logger.info(`Using stock location: ${stockLocation.id} (${stockLocation.name})`);
+  logger.info(`Using sales channel: ${salesChannel.id} (${salesChannel.name})`);
 
   // 1. Shipping profile (reuse default)
   logger.info("Getting shipping profile...");
@@ -50,7 +76,7 @@ export default async function setupShipping({ container }: ExecArgs) {
   // 3. Link stock location to fulfillment set
   logger.info("Linking stock location to fulfillment set...");
   await remoteLink.create({
-    [Modules.STOCK_LOCATION]: { stock_location_id: STOCK_LOCATION_ID },
+    [Modules.STOCK_LOCATION]: { stock_location_id: stockLocation.id },
     [Modules.FULFILLMENT]: { fulfillment_set_id: fulfillmentSet.id },
   });
 
@@ -58,8 +84,8 @@ export default async function setupShipping({ container }: ExecArgs) {
   logger.info("Linking sales channel to stock location...");
   await linkSalesChannelsToStockLocationWorkflow(container).run({
     input: {
-      id: STOCK_LOCATION_ID,
-      add: [SALES_CHANNEL_ID],
+      id: stockLocation.id,
+      add: [salesChannel.id],
     },
   });
 
@@ -86,7 +112,7 @@ export default async function setupShipping({ container }: ExecArgs) {
             amount: 0,
           },
           {
-            region_id: REGION_ID,
+            region_id: region.id,
             amount: 0,
           },
         ],
@@ -109,7 +135,7 @@ export default async function setupShipping({ container }: ExecArgs) {
             amount: 15000,
           },
           {
-            region_id: REGION_ID,
+            region_id: region.id,
             amount: 15000,
           },
         ],
@@ -123,7 +149,7 @@ export default async function setupShipping({ container }: ExecArgs) {
   logger.info("Adding payment provider to region...");
   await regionModuleService.upsertRegions([
     {
-      id: REGION_ID,
+      id: region.id,
       payment_providers: ["pp_system_default"],
     } as any,
   ]);

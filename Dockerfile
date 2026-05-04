@@ -5,7 +5,7 @@ WORKDIR /app
 # Install dependencies
 COPY package.json yarn.lock .yarnrc.yml ./
 COPY .yarn .yarn
-RUN yarn install --immutable 2>/dev/null || yarn install
+RUN yarn install --immutable
 
 # Copy source
 COPY . .
@@ -14,8 +14,7 @@ COPY . .
 RUN yarn build
 
 # Build admin dashboard (needs NODE_ENV=development for build tools)
-ENV NODE_ENV=development
-RUN npx medusa build --admin-only
+RUN NODE_ENV=development npx medusa build --admin-only
 ENV NODE_ENV=production
 
 # Ensure admin build is in the expected location
