@@ -76,5 +76,43 @@ module.exports = defineConfig({
         providers: authProviders,
       },
     },
+    // Custom Doll Rewards loyalty module — earns + ledger + redeem.
+    {
+      resolve: "./src/modules/loyalty",
+    },
+    // Notification module — local 'feed' for admin UI + Resend for email.
+    {
+      resolve: "@medusajs/medusa/notification",
+      options: {
+        providers: [
+          {
+            resolve: "@medusajs/medusa/notification-local",
+            id: "local",
+            options: {
+              name: "Local Notification Provider",
+              channels: ["feed"],
+            },
+          },
+          ...(process.env.RESEND_API_KEY && process.env.RESEND_FROM_EMAIL
+            ? [
+                {
+                  resolve: "./src/modules/notification-resend",
+                  id: "resend",
+                  options: {
+                    channels: ["email"],
+                    api_key: process.env.RESEND_API_KEY,
+                    from: process.env.RESEND_FROM_EMAIL,
+                    from_name:
+                      process.env.RESEND_FROM_NAME ?? "Doll Up Team",
+                    reply_to:
+                      process.env.RESEND_REPLY_TO ??
+                      process.env.RESEND_FROM_EMAIL,
+                  },
+                },
+              ]
+            : []),
+        ],
+      },
+    },
   ],
 })

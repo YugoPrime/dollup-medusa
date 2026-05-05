@@ -34,7 +34,10 @@
     "@medusajs/locking": "2.13.1",
     "@medusajs/locking-redis": "2.13.1",
     "@medusajs/medusa": "2.13.1",
-    "@medusajs/payment": "2.13.1"
+    "@medusajs/payment": "2.13.1",
+    "@react-email/components": "^1.0.12",
+    "@react-email/render": "^2.0.8",
+    "resend": "^6.12.2"
   },
   "devDependencies": {
     "@medusajs/test-utils": "2.13.1",
