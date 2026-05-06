@@ -38,6 +38,7 @@
     "@medusajs/payment": "2.13.1",
     "@react-email/components": "^1.0.12",
     "@react-email/render": "^2.0.8",
+    "cheerio": "^1.2.0",
     "google-auth-library": "^10.6.2",
     "resend": "^6.12.2"
   },
