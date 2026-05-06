@@ -37,18 +37,6 @@ type LoyaltyResponse = {
   transactions_count: number
 }
 
-type LoyaltySettings = {
-  earn_rate_per_100_mur: number
-  redeem_rate_mur_per_100_pts: number
-  min_redeem_points: number
-  welcome_bonus_points: number
-  points_expiry_months: number | null
-}
-
-type LoyaltySettingsResponse = {
-  settings: LoyaltySettings
-}
-
 type WidgetProps = {
   data: { id: string }
 }
@@ -77,15 +65,6 @@ const CustomerLoyaltyWidget = ({ data: customer }: WidgetProps) => {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [resp, setResp] = useState<LoyaltyResponse | null>(null)
-  const [settings, setSettings] = useState<LoyaltySettings | null>(null)
-  const [settingsForm, setSettingsForm] = useState<Record<keyof LoyaltySettings, string>>({
-    earn_rate_per_100_mur: "",
-    redeem_rate_mur_per_100_pts: "",
-    min_redeem_points: "",
-    welcome_bonus_points: "",
-    points_expiry_months: "",
-  })
-  const [settingsSaving, setSettingsSaving] = useState(false)
 
   const [adjustOpen, setAdjustOpen] = useState(false)
   const [adjustDelta, setAdjustDelta] = useState("")
@@ -96,45 +75,14 @@ const CustomerLoyaltyWidget = ({ data: customer }: WidgetProps) => {
     setLoading(true)
     setError(null)
     try {
-      const [json, settingsJson] = (await Promise.all([
-        fetcher(`/admin/loyalty/accounts/${customer.id}`),
-        fetcher("/admin/loyalty/settings"),
-      ])) as [LoyaltyResponse, LoyaltySettingsResponse]
+      const json = (await fetcher(
+        `/admin/loyalty/accounts/${customer.id}`,
+      )) as LoyaltyResponse
       setResp(json)
-      setSettings(settingsJson.settings)
-      setSettingsForm(toSettingsForm(settingsJson.settings))
     } catch (e) {
       setError((e as Error).message)
     } finally {
       setLoading(false)
-    }
-  }
-
-  const submitSettings = async () => {
-    setSettingsSaving(true)
-    try {
-      const payload = {
-        earn_rate_per_100_mur: Number(settingsForm.earn_rate_per_100_mur),
-        redeem_rate_mur_per_100_pts: Number(
-          settingsForm.redeem_rate_mur_per_100_pts,
-        ),
-        min_redeem_points: Number(settingsForm.min_redeem_points),
-        welcome_bonus_points: Number(settingsForm.welcome_bonus_points),
-        points_expiry_months: settingsForm.points_expiry_months.trim()
-          ? Number(settingsForm.points_expiry_months)
-          : null,
-      }
-      const json = (await fetcher("/admin/loyalty/settings", {
-        method: "POST",
-        body: JSON.stringify(payload),
-      })) as LoyaltySettingsResponse
-      setSettings(json.settings)
-      setSettingsForm(toSettingsForm(json.settings))
-      toast.success("Loyalty settings saved")
-    } catch (e) {
-      toast.error((e as Error).message || "Failed to save settings")
-    } finally {
-      setSettingsSaving(false)
     }
   }
 
@@ -198,76 +146,19 @@ const CustomerLoyaltyWidget = ({ data: customer }: WidgetProps) => {
         <Stat label="Lifetime redeemed" value={resp?.loyalty.lifetime_redeemed} loading={loading} />
       </div>
 
-      <div className="px-6 py-4">
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <Heading level="h3">Program settings</Heading>
-          <Button
-            size="small"
-            variant="secondary"
-            onClick={() => void submitSettings()}
-            disabled={loading || settingsSaving || !settings}
+      <div className="px-6 py-3 text-ui-fg-subtle">
+        <Text size="small">
+          Program settings are managed at{" "}
+          <a
+            href="https://admin.dollupboutique.com/settings/loyalty"
+            target="_blank"
+            rel="noreferrer"
+            className="underline"
           >
-            {settingsSaving ? "Saving..." : "Save settings"}
-          </Button>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <SettingsField
-            id="earn-rate"
-            label="Earn per Rs 100"
-            value={settingsForm.earn_rate_per_100_mur}
-            onChange={(value) =>
-              setSettingsForm((prev) => ({
-                ...prev,
-                earn_rate_per_100_mur: value,
-              }))
-            }
-          />
-          <SettingsField
-            id="redeem-rate"
-            label="Rs per 100 points"
-            value={settingsForm.redeem_rate_mur_per_100_pts}
-            onChange={(value) =>
-              setSettingsForm((prev) => ({
-                ...prev,
-                redeem_rate_mur_per_100_pts: value,
-              }))
-            }
-          />
-          <SettingsField
-            id="min-redeem"
-            label="Min redeem points"
-            value={settingsForm.min_redeem_points}
-            onChange={(value) =>
-              setSettingsForm((prev) => ({
-                ...prev,
-                min_redeem_points: value,
-              }))
-            }
-          />
-          <SettingsField
-            id="welcome-bonus"
-            label="Welcome bonus"
-            value={settingsForm.welcome_bonus_points}
-            onChange={(value) =>
-              setSettingsForm((prev) => ({
-                ...prev,
-                welcome_bonus_points: value,
-              }))
-            }
-          />
-          <SettingsField
-            id="points-expiry"
-            label="Expiry months"
-            value={settingsForm.points_expiry_months}
-            placeholder="No expiry"
-            onChange={(value) =>
-              setSettingsForm((prev) => ({
-                ...prev,
-                points_expiry_months: value,
-              }))
-            }
-          />
-        </div>
+            admin.dollupboutique.com/settings/loyalty
+          </a>
+          .
+        </Text>
       </div>
 
       <div className="px-6 py-4">
@@ -378,45 +269,6 @@ const Stat = ({
     </Heading>
   </div>
 )
-
-const SettingsField = ({
-  id,
-  label,
-  value,
-  onChange,
-  placeholder,
-}: {
-  id: string
-  label: string
-  value: string
-  onChange: (value: string) => void
-  placeholder?: string
-}) => (
-  <div className="flex flex-col gap-1">
-    <Label htmlFor={`loyalty-${id}`}>{label}</Label>
-    <Input
-      id={`loyalty-${id}`}
-      type="number"
-      min="0"
-      placeholder={placeholder}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-    />
-  </div>
-)
-
-function toSettingsForm(settings: LoyaltySettings) {
-  return {
-    earn_rate_per_100_mur: String(settings.earn_rate_per_100_mur),
-    redeem_rate_mur_per_100_pts: String(settings.redeem_rate_mur_per_100_pts),
-    min_redeem_points: String(settings.min_redeem_points),
-    welcome_bonus_points: String(settings.welcome_bonus_points),
-    points_expiry_months:
-      settings.points_expiry_months === null
-        ? ""
-        : String(settings.points_expiry_months),
-  }
-}
 
 export const config = defineWidgetConfig({
   zone: "customer.details.after",

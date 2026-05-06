@@ -80,6 +80,9 @@ module.exports = defineConfig({
     {
       resolve: "./src/modules/loyalty",
     },
+    {
+      resolve: "./src/modules/store-config",
+    },
     // Notification module — local 'feed' for admin UI + Resend for email.
     {
       resolve: "@medusajs/medusa/notification",

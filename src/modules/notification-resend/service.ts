@@ -20,6 +20,7 @@ import WelcomeEmail, { type WelcomeEmailData } from "./templates/welcome"
 import PasswordResetEmail, {
   type PasswordResetEmailData,
 } from "./templates/password-reset"
+import type StoreConfigModuleService from "../store-config/service"
 
 export enum EmailTemplate {
   ORDER_PLACED = "order-placed",
@@ -72,6 +73,7 @@ export type ResendNotificationOptions = {
 
 type InjectedDependencies = {
   logger: Logger
+  store_config?: StoreConfigModuleService
 }
 
 class ResendNotificationProviderService extends AbstractNotificationProviderService {
@@ -80,15 +82,17 @@ class ResendNotificationProviderService extends AbstractNotificationProviderServ
   private resendClient: Resend
   private options: ResendNotificationOptions
   private logger: Logger
+  private storeConfig?: StoreConfigModuleService
 
   constructor(
-    { logger }: InjectedDependencies,
+    { logger, store_config }: InjectedDependencies,
     options: ResendNotificationOptions,
   ) {
     super()
     this.resendClient = new Resend(options.api_key)
     this.options = options
     this.logger = logger
+    this.storeConfig = store_config
   }
 
   static validateOptions(options: Record<string, unknown>) {
@@ -134,12 +138,48 @@ class ResendNotificationProviderService extends AbstractNotificationProviderServ
     return defaultSubjects[template as EmailTemplate](data)
   }
 
+  private async isTemplateEnabled(template: string): Promise<boolean> {
+    if (!this.storeConfig) {
+      return true
+    }
+
+    try {
+      const settings = await this.storeConfig.getEmailSettings()
+      if (template === EmailTemplate.ORDER_PLACED) {
+        return settings.enabled_order_placed
+      }
+      if (template === EmailTemplate.ORDER_SHIPPED) {
+        return settings.enabled_order_shipped
+      }
+      if (template === EmailTemplate.WELCOME) {
+        return settings.enabled_welcome
+      }
+      if (template === EmailTemplate.PASSWORD_RESET) {
+        return settings.enabled_password_reset
+      }
+      return true
+    } catch (err) {
+      this.logger.warn(
+        `notification-resend: could not read email settings; sending ${template} anyway (${(err as Error).message})`,
+      )
+      return true
+    }
+  }
+
   async send(
     notification: ProviderSendNotificationDTO,
   ): Promise<ProviderSendNotificationResultsDTO> {
     if (!notification.to) {
       this.logger.warn(
         `notification-resend: missing recipient for template ${notification.template}`,
+      )
+      return {}
+    }
+
+    const enabled = await this.isTemplateEnabled(notification.template)
+    if (!enabled) {
+      this.logger.info(
+        `notification-resend: suppressed ${notification.template} to ${notification.to} by email settings`,
       )
       return {}
     }
