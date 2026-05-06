@@ -1,0 +1,24 @@
+import { model } from "@medusajs/framework/utils"
+import DraftOrder from "./draft-order"
+import DraftVariant from "./draft-variant"
+import DraftCostHistory from "./draft-cost-history"
+
+export const SOURCE_TYPES = ["alibaba", "pdf", "manual"] as const
+
+const DraftItem = model.define("DraftItem", {
+  id: model.id({ prefix: "ditm" }).primaryKey(),
+  draft_order: model.belongsTo(() => DraftOrder, { mappedBy: "items" }),
+  source_url: model.text().nullable(),
+  source_type: model.enum([...SOURCE_TYPES]).default("manual"),
+  scraped_title: model.text().nullable(),
+  scraped_image_url: model.text().nullable(),
+  working_name: model.text().nullable(),
+  cost_usd: model.number().default(0),
+  notes: model.text().nullable(),
+  position: model.number().default(0),
+  uploaded_image_r2_key: model.text().nullable(),
+  variants: model.hasMany(() => DraftVariant, { mappedBy: "draft_item" }),
+  cost_history: model.hasMany(() => DraftCostHistory, { mappedBy: "draft_item" }),
+})
+
+export default DraftItem
