@@ -10,8 +10,6 @@ const RETENTION_DAYS = 30
 const LOOKBACK_DAYS = 90
 const FILE_PREFIX = "dollup-orders-"
 
-type SkuItem = { sku: string; size: string; color: string; quantity: number; title: string }
-
 function csvEscape(v: unknown): string {
   if (v == null) return ""
   const s = String(v)
@@ -23,6 +21,32 @@ function csvEscape(v: unknown): string {
 function muDate(d: Date): string {
   const muMs = d.getTime() + 4 * 60 * 60 * 1000
   return new Date(muMs).toISOString().slice(0, 10)
+}
+
+// Accepts the service account credential as either:
+//   - raw JSON (works only if your hosting can pass multiline env vars cleanly)
+//   - base64-encoded JSON (single-line, recommended for Coolify / docker .env)
+function parseServiceAccountKey(raw: string): {
+  client_email?: string
+  private_key?: string
+} | null {
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+  // JSON path: starts with `{`.
+  if (trimmed.startsWith("{")) {
+    try {
+      return JSON.parse(trimmed)
+    } catch {
+      return null
+    }
+  }
+  // Otherwise assume base64.
+  try {
+    const decoded = Buffer.from(trimmed, "base64").toString("utf8")
+    return JSON.parse(decoded)
+  } catch {
+    return null
+  }
 }
 
 // Variants store title as "Color / Size" in this codebase. Output as
@@ -80,30 +104,36 @@ const HEADERS = [
   "Status",
 ] as const
 
-export default async function exportOrdersCsv(container: MedusaContainer) {
+export type ExportResult = {
+  ok: boolean
+  filename?: string
+  ordersExported?: number
+  bytes?: number
+  pruned?: number
+  error?: string
+}
+
+export async function runExport(container: MedusaContainer): Promise<ExportResult> {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER)
 
   if (!FOLDER_ID || !SA_KEY) {
-    logger.warn(
-      "[export-orders-csv] missing GOOGLE_DRIVE_FOLDER_ID or GOOGLE_DRIVE_SA_KEY — skipping run",
-    )
-    return
+    const msg =
+      "missing GOOGLE_DRIVE_FOLDER_ID or GOOGLE_DRIVE_SA_KEY — skipping run"
+    logger.warn(`[export-orders-csv] ${msg}`)
+    return { ok: false, error: msg }
   }
 
-  let credentials: { client_email?: string; private_key?: string }
-  try {
-    credentials = JSON.parse(SA_KEY)
-  } catch {
-    logger.error(
-      "[export-orders-csv] GOOGLE_DRIVE_SA_KEY is not valid JSON — skipping run",
-    )
-    return
+  const credentials = parseServiceAccountKey(SA_KEY)
+  if (!credentials) {
+    const msg =
+      "GOOGLE_DRIVE_SA_KEY is not valid JSON or base64-encoded JSON — skipping run"
+    logger.error(`[export-orders-csv] ${msg}`)
+    return { ok: false, error: msg }
   }
   if (!credentials.client_email || !credentials.private_key) {
-    logger.error(
-      "[export-orders-csv] SA key missing client_email or private_key — skipping run",
-    )
-    return
+    const msg = "SA key missing client_email or private_key — skipping run"
+    logger.error(`[export-orders-csv] ${msg}`)
+    return { ok: false, error: msg }
   }
 
   const query = container.resolve(ContainerRegistrationKeys.QUERY)
@@ -282,6 +312,20 @@ export default async function exportOrdersCsv(container: MedusaContainer) {
       pruned > 0 ? `, pruned ${pruned} old file(s)` : ""
     }`,
   )
+
+  return {
+    ok: true,
+    filename,
+    ordersExported: (orders ?? []).length,
+    bytes: csv.length,
+    pruned,
+  }
+}
+
+export default async function exportOrdersCsv(
+  container: MedusaContainer,
+): Promise<void> {
+  await runExport(container)
 }
 
 export const config = {
