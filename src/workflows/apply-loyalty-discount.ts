@@ -4,10 +4,7 @@ import {
   MedusaError,
   Modules,
 } from "@medusajs/framework/utils"
-import {
-  completeCartWorkflow,
-  refreshPaymentCollectionForCartWorkflow,
-} from "@medusajs/medusa/core-flows"
+import { refreshPaymentCollectionForCartWorkflow } from "@medusajs/medusa/core-flows"
 
 import type { LoyaltySettingsDTO } from "../modules/loyalty/service"
 
@@ -280,6 +277,3 @@ function getLineItemSubtotal(item: CartLineItem) {
   )
 }
 
-completeCartWorkflow.hooks.validate(async ({ cart }) => {
-  assertCartHasLoyaltyDiscount(cart as LoyaltyCart)
-})

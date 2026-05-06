@@ -4,10 +4,7 @@ import {
   MedusaError,
   Modules,
 } from "@medusajs/framework/utils"
-import {
-  completeCartWorkflow,
-  refreshPaymentCollectionForCartWorkflow,
-} from "@medusajs/medusa/core-flows"
+import { refreshPaymentCollectionForCartWorkflow } from "@medusajs/medusa/core-flows"
 
 export const MYSTERY_BOX_FLAT_PRICE_MUR = 3500
 export const MYSTERY_BOX_ADJUSTMENT_CODE = "MYSTERY_BOX"
@@ -266,6 +263,3 @@ function getLineItemSubtotal(item: CartLineItem) {
   )
 }
 
-completeCartWorkflow.hooks.validate(async ({ cart }) => {
-  assertCartHasMysteryBoxDiscount(cart as MysteryBoxCart)
-})
