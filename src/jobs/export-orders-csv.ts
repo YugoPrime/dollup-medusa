@@ -1,21 +1,14 @@
 import type { MedusaContainer } from "@medusajs/framework/types"
 import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
-import { Readable } from "node:stream"
 import { JWT } from "google-auth-library"
-import { drive as driveClient } from "@googleapis/drive"
+import { sheets as sheetsClient } from "@googleapis/sheets"
 
-const FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID
+const SPREADSHEET_ID = process.env.GOOGLE_SHEETS_SPREADSHEET_ID
 const SA_KEY = process.env.GOOGLE_DRIVE_SA_KEY
-const RETENTION_DAYS = 30
 const LOOKBACK_DAYS = 90
-const FILE_PREFIX = "dollup-orders-"
-
-function csvEscape(v: unknown): string {
-  if (v == null) return ""
-  const s = String(v)
-  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`
-  return s
-}
+// Hardcoded so we can clear with confidence regardless of how big the sheet
+// has grown. Bump if we ever exceed it.
+const CLEAR_RANGE = "A1:Z10000"
 
 // MU is UTC+4 fixed.
 function muDate(d: Date): string {
@@ -23,7 +16,12 @@ function muDate(d: Date): string {
   return new Date(muMs).toISOString().slice(0, 10)
 }
 
-// Accepts the service account credential as either:
+function muDateTime(d: Date): string {
+  const muMs = d.getTime() + 4 * 60 * 60 * 1000
+  return new Date(muMs).toISOString().replace("T", " ").slice(0, 19)
+}
+
+// Accepts the SA credential as either:
 //   - raw JSON (works only if your hosting can pass multiline env vars cleanly)
 //   - base64-encoded JSON (single-line, recommended for Coolify / docker .env)
 function parseServiceAccountKey(raw: string): {
@@ -32,7 +30,6 @@ function parseServiceAccountKey(raw: string): {
 } | null {
   const trimmed = raw.trim()
   if (!trimmed) return null
-  // JSON path: starts with `{`.
   if (trimmed.startsWith("{")) {
     try {
       return JSON.parse(trimmed)
@@ -40,7 +37,6 @@ function parseServiceAccountKey(raw: string): {
       return null
     }
   }
-  // Otherwise assume base64.
   try {
     const decoded = Buffer.from(trimmed, "base64").toString("utf8")
     return JSON.parse(decoded)
@@ -50,8 +46,8 @@ function parseServiceAccountKey(raw: string): {
 }
 
 // Variants store title as "Color / Size" in this codebase. Output as
-// "${SKU} ${size} ${color}" to match the Google Sheet convention
-// (e.g. "IS2316 S Blue").
+// "${SKU} ${size} ${color}" to match the existing operations sheet
+// convention (e.g. "IS2316 S Blue").
 function formatVariantSku(item: {
   variant_sku?: string | null
   variant_title?: string | null
@@ -106,19 +102,19 @@ const HEADERS = [
 
 export type ExportResult = {
   ok: boolean
-  filename?: string
+  spreadsheetId?: string
+  rowsWritten?: number
   ordersExported?: number
-  bytes?: number
-  pruned?: number
+  lastUpdatedAtMu?: string
   error?: string
 }
 
 export async function runExport(container: MedusaContainer): Promise<ExportResult> {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER)
 
-  if (!FOLDER_ID || !SA_KEY) {
+  if (!SPREADSHEET_ID || !SA_KEY) {
     const msg =
-      "missing GOOGLE_DRIVE_FOLDER_ID or GOOGLE_DRIVE_SA_KEY — skipping run"
+      "missing GOOGLE_SHEETS_SPREADSHEET_ID or GOOGLE_DRIVE_SA_KEY — skipping run"
     logger.warn(`[export-orders-csv] ${msg}`)
     return { ok: false, error: msg }
   }
@@ -169,19 +165,26 @@ export async function runExport(container: MedusaContainer): Promise<ExportResul
     filters: { created_at: { $gte: since.toISOString() } },
   })
 
-  const rows: string[][] = [HEADERS as unknown as string[]]
+  // Newest orders first matches the operator's existing sheet ordering.
+  const sortedOrders = [...(orders ?? [])].sort((a, b) => {
+    const ta = a?.created_at ? new Date(a.created_at).getTime() : 0
+    const tb = b?.created_at ? new Date(b.created_at).getTime() : 0
+    return tb - ta
+  })
 
-  for (const o of orders ?? []) {
+  const rows: (string | number)[][] = [HEADERS as unknown as string[]]
+
+  for (const o of sortedOrders) {
     if (!o) continue
     const meta = (o.metadata ?? {}) as Record<string, unknown>
-    const items = (o.items ?? []).filter((i): i is NonNullable<typeof i> => i != null)
+    const items = (o.items ?? []).filter(
+      (i): i is NonNullable<typeof i> => i != null,
+    )
 
     const variantItems = items.filter((i) => i.variant_id != null)
     const manualItems = items.filter((i) => i.variant_id == null)
 
-    const variantSlots = variantItems
-      .slice(0, 6)
-      .map((i) => formatVariantSku(i))
+    const variantSlots = variantItems.slice(0, 6).map((i) => formatVariantSku(i))
     while (variantSlots.length < 6) variantSlots.push("")
 
     const overflow = variantItems.slice(6).map((i) => formatVariantSku(i))
@@ -231,9 +234,9 @@ export async function runExport(container: MedusaContainer): Promise<ExportResul
       buyerPhone,
       ...variantSlots,
       manualCol,
-      String(shipping),
-      String(discount),
-      String(total),
+      shipping,
+      discount,
+      total,
       paymentMethod,
       pointOfSale,
       saleType,
@@ -241,84 +244,41 @@ export async function runExport(container: MedusaContainer): Promise<ExportResul
     ])
   }
 
-  const csv = rows.map((r) => r.map(csvEscape).join(",")).join("\r\n") + "\r\n"
-
   const auth = new JWT({
     email: credentials.client_email,
     key: credentials.private_key,
-    scopes: ["https://www.googleapis.com/auth/drive.file"],
+    scopes: ["https://www.googleapis.com/auth/spreadsheets"],
   })
-  const drive = driveClient({ version: "v3", auth })
+  const sheets = sheetsClient({ version: "v4", auth })
 
-  const today = muDate(new Date())
-  const filename = `${FILE_PREFIX}${today}.csv`
-
-  // Same-day re-run replaces the existing file rather than creating duplicates.
-  const existing = await drive.files.list({
-    q: `'${FOLDER_ID}' in parents and name='${filename}' and trashed=false`,
-    fields: "files(id, name)",
-    pageSize: 10,
-    spaces: "drive",
-  })
-  const existingId = existing.data.files?.[0]?.id
-
-  const media = { mimeType: "text/csv", body: Readable.from(csv) }
-
-  if (existingId) {
-    await drive.files.update({
-      fileId: existingId,
-      media,
-    })
-  } else {
-    await drive.files.create({
-      requestBody: {
-        name: filename,
-        parents: [FOLDER_ID],
-        mimeType: "text/csv",
-      },
-      media,
-    })
-  }
-
-  // Retention: drop files older than RETENTION_DAYS days.
-  const cutoff = new Date()
-  cutoff.setDate(cutoff.getDate() - RETENTION_DAYS)
-  const cutoffMs = cutoff.getTime()
-
-  const allFiles = await drive.files.list({
-    q: `'${FOLDER_ID}' in parents and name contains '${FILE_PREFIX}' and trashed=false`,
-    fields: "files(id, name, createdTime)",
-    pageSize: 200,
-    spaces: "drive",
+  // 1. Clear out everything in the canonical range so stale rows from the
+  //    previous run don't linger if the order count shrank.
+  await sheets.spreadsheets.values.clear({
+    spreadsheetId: SPREADSHEET_ID,
+    range: CLEAR_RANGE,
   })
 
-  let pruned = 0
-  for (const f of allFiles.data.files ?? []) {
-    if (!f.id || !f.createdTime) continue
-    if (new Date(f.createdTime).getTime() < cutoffMs) {
-      try {
-        await drive.files.delete({ fileId: f.id })
-        pruned += 1
-      } catch (err) {
-        logger.warn(
-          `[export-orders-csv] failed to delete ${f.name}: ${(err as Error).message}`,
-        )
-      }
-    }
-  }
+  // 2. Write headers + all rows starting at A1.
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID,
+    range: "A1",
+    valueInputOption: "RAW",
+    requestBody: { values: rows },
+  })
+
+  const updatedAt = muDateTime(new Date())
+  const ordersCount = sortedOrders.length
 
   logger.info(
-    `[export-orders-csv] uploaded ${filename} — ${(orders ?? []).length} orders, ${csv.length} bytes${
-      pruned > 0 ? `, pruned ${pruned} old file(s)` : ""
-    }`,
+    `[export-orders-csv] wrote ${rows.length} rows (${ordersCount} orders) to spreadsheet ${SPREADSHEET_ID} at ${updatedAt}`,
   )
 
   return {
     ok: true,
-    filename,
-    ordersExported: (orders ?? []).length,
-    bytes: csv.length,
-    pruned,
+    spreadsheetId: SPREADSHEET_ID,
+    rowsWritten: rows.length,
+    ordersExported: ordersCount,
+    lastUpdatedAtMu: updatedAt,
   }
 }
 

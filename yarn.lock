@@ -1546,12 +1546,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@googleapis/drive@npm:^20.1.0":
-  version: 20.1.0
-  resolution: "@googleapis/drive@npm:20.1.0"
+"@googleapis/sheets@npm:^13.0.1":
+  version: 13.0.1
+  resolution: "@googleapis/sheets@npm:13.0.1"
   dependencies:
     googleapis-common: "npm:^8.0.0"
-  checksum: 10c0/db88d441335a15faeddb2c1d59ae262df64ae961c9862272f1c4d58ad5b7c3c609dd8fbc92726e6c7955273ff10a990f721655b86daf4a4bae6d7d66fe88b294
+  checksum: 10c0/e20d2a3bed1fe2b91cababdf1fe3e171e69e7cf694dd77535ef2dccc8a785eeeda44bd7596c193847081a6c33cda9c06035b46f7de5a3878adc6f9e6db08405c
   languageName: node
   linkType: hard
 
@@ -13562,7 +13562,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "medusa-starter-default@workspace:."
   dependencies:
-    "@googleapis/drive": "npm:^20.1.0"
+    "@googleapis/sheets": "npm:^13.0.1"
     "@medusajs/admin-sdk": "npm:2.13.1"
     "@medusajs/auth-google": "npm:2.13.1"
     "@medusajs/cli": "npm:2.13.1"
