@@ -25,6 +25,7 @@
     "test:unit": "TEST_TYPE=unit NODE_OPTIONS=--experimental-vm-modules jest --silent --runInBand --forceExit"
   },
   "dependencies": {
+    "@googleapis/drive": "^20.1.0",
     "@medusajs/admin-sdk": "2.13.1",
     "@medusajs/auth-google": "2.13.1",
     "@medusajs/cli": "2.13.1",
@@ -37,6 +38,7 @@
     "@medusajs/payment": "2.13.1",
     "@react-email/components": "^1.0.12",
     "@react-email/render": "^2.0.8",
+    "google-auth-library": "^10.6.2",
     "resend": "^6.12.2"
   },
   "devDependencies": {
