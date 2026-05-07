@@ -89,6 +89,51 @@ class StoriesModuleService extends MedusaService({
     } as unknown as Parameters<this["createStoryPlans"]>[0])
     return created as unknown as StoryPlanDTO
   }
+
+  /**
+   * Stamps slot.posted_at, writes a publication_log row, and (if it was the
+   * last unposted slot of its plan) flips plan.status from active → completed.
+   * On the first markPosted of a plan, also flips draft → active.
+   */
+  async markPosted(slotId: string): Promise<void> {
+    const [slot] = await this.listStorySlots({ id: slotId })
+    if (!slot) throw new Error(`Slot ${slotId} not found`)
+    if (!slot.product_id) throw new Error("Cannot mark posted: slot has no product")
+    if (slot.posted_at) return  // idempotent
+
+    const now = new Date()
+
+    await this.updateStorySlots({ id: slotId, posted_at: now })
+    await this.createPublicationLogs({
+      product_id: slot.product_id,
+      slot_id: slot.id,
+      posted_at: now,
+    })
+
+    const [plan] = await this.listStoryPlans({ id: slot.plan_id })
+    const allSlots = await this.listStorySlots({ plan_id: plan.id })
+    const allPosted = allSlots.every((s) => s.id === slotId || s.posted_at)
+    if (plan.status === "draft") {
+      await this.updateStoryPlans({ id: plan.id, status: allPosted ? "completed" : "active" })
+    } else if (plan.status === "active" && allPosted) {
+      await this.updateStoryPlans({ id: plan.id, status: "completed" })
+    }
+  }
+
+  async unmark(slotId: string): Promise<void> {
+    const [slot] = await this.listStorySlots({ id: slotId })
+    if (!slot) throw new Error(`Slot ${slotId} not found`)
+    if (!slot.posted_at) return  // idempotent
+
+    await this.updateStorySlots({ id: slotId, posted_at: null })
+    const logs = await this.listPublicationLogs({ slot_id: slotId })
+    for (const log of logs) await this.deletePublicationLogs(log.id)
+
+    const [plan] = await this.listStoryPlans({ id: slot.plan_id })
+    if (plan.status === "completed") {
+      await this.updateStoryPlans({ id: plan.id, status: "active" })
+    }
+  }
 }
 
 export default StoriesModuleService

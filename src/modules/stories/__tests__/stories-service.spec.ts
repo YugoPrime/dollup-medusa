@@ -73,5 +73,83 @@ moduleIntegrationTestRunner<StoriesModuleService>({
         ).rejects.toThrow()
       })
     })
+
+    describe("StoriesModuleService — mark/unmark", () => {
+      async function makePlanWithSlot(date: string) {
+        const plan = await service.createPlan({
+          plan_date: date,
+          category_distribution: [{ category_id: "c1", count: 1 }],
+          scheduled_times: ["09:00"],
+        })
+        const slot = await service.createStorySlots({
+          plan_id: plan.id,
+          slot_index: 0,
+          scheduled_at: new Date(`${date}T09:00:00+04:00`),
+          category_id: "c1",
+          product_id: "prod_test",
+          product_snapshot: {
+            name: "Test",
+            handle: "test",
+            price_mur: 100,
+            compare_at_price_mur: null,
+            variants_in_stock: [],
+            variant_in_stock_count: 0,
+            picked_at: new Date().toISOString(),
+          },
+          fallback_used: false,
+          pick_attempt: 1,
+        })
+        return { plan, slot }
+      }
+
+      it("markPosted stamps posted_at, writes a publication_log row, transitions plan to completed when all slots done", async () => {
+        const { plan, slot } = await makePlanWithSlot("2026-07-01")
+        await service.markPosted(slot.id)
+
+        const reloadedSlot = (await service.listStorySlots({ id: slot.id }))[0]
+        expect(reloadedSlot.posted_at).toBeTruthy()
+
+        const logs = await service.listPublicationLogs({ slot_id: slot.id })
+        expect(logs).toHaveLength(1)
+        expect(logs[0].product_id).toBe("prod_test")
+
+        const reloadedPlan = (await service.listStoryPlans({ id: plan.id }))[0]
+        expect(reloadedPlan.status).toBe("completed")
+      })
+
+      it("unmark deletes the publication_log row and reverts status if it was completed", async () => {
+        const { plan, slot } = await makePlanWithSlot("2026-07-02")
+        await service.markPosted(slot.id)
+        await service.unmark(slot.id)
+
+        const reloadedSlot = (await service.listStorySlots({ id: slot.id }))[0]
+        expect(reloadedSlot.posted_at).toBeNull()
+
+        const logs = await service.listPublicationLogs({ slot_id: slot.id })
+        expect(logs).toHaveLength(0)
+
+        const reloadedPlan = (await service.listStoryPlans({ id: plan.id }))[0]
+        expect(reloadedPlan.status).toBe("active")
+      })
+
+      it("markPosted refuses if slot has no product_id", async () => {
+        const plan = await service.createPlan({
+          plan_date: "2026-07-03",
+          category_distribution: [{ category_id: "c", count: 1 }],
+          scheduled_times: ["09:00"],
+        })
+        const empty = await service.createStorySlots({
+          plan_id: plan.id,
+          slot_index: 0,
+          scheduled_at: new Date("2026-07-03T09:00:00+04:00"),
+          category_id: "c",
+          product_id: null,
+          product_snapshot: null,
+          fallback_used: false,
+          pick_attempt: 1,
+        })
+        await expect(service.markPosted(empty.id)).rejects.toThrow(/no product/i)
+      })
+    })
   },
 })
