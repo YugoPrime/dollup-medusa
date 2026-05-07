@@ -20,6 +20,23 @@ export type StorySettingsDTO = {
 
 export type UpdateStorySettingsInput = Partial<Omit<StorySettingsDTO, "id">>
 
+export type CreatePlanInput = {
+  plan_date: string  // ISO date
+  category_distribution: Array<{ category_id: string; count: number }>
+  scheduled_times: string[]  // "HH:mm"
+  notes?: string | null
+}
+
+export type StoryPlanDTO = {
+  id: string
+  plan_date: string
+  total_slots: number
+  status: string
+  category_distribution: Array<{ category_id: string; count: number }>
+  scheduled_times: string[]
+  notes: string | null
+}
+
 export const DEFAULT_STORY_SETTINGS: Omit<StorySettingsDTO, "id"> = {
   anti_repeat_days: 7,
   caption_template: "{name} — Rs {price} · {sizes} · {link}",
@@ -53,6 +70,24 @@ class StoriesModuleService extends MedusaService({
       ...input,
     } as unknown as Parameters<this["updateStorySettings"]>[0])
     return updated as unknown as StorySettingsDTO
+  }
+
+  async createPlan(input: CreatePlanInput): Promise<StoryPlanDTO> {
+    const total = input.category_distribution.reduce((s, b) => s + b.count, 0)
+    if (total !== input.scheduled_times.length) {
+      throw new Error(
+        `scheduled_times length (${input.scheduled_times.length}) must equal sum of distribution counts (${total})`,
+      )
+    }
+    const created = await this.createStoryPlans({
+      plan_date: input.plan_date,
+      total_slots: total,
+      category_distribution: input.category_distribution,
+      scheduled_times: input.scheduled_times,
+      status: "draft",
+      notes: input.notes ?? null,
+    } as unknown as Parameters<this["createStoryPlans"]>[0])
+    return created as unknown as StoryPlanDTO
   }
 }
 

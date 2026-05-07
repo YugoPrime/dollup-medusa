@@ -31,5 +31,47 @@ moduleIntegrationTestRunner<StoriesModuleService>({
         expect(updated.caption_template).toContain("{name}")
       })
     })
+
+    describe("StoriesModuleService — plans", () => {
+      it("createPlan computes total_slots from distribution and creates empty slots", async () => {
+        const plan = await service.createPlan({
+          plan_date: "2026-06-01",
+          category_distribution: [
+            { category_id: "cat_dresses", count: 2 },
+            { category_id: "cat_beach", count: 1 },
+          ],
+          scheduled_times: ["09:00", "13:00", "17:00"],
+        })
+        expect(plan.total_slots).toBe(3)
+        expect(plan.status).toBe("draft")
+        const slots = await service.listStorySlots({ plan_id: plan.id })
+        expect(slots).toHaveLength(0)
+      })
+
+      it("createPlan rejects when total_slots !== scheduled_times.length", async () => {
+        await expect(
+          service.createPlan({
+            plan_date: "2026-06-02",
+            category_distribution: [{ category_id: "c", count: 3 }],
+            scheduled_times: ["09:00", "13:00"],
+          }),
+        ).rejects.toThrow(/scheduled_times length/i)
+      })
+
+      it("createPlan enforces UNIQUE(plan_date)", async () => {
+        await service.createPlan({
+          plan_date: "2026-06-03",
+          category_distribution: [{ category_id: "c", count: 1 }],
+          scheduled_times: ["09:00"],
+        })
+        await expect(
+          service.createPlan({
+            plan_date: "2026-06-03",
+            category_distribution: [{ category_id: "c", count: 1 }],
+            scheduled_times: ["10:00"],
+          }),
+        ).rejects.toThrow()
+      })
+    })
   },
 })
