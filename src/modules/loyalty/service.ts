@@ -355,6 +355,137 @@ class LoyaltyModuleService extends MedusaService({
   }
 
   /**
+   * Refund-driven reversal of points awarded on an order.
+   *
+   * Called when a full refund is issued — pulls back the points that were
+   * credited to the customer at order time. UNLIKE adjustPoints, this is
+   * permitted to push the balance below zero (the customer got their money
+   * back, so the points should not stay).
+   *
+   * Behavior:
+   *   - Looks up the original `earn` transaction for this orderId. If none
+   *     exists, no-op (returns { reversed: 0, account }).
+   *   - Idempotency: if an `adjustment` txn already exists for this orderId
+   *     with negative points, no-op (returns the existing reversal info).
+   *   - Otherwise: deducts the original earned amount, allowing balance to
+   *     go negative. Writes an `adjustment` txn tagged with `order_id`.
+   */
+  async reversePointsForOrder(
+    customerId: string,
+    orderId: string,
+    options: { reason: string },
+  ): Promise<{ reversed: number; balance: number }> {
+    if (!customerId) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        "customerId is required",
+      )
+    }
+    if (!orderId) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        "orderId is required",
+      )
+    }
+
+    const account = await this.ensureAccount(customerId)
+
+    // Find the original earn transaction for this order.
+    const earns = await this.listLoyaltyTransactions({
+      account_id: account.id,
+      order_id: orderId,
+      type: "earn",
+    })
+    const originalEarn = earns[0]
+    if (!originalEarn || originalEarn.points <= 0) {
+      return { reversed: 0, balance: account.points_balance }
+    }
+
+    // Idempotency: a negative adjustment for this orderId means we already reversed.
+    const priorReversals = await this.listLoyaltyTransactions({
+      account_id: account.id,
+      order_id: orderId,
+      type: "adjustment",
+    })
+    const existing = priorReversals.find((t) => t.points < 0)
+    if (existing) {
+      return {
+        reversed: Math.abs(existing.points),
+        balance: account.points_balance,
+      }
+    }
+
+    const intPoints = Math.floor(originalEarn.points)
+    const newBalance = account.points_balance - intPoints
+
+    await this.updateLoyaltyAccounts({
+      id: account.id,
+      points_balance: newBalance,
+      lifetime_redeemed: account.lifetime_redeemed + intPoints,
+    })
+
+    await this.createLoyaltyTransactions({
+      account_id: account.id,
+      type: "adjustment",
+      points: -intPoints,
+      reason: options.reason,
+      order_id: orderId,
+    })
+
+    return { reversed: intPoints, balance: newBalance }
+  }
+
+  /**
+   * Restore points that were previously reversed (used when a full refund is voided).
+   *
+   * Idempotent: if no negative adjustment exists for this order, no-op.
+   *             If a positive adjustment for this order already exists matching
+   *             the reversed amount, no-op.
+   */
+  async restorePointsForOrder(
+    customerId: string,
+    orderId: string,
+    options: { reason: string },
+  ): Promise<{ restored: number; balance: number }> {
+    const account = await this.ensureAccount(customerId)
+
+    const adjustments = await this.listLoyaltyTransactions({
+      account_id: account.id,
+      order_id: orderId,
+      type: "adjustment",
+    })
+    const reversal = adjustments.find((t) => t.points < 0)
+    if (!reversal) {
+      return { restored: 0, balance: account.points_balance }
+    }
+    const alreadyRestored = adjustments.some(
+      (t) => t.points === Math.abs(reversal.points),
+    )
+    if (alreadyRestored) {
+      return { restored: Math.abs(reversal.points), balance: account.points_balance }
+    }
+
+    const intPoints = Math.abs(reversal.points)
+    const newBalance = account.points_balance + intPoints
+
+    await this.updateLoyaltyAccounts({
+      id: account.id,
+      points_balance: newBalance,
+      lifetime_earned: account.lifetime_earned + intPoints,
+    })
+
+    await this.createLoyaltyTransactions({
+      account_id: account.id,
+      type: "adjustment",
+      points: intPoints,
+      reason: options.reason,
+      order_id: orderId,
+    })
+
+    return { restored: intPoints, balance: newBalance }
+  }
+
+  /**
    * Paginated transaction history for a customer.
    * Newest first.
    */
