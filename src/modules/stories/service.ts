@@ -4,8 +4,6 @@ import StoryPlan from "./models/story-plan"
 import StorySlot from "./models/story-slot"
 import PublicationLog from "./models/publication-log"
 import StorySettings from "./models/story-settings"
-// buildSnapshot is wired in by Task 13 (regeneratePlan picker).
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { buildSnapshot, type ProductLike } from "./snapshot"
 
 export const STORY_SETTINGS_ID = "story_settings"
@@ -147,6 +145,120 @@ class StoriesModuleService extends MedusaService({
     )
     return Array.from(new Set(logs.map((l) => l.product_id)))
   }
+
+  /**
+   * Re-rolls every un-posted slot of a plan. Posted slots are immutable.
+   *
+   * `productSource` is injected so this method is testable without the Medusa
+   * product module. In production it's wired to the product module via the
+   * API layer (see /admin/stories/plans/[id]/regenerate/route.ts).
+   *
+   * Algorithm — see docs/superpowers/specs/2026-05-07-story-planner-v1-design.md §4.
+   */
+  async regeneratePlan(
+    planId: string,
+    deps: {
+      productSource: (filter: { category_id?: string }) => Promise<ProductLike[]>
+    },
+  ): Promise<void> {
+    const [plan] = await this.listStoryPlans({ id: planId })
+    if (!plan) throw new Error(`Plan ${planId} not found`)
+    if (plan.status === "completed")
+      throw new Error("Plan is completed; cannot regenerate")
+
+    const allSlots = await this.listStorySlots({ plan_id: planId })
+    const postedSlots = allSlots.filter((s) => s.posted_at)
+    const postedIndices = new Set(postedSlots.map((s) => s.slot_index))
+    const postedProductIds = postedSlots
+      .map((s) => s.product_id)
+      .filter((id): id is string => Boolean(id))
+
+    const settings = await this.getSettings()
+    const excluded = new Set(
+      await this.getExcludedProductIds(settings.anti_repeat_days),
+    )
+    const pickedThisRun = new Set<string>(postedProductIds)
+
+    const unpostedSlots = allSlots.filter((s) => !s.posted_at)
+    for (const s of unpostedSlots) await this.deleteStorySlots(s.id)
+
+    type ToFill = { slot_index: number; category_id: string }
+    const toFill: ToFill[] = []
+    let walker = 0
+    const distribution = plan.category_distribution as unknown as Array<{
+      category_id: string
+      count: number
+    }>
+    for (const bucket of distribution) {
+      for (let i = 0; i < bucket.count; i++) {
+        if (!postedIndices.has(walker)) {
+          toFill.push({ slot_index: walker, category_id: bucket.category_id })
+        }
+        walker++
+      }
+    }
+    const scheduledTimes = plan.scheduled_times as unknown as string[]
+
+    const eligible = (p: ProductLike) =>
+      p.variants.some((v) => v.inventory_quantity > 0) &&
+      !excluded.has(p.id) &&
+      !pickedThisRun.has(p.id)
+
+    const pickRandom = <T,>(arr: T[]): T | null =>
+      arr.length > 0 ? arr[Math.floor(Math.random() * arr.length)] : null
+
+    for (const { slot_index, category_id } of toFill) {
+      const scheduledAt = resolveScheduledAt(
+        plan.plan_date as unknown as string | Date,
+        scheduledTimes[slot_index],
+      )
+
+      const inCategory = (await deps.productSource({ category_id })).filter(eligible)
+      let product = pickRandom(inCategory)
+      let fallbackUsed = false
+
+      if (!product) {
+        const union = (await deps.productSource({})).filter(eligible)
+        product = pickRandom(union)
+        fallbackUsed = product != null
+      }
+
+      if (product) {
+        await this.createStorySlots({
+          plan_id: planId,
+          slot_index,
+          scheduled_at: scheduledAt,
+          category_id,
+          product_id: product.id,
+          product_snapshot: buildSnapshot(product),
+          fallback_used: fallbackUsed,
+          pick_attempt: 1,
+        })
+        pickedThisRun.add(product.id)
+      } else {
+        await this.createStorySlots({
+          plan_id: planId,
+          slot_index,
+          scheduled_at: scheduledAt,
+          category_id,
+          product_id: null,
+          product_snapshot: null,
+          fallback_used: false,
+          pick_attempt: 1,
+        })
+      }
+    }
+
+    if (plan.status === "draft") {
+      await this.updateStoryPlans({ id: planId, status: "active" })
+    }
+  }
+}
+
+function resolveScheduledAt(planDate: string | Date, time: string): Date {
+  const date =
+    typeof planDate === "string" ? planDate : planDate.toISOString().slice(0, 10)
+  return new Date(`${date}T${time}:00+04:00`)
 }
 
 export default StoriesModuleService
