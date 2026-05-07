@@ -134,6 +134,19 @@ class StoriesModuleService extends MedusaService({
       await this.updateStoryPlans({ id: plan.id, status: "active" })
     }
   }
+
+  /**
+   * Returns deduped product IDs that have been posted within the last
+   * `days` days. Used by the picker to enforce anti-repeat.
+   */
+  async getExcludedProductIds(days: number): Promise<string[]> {
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+    const logs = await this.listPublicationLogs(
+      { posted_at: { $gte: cutoff } },
+      { take: 10000 },
+    )
+    return Array.from(new Set(logs.map((l) => l.product_id)))
+  }
 }
 
 export default StoriesModuleService

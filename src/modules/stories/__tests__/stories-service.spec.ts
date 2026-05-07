@@ -151,5 +151,30 @@ moduleIntegrationTestRunner<StoriesModuleService>({
         await expect(service.markPosted(empty.id)).rejects.toThrow(/no product/i)
       })
     })
+
+    describe("StoriesModuleService — anti-repeat", () => {
+      it("getExcludedProductIds returns products with publication_log within window", async () => {
+        const now = Date.now()
+        const dayAgo = new Date(now - 1 * 24 * 3600 * 1000)
+        const tenDaysAgo = new Date(now - 10 * 24 * 3600 * 1000)
+
+        await service.createPublicationLogs({ product_id: "prod_recent", posted_at: dayAgo })
+        await service.createPublicationLogs({ product_id: "prod_old", posted_at: tenDaysAgo })
+
+        const excluded = await service.getExcludedProductIds(7)
+        expect(excluded).toContain("prod_recent")
+        expect(excluded).not.toContain("prod_old")
+      })
+
+      it("getExcludedProductIds dedupes when same product was posted multiple times", async () => {
+        const now = Date.now()
+        await service.createPublicationLogs({ product_id: "prod_dup", posted_at: new Date(now - 1000) })
+        await service.createPublicationLogs({ product_id: "prod_dup", posted_at: new Date(now - 2000) })
+
+        const excluded = await service.getExcludedProductIds(7)
+        const dupCount = excluded.filter((id) => id === "prod_dup").length
+        expect(dupCount).toBe(1)
+      })
+    })
   },
 })
