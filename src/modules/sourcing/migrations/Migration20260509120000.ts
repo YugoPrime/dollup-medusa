@@ -1,6 +1,6 @@
 import { Migration } from "@medusajs/framework/mikro-orm/migrations"
 
-export class Migration20260507000000 extends Migration {
+export class Migration20260509120000 extends Migration {
   async up(): Promise<void> {
     this.addSql(
       'create table if not exists "supplier" (' +
