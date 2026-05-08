@@ -38,7 +38,10 @@ export const POST = async (req: AuthenticatedMedusaRequest, res: MedusaResponse)
         "variants.id",
         "variants.sku",
         "variants.title",
-        "variants.inventory_quantity",
+        "variants.manage_inventory",
+        "variants.inventory_items.required_quantity",
+        "variants.inventory_items.inventory.location_levels.stocked_quantity",
+        "variants.inventory_items.inventory.location_levels.reserved_quantity",
         "variants.options.value",
         "variants.options.option.title",
         "variants.calculated_price.*",
@@ -66,6 +69,21 @@ export const POST = async (req: AuthenticatedMedusaRequest, res: MedusaResponse)
   }
 }
 
+// Medusa v2 has no `inventory_quantity` on product_variant — stock lives in the
+// Inventory module, joined via inventory_items.inventory.location_levels. Sum
+// (stocked - reserved) across every level of every linked item; if the variant
+// is not inventory-managed, treat as effectively unlimited.
+function computeInventoryQuantity(v: any): number {
+  if (v.manage_inventory === false) return Number.MAX_SAFE_INTEGER
+  let total = 0
+  for (const ii of v.inventory_items ?? []) {
+    for (const lvl of ii.inventory?.location_levels ?? []) {
+      total += Number(lvl.stocked_quantity ?? 0) - Number(lvl.reserved_quantity ?? 0)
+    }
+  }
+  return Math.max(0, total)
+}
+
 function toProductLike(p: any): ProductLike {
   return {
     id: p.id,
@@ -89,7 +107,7 @@ function toProductLike(p: any): ProductLike {
         id: v.id,
         sku: v.sku,
         title: v.title,
-        inventory_quantity: v.inventory_quantity ?? 0,
+        inventory_quantity: computeInventoryQuantity(v),
         prices,
         options: Object.fromEntries(
           (v.options ?? []).map((o: any) => [
