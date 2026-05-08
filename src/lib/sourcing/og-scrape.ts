@@ -9,10 +9,25 @@ export type OgFields = {
 
 export type ScrapeResult =
   | { ok: true; fields: OgFields }
-  | { ok: false; reason: "fetch_failed" | "invalid_url" | "timeout" | "no_og_tags" }
+  | {
+      ok: false
+      reason:
+        | "fetch_failed"
+        | "invalid_url"
+        | "host_not_allowed"
+        | "timeout"
+        | "no_og_tags"
+    }
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000
 const cache = new Map<string, { at: number; value: ScrapeResult }>()
+
+const ALLOWED_HOST_SUFFIXES = [
+  "alibaba.com",
+  "aliexpress.com",
+  "aliexpress.us",
+  "1688.com",
+] as const
 
 export function parseOgFromHtml(html: string): OgFields {
   const $ = load(html)
@@ -34,6 +49,10 @@ export function parseOgFromHtml(html: string): OgFields {
 
 export async function scrapeUrl(url: string): Promise<ScrapeResult> {
   if (!isValidHttpUrl(url)) return { ok: false, reason: "invalid_url" }
+  const parsed = new URL(url)
+  if (!isAllowedHost(parsed.hostname)) {
+    return { ok: false, reason: "host_not_allowed" }
+  }
   const key = createHash("sha256").update(url).digest("hex")
   const hit = cache.get(key)
   if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.value
@@ -89,4 +108,11 @@ function isValidHttpUrl(url: string): boolean {
   } catch {
     return false
   }
+}
+
+function isAllowedHost(hostname: string): boolean {
+  const h = hostname.toLowerCase()
+  return ALLOWED_HOST_SUFFIXES.some(
+    (suffix) => h === suffix || h.endsWith(`.${suffix}`),
+  )
 }
