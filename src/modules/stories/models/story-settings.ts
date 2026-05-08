@@ -12,6 +12,7 @@ const StorySettings = model.define("StorySettings", {
   // SQL-side default ('[]') in the migration is the source of truth.
   default_distribution: model.json(),
   default_schedule: model.json(),
+  stock_alert_threshold: model.number().default(0),
 })
 
 export default StorySettings
