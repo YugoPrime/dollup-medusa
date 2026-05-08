@@ -30,6 +30,8 @@ export const PUT = async (
     input.default_distribution = body.default_distribution as never
   if (Array.isArray(body.default_schedule))
     input.default_schedule = body.default_schedule as never
+  if (typeof body.stock_alert_threshold === "number")
+    input.stock_alert_threshold = Math.max(0, Math.min(50, Math.trunc(body.stock_alert_threshold)))
 
   const service = req.scope.resolve<StoriesModuleService>(STORIES_MODULE)
   try {
