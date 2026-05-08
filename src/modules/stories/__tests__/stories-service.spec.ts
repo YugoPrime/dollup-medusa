@@ -187,5 +187,54 @@ moduleIntegrationTestRunner<StoriesModuleService>({
         expect(dupCount).toBe(1)
       })
     })
+
+    describe("StoriesModuleService — rescheduleSlot", () => {
+      it("updates scheduled_at on an unposted slot", async () => {
+        const plan = await service.createPlan({
+          plan_date: "2026-07-01",
+          category_distribution: [{ category_id: "cat_a", count: 1 }],
+          scheduled_times: ["09:00"],
+        })
+        const slot = await service.createStorySlots({
+          plan_id: plan.id,
+          slot_index: 0,
+          scheduled_at: new Date("2026-07-01T09:00:00+04:00"),
+          category_id: "cat_a",
+          product_id: null,
+          product_snapshot: null,
+          fallback_used: false,
+          pick_attempt: 1,
+        } as never)
+        const newAt = new Date("2026-07-01T15:30:00+04:00")
+        await service.rescheduleSlot((slot as { id: string }).id, newAt)
+        const [updated] = await service.listStorySlots({ id: (slot as { id: string }).id })
+        expect(new Date(updated.scheduled_at).toISOString()).toBe(newAt.toISOString())
+      })
+
+      it("rejects rescheduling a posted slot", async () => {
+        const plan = await service.createPlan({
+          plan_date: "2026-07-02",
+          category_distribution: [{ category_id: "cat_a", count: 1 }],
+          scheduled_times: ["09:00"],
+        })
+        const slot = await service.createStorySlots({
+          plan_id: plan.id,
+          slot_index: 0,
+          scheduled_at: new Date("2026-07-02T09:00:00+04:00"),
+          category_id: "cat_a",
+          product_id: "prod_x",
+          product_snapshot: null,
+          fallback_used: false,
+          pick_attempt: 1,
+          posted_at: new Date(),
+        } as never)
+        await expect(
+          service.rescheduleSlot(
+            (slot as { id: string }).id,
+            new Date("2026-07-02T15:00:00+04:00"),
+          ),
+        ).rejects.toThrow(/posted/i)
+      })
+    })
   },
 })

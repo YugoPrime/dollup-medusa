@@ -135,6 +135,13 @@ class StoriesModuleService extends MedusaService({
     }
   }
 
+  async rescheduleSlot(slotId: string, scheduledAt: Date): Promise<void> {
+    const [slot] = await this.listStorySlots({ id: slotId })
+    if (!slot) throw new Error(`Slot ${slotId} not found`)
+    if (slot.posted_at) throw new Error("Cannot reschedule a posted slot")
+    await this.updateStorySlots({ id: slotId, scheduled_at: scheduledAt })
+  }
+
   /**
    * Returns deduped product IDs that have been posted within the last
    * `days` days. Used by the picker to enforce anti-repeat.
