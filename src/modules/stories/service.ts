@@ -8,6 +8,14 @@ import { buildSnapshot, type ProductLike } from "./snapshot"
 
 export const STORY_SETTINGS_ID = "story_settings"
 
+// Mauritius is UTC+4 with no DST. Plan dates are stored as MU local calendar
+// dates ("YYYY-MM-DD"); using UTC here would shift "today" by a day during the
+// 20:00–24:00 UTC window (i.e., 00:00–04:00 Mauritius local time).
+const MU_OFFSET_MS = 4 * 60 * 60 * 1000
+function todayIsoMauritius(): string {
+  return new Date(Date.now() + MU_OFFSET_MS).toISOString().slice(0, 10)
+}
+
 export type StorySettingsDTO = {
   id: string
   anti_repeat_days: number
@@ -303,14 +311,13 @@ class StoriesModuleService extends MedusaService({
 
   async getStockAlerts(deps: {
     variantStockLookup: (productIds: string[]) => Promise<Map<string, number>>
-    fromDate?: string  // ISO date inclusive, default today (UTC)
+    fromDate?: string  // ISO date inclusive, default today (Mauritius)
     toDate?: string    // ISO date inclusive, default fromDate + 7
   }): Promise<StockAlert[]> {
     const settings = await this.getSettings()
     const threshold = settings.stock_alert_threshold
 
-    const todayIso = new Date().toISOString().slice(0, 10)
-    const from = deps.fromDate ?? todayIso
+    const from = deps.fromDate ?? todayIsoMauritius()
     const toFallback = new Date(`${from}T00:00:00Z`)
     toFallback.setUTCDate(toFallback.getUTCDate() + 7)
     const to = deps.toDate ?? toFallback.toISOString().slice(0, 10)
