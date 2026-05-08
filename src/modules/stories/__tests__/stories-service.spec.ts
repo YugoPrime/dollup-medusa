@@ -286,6 +286,91 @@ moduleIntegrationTestRunner<StoriesModuleService>({
       })
     })
 
+    describe("StoriesModuleService — getStockAlerts", () => {
+      it("returns alerts for unposted slots whose product is at/below threshold", async () => {
+        const plan = await service.createPlan({
+          plan_date: "2026-11-01",
+          category_distribution: [{ category_id: "cat_a", count: 2 }],
+          scheduled_times: ["09:00", "13:00"],
+        })
+        await service.createStorySlots({
+          plan_id: plan.id,
+          slot_index: 0,
+          scheduled_at: new Date("2026-11-01T09:00:00+04:00"),
+          category_id: "cat_a",
+          product_id: "prod_oos",
+          product_snapshot: {
+            name: "Out of stock dress",
+            handle: "x",
+            price_mur: 0,
+            compare_at_price_mur: null,
+            variants_in_stock: [],
+            variant_in_stock_count: 0,
+            picked_at: new Date().toISOString(),
+          },
+          fallback_used: false,
+          pick_attempt: 1,
+        } as never)
+        await service.createStorySlots({
+          plan_id: plan.id,
+          slot_index: 1,
+          scheduled_at: new Date("2026-11-01T13:00:00+04:00"),
+          category_id: "cat_a",
+          product_id: "prod_ok",
+          product_snapshot: {
+            name: "Healthy dress",
+            handle: "y",
+            price_mur: 0,
+            compare_at_price_mur: null,
+            variants_in_stock: [],
+            variant_in_stock_count: 0,
+            picked_at: new Date().toISOString(),
+          },
+          fallback_used: false,
+          pick_attempt: 1,
+        } as never)
+        const stocks = new Map<string, number>([
+          ["prod_oos", 0],
+          ["prod_ok", 12],
+        ])
+        const alerts = await service.getStockAlerts({
+          variantStockLookup: async (ids) =>
+            new Map(ids.map((id) => [id, stocks.get(id) ?? 0])),
+          fromDate: "2026-11-01",
+          toDate: "2026-11-01",
+        })
+        expect(alerts).toHaveLength(1)
+        expect(alerts[0].product_id).toBe("prod_oos")
+        expect(alerts[0].current_stock).toBe(0)
+      })
+
+      it("excludes posted slots and respects threshold setting", async () => {
+        await service.updateSettings({ stock_alert_threshold: 2 })
+        const plan = await service.createPlan({
+          plan_date: "2026-11-02",
+          category_distribution: [{ category_id: "cat_a", count: 1 }],
+          scheduled_times: ["09:00"],
+        })
+        await service.createStorySlots({
+          plan_id: plan.id,
+          slot_index: 0,
+          scheduled_at: new Date("2026-11-02T09:00:00+04:00"),
+          category_id: "cat_a",
+          product_id: "prod_p",
+          product_snapshot: null,
+          fallback_used: false,
+          pick_attempt: 1,
+          posted_at: new Date(),
+        } as never)
+        const alerts = await service.getStockAlerts({
+          variantStockLookup: async () => new Map([["prod_p", 0]]),
+          fromDate: "2026-11-02",
+          toDate: "2026-11-02",
+        })
+        expect(alerts).toHaveLength(0)  // posted, never alerts
+      })
+    })
+
     describe("StoriesModuleService — createBatchPlans", () => {
       it("creates N plans with shared anti-repeat across the batch", async () => {
         const distribution = [{ category_id: "cat_a", count: 1 }]

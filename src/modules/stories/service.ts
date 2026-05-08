@@ -44,6 +44,18 @@ export type StoryPlanDTO = {
   notes: string | null
 }
 
+export type StockAlert = {
+  slot_id: string
+  plan_id: string
+  plan_date: string
+  slot_index: number
+  scheduled_at: string
+  product_id: string
+  product_name: string
+  current_stock: number
+  threshold: number
+}
+
 export const DEFAULT_STORY_SETTINGS: Omit<StorySettingsDTO, "id"> = {
   anti_repeat_days: 7,
   caption_template: "{name} — Rs {price} · {sizes} · {link}",
@@ -271,6 +283,79 @@ class StoriesModuleService extends MedusaService({
       await this.getExcludedProductIds(settings.anti_repeat_days),
     )
     await this.pickProductsForPlan(planId, deps, excluded)
+  }
+
+  async getStockAlerts(deps: {
+    variantStockLookup: (productIds: string[]) => Promise<Map<string, number>>
+    fromDate?: string  // ISO date inclusive, default today (UTC)
+    toDate?: string    // ISO date inclusive, default fromDate + 7
+  }): Promise<StockAlert[]> {
+    const settings = await this.getSettings()
+    const threshold = settings.stock_alert_threshold
+
+    const todayIso = new Date().toISOString().slice(0, 10)
+    const from = deps.fromDate ?? todayIso
+    const toFallback = new Date(`${from}T00:00:00Z`)
+    toFallback.setUTCDate(toFallback.getUTCDate() + 7)
+    const to = deps.toDate ?? toFallback.toISOString().slice(0, 10)
+
+    const plans = await this.listStoryPlans(
+      { plan_date: { $gte: from, $lte: to } },
+      { take: 100 },
+    )
+    if (plans.length === 0) return []
+    const planIds = plans.map((p) => p.id)
+    const planById = new Map<string, { id: string; plan_date: string }>(
+      plans.map((p) => {
+        const pd = p.plan_date as unknown as string | Date
+        return [
+          p.id,
+          {
+            id: p.id,
+            plan_date:
+              typeof pd === "string"
+                ? pd.slice(0, 10)
+                : pd.toISOString().slice(0, 10),
+          },
+        ]
+      }),
+    )
+
+    const slots = await this.listStorySlots(
+      { plan_id: { $in: planIds }, posted_at: null } as any,
+      { take: 1000 },
+    )
+    const populated = slots.filter(
+      (s): s is typeof s & { product_id: string } => Boolean(s.product_id),
+    )
+    if (populated.length === 0) return []
+
+    const productIds = Array.from(new Set(populated.map((s) => s.product_id)))
+    const stocks = await deps.variantStockLookup(productIds)
+
+    const alerts: StockAlert[] = []
+    for (const s of populated) {
+      const current = stocks.get(s.product_id) ?? 0
+      if (current <= threshold) {
+        const plan = planById.get(s.plan_id)!
+        const snap = (s.product_snapshot ?? null) as { name?: string } | null
+        alerts.push({
+          slot_id: s.id,
+          plan_id: s.plan_id,
+          plan_date: plan.plan_date,
+          slot_index: s.slot_index,
+          scheduled_at:
+            typeof s.scheduled_at === "string"
+              ? s.scheduled_at
+              : (s.scheduled_at as Date).toISOString(),
+          product_id: s.product_id,
+          product_name: snap?.name ?? "(unknown)",
+          current_stock: current,
+          threshold,
+        })
+      }
+    }
+    return alerts
   }
 
   async createBatchPlans(
