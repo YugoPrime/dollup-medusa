@@ -64,4 +64,29 @@ describe("buildSnapshot", () => {
     expect(buildSnapshot(allOut).variants_in_stock).toEqual([])
     expect(buildSnapshot(allOut).variant_in_stock_count).toBe(0)
   })
+
+  it("price_mur reflects display rupees, not display × 100 nor display ÷ 100", () => {
+    // Regression: toProductLike previously fed raw_calculated_amount.value
+    // (which equals display, e.g. "1290") into prices[].amount, then
+    // snapshot.ts divided by 100 → Rs 13. Contract is now "amount = minor
+    // units (display × 100)". For Rs 1290 expect amount=129000 → price_mur=1290.
+    const product = {
+      id: "prod_1",
+      title: "Floral Wrap Dress",
+      handle: "floral-wrap-dress",
+      variants: [
+        {
+          id: "var_1",
+          sku: null,
+          title: null,
+          inventory_quantity: 5,
+          prices: [{ amount: 129000, currency_code: "mur" }],
+          options: { color: "Pink", size: "M" },
+          images: [{ url: "https://cdn.example/a.jpg" }],
+        },
+      ],
+    }
+    const snap = buildSnapshot(product)
+    expect(snap.price_mur).toBe(1290)
+  })
 })
