@@ -156,19 +156,16 @@ class StoriesModuleService extends MedusaService({
   }
 
   /**
-   * Re-rolls every un-posted slot of a plan. Posted slots are immutable.
-   *
-   * `productSource` is injected so this method is testable without the Medusa
-   * product module. In production it's wired to the product module via the
-   * API layer (see /admin/stories/plans/[id]/regenerate/route.ts).
-   *
-   * Algorithm — see docs/superpowers/specs/2026-05-07-story-planner-v1-design.md §4.
+   * Internal: picks products for every un-posted slot of one plan and writes
+   * them. Mutates `excluded` by adding picked ids — caller can carry the set
+   * across multiple plan calls (used by createBatchPlans).
    */
-  async regeneratePlan(
+  private async pickProductsForPlan(
     planId: string,
     deps: {
       productSource: (filter: { category_id?: string }) => Promise<ProductLike[]>
     },
+    excluded: Set<string>,
   ): Promise<void> {
     const [plan] = await this.listStoryPlans({ id: planId })
     if (!plan) throw new Error(`Plan ${planId} not found`)
@@ -178,15 +175,9 @@ class StoriesModuleService extends MedusaService({
     const allSlots = await this.listStorySlots({ plan_id: planId })
     const postedSlots = allSlots.filter((s) => s.posted_at)
     const postedIndices = new Set(postedSlots.map((s) => s.slot_index))
-    const postedProductIds = postedSlots
-      .map((s) => s.product_id)
-      .filter((id): id is string => Boolean(id))
-
-    const settings = await this.getSettings()
-    const excluded = new Set(
-      await this.getExcludedProductIds(settings.anti_repeat_days),
-    )
-    const pickedThisRun = new Set<string>(postedProductIds)
+    for (const id of postedSlots.map((s) => s.product_id).filter((x): x is string => Boolean(x))) {
+      excluded.add(id)
+    }
 
     const unpostedSlots = allSlots.filter((s) => !s.posted_at)
     for (const s of unpostedSlots) await this.deleteStorySlots(s.id)
@@ -209,9 +200,7 @@ class StoriesModuleService extends MedusaService({
     const scheduledTimes = plan.scheduled_times as unknown as string[]
 
     const eligible = (p: ProductLike) =>
-      p.variants.some((v) => v.inventory_quantity > 0) &&
-      !excluded.has(p.id) &&
-      !pickedThisRun.has(p.id)
+      p.variants.some((v) => v.inventory_quantity > 0) && !excluded.has(p.id)
 
     const pickRandom = <T,>(arr: T[]): T | null =>
       arr.length > 0 ? arr[Math.floor(Math.random() * arr.length)] : null
@@ -243,7 +232,7 @@ class StoriesModuleService extends MedusaService({
           fallback_used: fallbackUsed,
           pick_attempt: 1,
         })
-        pickedThisRun.add(product.id)
+        excluded.add(product.id)
       } else {
         await this.createStorySlots({
           plan_id: planId,
@@ -261,6 +250,19 @@ class StoriesModuleService extends MedusaService({
     if (plan.status === "draft") {
       await this.updateStoryPlans({ id: planId, status: "active" })
     }
+  }
+
+  async regeneratePlan(
+    planId: string,
+    deps: {
+      productSource: (filter: { category_id?: string }) => Promise<ProductLike[]>
+    },
+  ): Promise<void> {
+    const settings = await this.getSettings()
+    const excluded = new Set(
+      await this.getExcludedProductIds(settings.anti_repeat_days),
+    )
+    await this.pickProductsForPlan(planId, deps, excluded)
   }
 }
 

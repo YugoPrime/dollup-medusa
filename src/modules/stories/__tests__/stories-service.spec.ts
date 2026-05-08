@@ -236,5 +236,54 @@ moduleIntegrationTestRunner<StoriesModuleService>({
         ).rejects.toThrow(/posted/i)
       })
     })
+
+    describe("StoriesModuleService — regeneratePlan baseline (refactor safety)", () => {
+      it("fills slots from a small catalog under no anti-repeat exclusions", async () => {
+        const plan = await service.createPlan({
+          plan_date: "2026-08-01",
+          category_distribution: [{ category_id: "cat_dresses", count: 2 }],
+          scheduled_times: ["09:00", "13:00"],
+        })
+        const productSource = async () => [
+          {
+            id: "prod_a",
+            title: "A",
+            handle: "a",
+            variants: [
+              {
+                id: "var_a",
+                inventory_quantity: 5,
+                prices: [{ amount: 50000, currency_code: "mur" }],
+                options: { color: "Pink", size: "M" },
+                images: [{ url: "https://x/a.jpg" }],
+              },
+            ],
+          },
+          {
+            id: "prod_b",
+            title: "B",
+            handle: "b",
+            variants: [
+              {
+                id: "var_b",
+                inventory_quantity: 5,
+                prices: [{ amount: 60000, currency_code: "mur" }],
+                options: { color: "Blue", size: "S" },
+                images: [{ url: "https://x/b.jpg" }],
+              },
+            ],
+          },
+        ]
+        await service.regeneratePlan(plan.id, { productSource })
+        const slots = (await service.listStorySlots({ plan_id: plan.id })).sort(
+          (a, b) => a.slot_index - b.slot_index,
+        )
+        expect(slots).toHaveLength(2)
+        expect(slots.every((s) => s.product_id != null)).toBe(true)
+        // No same product in two slots within the plan
+        const ids = slots.map((s) => s.product_id)
+        expect(new Set(ids).size).toBe(2)
+      })
+    })
   },
 })
