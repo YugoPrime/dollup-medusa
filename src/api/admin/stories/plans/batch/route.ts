@@ -7,27 +7,33 @@ import {
   QueryContext,
 } from "@medusajs/framework/utils"
 
-import { STORIES_MODULE } from "../../../../../../modules/stories"
-import type StoriesModuleService from "../../../../../../modules/stories/service"
-import type { ProductLike } from "../../../../../../modules/stories/snapshot"
+import { STORIES_MODULE } from "../../../../../modules/stories"
+import type StoriesModuleService from "../../../../../modules/stories/service"
+import type { ProductLike } from "../../../../../modules/stories/snapshot"
 
 /**
- * Wires the stories picker to the Medusa product module via query.graph so the
- * pricing module's calculated_price (a remote link) can be traversed in one call.
- * Returns rich Product entities shaped into ProductLike for the picker.
- *
- * `category_id` filter uses Medusa's product.categories relation.
+ * Batch-create N daily plans with shared anti-repeat. Reuses the same
+ * query.graph wiring as regenerate/route.ts so single-day and batch produce
+ * identical inventory + price computations.
  */
 export const POST = async (req: AuthenticatedMedusaRequest, res: MedusaResponse) => {
-  const planId = req.params.id
   const stories = req.scope.resolve<StoriesModuleService>(STORIES_MODULE)
   const query = req.scope.resolve(ContainerRegistrationKeys.QUERY)
 
+  const body = (req.body ?? {}) as Record<string, unknown>
+  const start_date = String(body.start_date ?? "")
+  const days = Number(body.days ?? 1)
+  const category_distribution = Array.isArray(body.category_distribution)
+    ? (body.category_distribution as Array<{ category_id: string; count: number }>)
+    : []
+  const scheduled_times = Array.isArray(body.scheduled_times)
+    ? (body.scheduled_times as string[])
+    : []
+  const notes = typeof body.notes === "string" ? body.notes : null
+
   const productSource = async (filter: { category_id?: string }): Promise<ProductLike[]> => {
     const filters: Record<string, unknown> = { status: "published" }
-    if (filter.category_id) {
-      filters.categories = { id: filter.category_id }
-    }
+    if (filter.category_id) filters.categories = { id: filter.category_id }
     const { data: products } = await query.graph({
       entity: "product",
       fields: [
@@ -49,30 +55,25 @@ export const POST = async (req: AuthenticatedMedusaRequest, res: MedusaResponse)
       filters,
       pagination: { take: 500 },
       context: {
-        variants: {
-          calculated_price: QueryContext({ currency_code: "mur" }),
-        },
+        variants: { calculated_price: QueryContext({ currency_code: "mur" }) },
       },
     })
     return products.map(toProductLike)
   }
 
   try {
-    await stories.regeneratePlan(planId, { productSource })
-    const slots = (await stories.listStorySlots({ plan_id: planId }))
-      .sort((a, b) => a.slot_index - b.slot_index)
-    res.json({ slots })
+    const plans = await stories.createBatchPlans(
+      { start_date, days, category_distribution, scheduled_times, notes },
+      { productSource },
+    )
+    res.status(201).json({ plans })
   } catch (err) {
-    const msg = (err as Error)?.message ?? "Regenerate failed"
-    const status = /completed/i.test(msg) ? 409 : 400
+    const msg = (err as Error)?.message ?? "Batch create failed"
+    const status = /already exist/i.test(msg) ? 409 : 400
     res.status(status).json({ message: msg })
   }
 }
 
-// Medusa v2 has no `inventory_quantity` on product_variant — stock lives in the
-// Inventory module, joined via inventory_items.inventory.location_levels. Sum
-// (stocked - reserved) across every level of every linked item; if the variant
-// is not inventory-managed, treat as effectively unlimited.
 function computeInventoryQuantity(v: any): number {
   if (v.manage_inventory === false) return Number.MAX_SAFE_INTEGER
   let total = 0
