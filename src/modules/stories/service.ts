@@ -14,6 +14,7 @@ export type StorySettingsDTO = {
   caption_template: string
   default_distribution: Array<{ category_id: string; count: number }>
   default_schedule: string[]
+  stock_alert_threshold: number
 }
 
 export type UpdateStorySettingsInput = Partial<Omit<StorySettingsDTO, "id">>
@@ -40,6 +41,7 @@ export const DEFAULT_STORY_SETTINGS: Omit<StorySettingsDTO, "id"> = {
   caption_template: "{name} — Rs {price} · {sizes} · {link}",
   default_distribution: [],
   default_schedule: [],
+  stock_alert_threshold: 0,
 }
 
 class StoriesModuleService extends MedusaService({

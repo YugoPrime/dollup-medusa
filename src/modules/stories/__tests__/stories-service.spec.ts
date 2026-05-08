@@ -30,6 +30,17 @@ moduleIntegrationTestRunner<StoriesModuleService>({
         expect(updated.anti_repeat_days).toBe(14)
         expect(updated.caption_template).toContain("{name}")
       })
+
+      it("getSettings returns stock_alert_threshold = 0 by default", async () => {
+        const s = await service.getSettings()
+        expect(s.stock_alert_threshold).toBe(0)
+      })
+
+      it("updateSettings persists stock_alert_threshold", async () => {
+        await service.getSettings()
+        const updated = await service.updateSettings({ stock_alert_threshold: 3 })
+        expect(updated.stock_alert_threshold).toBe(3)
+      })
     })
 
     describe("StoriesModuleService — plans", () => {
