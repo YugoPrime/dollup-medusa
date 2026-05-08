@@ -371,6 +371,84 @@ moduleIntegrationTestRunner<StoriesModuleService>({
       })
     })
 
+    describe("StoriesModuleService — swapSlotProduct", () => {
+      it("replaces product_id and snapshot on an unposted slot", async () => {
+        const plan = await service.createPlan({
+          plan_date: "2026-12-01",
+          category_distribution: [{ category_id: "cat_a", count: 1 }],
+          scheduled_times: ["09:00"],
+        })
+        const slot = await service.createStorySlots({
+          plan_id: plan.id,
+          slot_index: 0,
+          scheduled_at: new Date("2026-12-01T09:00:00+04:00"),
+          category_id: "cat_a",
+          product_id: "prod_old",
+          product_snapshot: null,
+          fallback_used: true,
+          pick_attempt: 1,
+        } as never)
+        const newProduct = {
+          id: "prod_new",
+          title: "Replacement Dress",
+          handle: "replacement-dress",
+          variants: [
+            {
+              id: "var_new",
+              sku: null,
+              title: null,
+              inventory_quantity: 8,
+              prices: [{ amount: 159000, currency_code: "mur" }],
+              options: { color: "Cream", size: "M" },
+              images: [{ url: "https://x/new.jpg" }],
+            },
+          ],
+        }
+        await service.swapSlotProduct((slot as { id: string }).id, newProduct)
+        const [updated] = await service.listStorySlots({ id: (slot as { id: string }).id })
+        expect(updated.product_id).toBe("prod_new")
+        expect((updated.product_snapshot as { name?: string })?.name).toBe("Replacement Dress")
+        expect(updated.fallback_used).toBe(false)
+        expect(updated.pick_attempt).toBeGreaterThan(1)
+      })
+
+      it("rejects swapping on a posted slot", async () => {
+        const plan = await service.createPlan({
+          plan_date: "2026-12-02",
+          category_distribution: [{ category_id: "cat_a", count: 1 }],
+          scheduled_times: ["09:00"],
+        })
+        const slot = await service.createStorySlots({
+          plan_id: plan.id,
+          slot_index: 0,
+          scheduled_at: new Date("2026-12-02T09:00:00+04:00"),
+          category_id: "cat_a",
+          product_id: "prod_old",
+          product_snapshot: null,
+          fallback_used: false,
+          pick_attempt: 1,
+          posted_at: new Date(),
+        } as never)
+        const stub = {
+          id: "prod_new",
+          title: "x",
+          handle: "x",
+          variants: [
+            {
+              id: "v",
+              inventory_quantity: 1,
+              prices: [{ amount: 100000, currency_code: "mur" }],
+              options: { color: "x", size: "x" },
+              images: [{ url: "https://x/x.jpg" }],
+            },
+          ],
+        }
+        await expect(
+          service.swapSlotProduct((slot as { id: string }).id, stub),
+        ).rejects.toThrow(/posted/i)
+      })
+    })
+
     describe("StoriesModuleService — createBatchPlans", () => {
       it("creates N plans with shared anti-repeat across the batch", async () => {
         const distribution = [{ category_id: "cat_a", count: 1 }]

@@ -162,6 +162,22 @@ class StoriesModuleService extends MedusaService({
     await this.updateStorySlots({ id: slotId, scheduled_at: scheduledAt })
   }
 
+  async swapSlotProduct(
+    slotId: string,
+    product: ProductLike,
+  ): Promise<void> {
+    const [slot] = await this.listStorySlots({ id: slotId })
+    if (!slot) throw new Error(`Slot ${slotId} not found`)
+    if (slot.posted_at) throw new Error("Cannot swap product on a posted slot")
+    await this.updateStorySlots({
+      id: slotId,
+      product_id: product.id,
+      product_snapshot: buildSnapshot(product),
+      fallback_used: false,
+      pick_attempt: (slot.pick_attempt ?? 1) + 1,
+    })
+  }
+
   /**
    * Returns deduped product IDs that have been posted within the last
    * `days` days. Used by the picker to enforce anti-repeat.
