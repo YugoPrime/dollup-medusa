@@ -1,15 +1,16 @@
 /**
- * Adds the "item_total >= 1500" cart rule to the FREE promotion.
+ * Configures the FREE promotion to auto-apply free shipping when item_total >= 1500.
  *
- * The Medusa admin UI exposes only customer-side filters (Customer Group,
- * Region, Country, Sales Channel, Currency Code) under "Who can use this
- * code?". Cart-attribute rules like `item_total` are supported by the
- * Promotion module but not surfaced in the admin form, so we set them via
- * the module API.
+ * Two things this script enforces, both invisible in the Medusa admin UI:
+ *   1. Cart rule `item_total >= 1500` — gate so the promo only fires above
+ *      the threshold. Cart-attribute rules aren't in the admin form.
+ *   2. `is_automatic: true` — promotion fires without the customer typing the
+ *      "FREE" code. The admin form has the toggle, but we re-assert it here so
+ *      a fresh-install re-run leaves the promo automatic.
  *
  * Run: yarn medusa exec ./src/scripts/setup-free-shipping-promo.ts
  *
- * Idempotent — safe to re-run. Skips if the rule already exists.
+ * Idempotent — safe to re-run.
  */
 import { ExecArgs } from "@medusajs/framework/types";
 import { Modules } from "@medusajs/framework/utils";
@@ -37,6 +38,18 @@ export default async function setupFreeShippingPromo({ container }: ExecArgs) {
 
   logger.info(`Found promotion ${promo.id} (${promo.code}).`);
 
+  // 1. is_automatic — flip if needed.
+  if (!promo.is_automatic) {
+    logger.info("Promo is not automatic. Setting is_automatic=true...");
+    await promotionModuleService.updatePromotions([
+      { id: promo.id, is_automatic: true },
+    ]);
+    logger.info("is_automatic ✅");
+  } else {
+    logger.info("Promo already is_automatic=true.");
+  }
+
+  // 2. item_total >= 1500 cart rule.
   const existingRule = promo.rules?.find(
     (r: any) =>
       r.attribute === RULE_ATTRIBUTE && r.operator === RULE_OPERATOR,
@@ -46,7 +59,7 @@ export default async function setupFreeShippingPromo({ container }: ExecArgs) {
     const values = (existingRule.values ?? []).map((v: any) => v.value);
     if (values.includes(RULE_VALUE)) {
       logger.info(
-        `Rule already present (${RULE_ATTRIBUTE} ${RULE_OPERATOR} ${RULE_VALUE}). Nothing to do.`,
+        `Rule already present (${RULE_ATTRIBUTE} ${RULE_OPERATOR} ${RULE_VALUE}). Nothing else to do.`,
       );
       return;
     }
@@ -75,6 +88,6 @@ export default async function setupFreeShippingPromo({ container }: ExecArgs) {
   ]);
   logger.info("Rule added ✅");
   logger.info(
-    "Verify by adding a Rs 1500+ cart on the storefront — Home/Office Delivery should drop to Free.",
+    "Verify by adding a Rs 1500+ cart on the storefront — Home/Office Delivery should drop to Free without typing FREE.",
   );
 }
