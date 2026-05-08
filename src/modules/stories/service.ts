@@ -26,6 +26,14 @@ export type CreatePlanInput = {
   notes?: string | null
 }
 
+export type CreateBatchPlansInput = {
+  start_date: string  // ISO date for day 0
+  days: number        // 1..31
+  category_distribution: Array<{ category_id: string; count: number }>
+  scheduled_times: string[]
+  notes?: string | null
+}
+
 export type StoryPlanDTO = {
   id: string
   plan_date: string
@@ -263,6 +271,59 @@ class StoriesModuleService extends MedusaService({
       await this.getExcludedProductIds(settings.anti_repeat_days),
     )
     await this.pickProductsForPlan(planId, deps, excluded)
+  }
+
+  async createBatchPlans(
+    input: CreateBatchPlansInput,
+    deps: {
+      productSource: (filter: { category_id?: string }) => Promise<ProductLike[]>
+    },
+  ): Promise<StoryPlanDTO[]> {
+    if (!Number.isInteger(input.days) || input.days < 1 || input.days > 31) {
+      throw new Error("days must be an integer between 1 and 31")
+    }
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(input.start_date)
+    if (!m) throw new Error("start_date must be ISO YYYY-MM-DD")
+    const year = Number(m[1])
+    const month = Number(m[2])
+    const day = Number(m[3])
+
+    const dates: string[] = []
+    for (let i = 0; i < input.days; i++) {
+      // Date.UTC handles month overflow (e.g., Aug 31 + 1 day → Sep 1)
+      const d = new Date(Date.UTC(year, month - 1, day + i))
+      dates.push(d.toISOString().slice(0, 10))
+    }
+
+    // Medusa v2 list filters accept arrays as IN queries; cast through `any`
+    // because the generated types only declare scalar/object filters.
+    const existing = await this.listStoryPlans(
+      { plan_date: { $in: dates } } as any,
+    )
+    const conflicts = (existing as Array<{ plan_date: string | Date }>).map((p) =>
+      typeof p.plan_date === "string"
+        ? p.plan_date.slice(0, 10)
+        : p.plan_date.toISOString().slice(0, 10),
+    )
+    if (conflicts.length > 0) {
+      throw new Error(`Plans already exist for: ${conflicts.join(", ")}`)
+    }
+
+    const settings = await this.getSettings()
+    const excluded = new Set(await this.getExcludedProductIds(settings.anti_repeat_days))
+
+    const created: StoryPlanDTO[] = []
+    for (const date of dates) {
+      const plan = await this.createPlan({
+        plan_date: date,
+        category_distribution: input.category_distribution,
+        scheduled_times: input.scheduled_times,
+        notes: input.notes ?? null,
+      })
+      await this.pickProductsForPlan(plan.id, deps, excluded)
+      created.push(plan)
+    }
+    return created
   }
 }
 

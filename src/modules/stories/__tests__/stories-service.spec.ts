@@ -285,5 +285,89 @@ moduleIntegrationTestRunner<StoriesModuleService>({
         expect(new Set(ids).size).toBe(2)
       })
     })
+
+    describe("StoriesModuleService — createBatchPlans", () => {
+      it("creates N plans with shared anti-repeat across the batch", async () => {
+        const distribution = [{ category_id: "cat_a", count: 1 }]
+        const times = ["09:00"]
+        // catalog of 3 products — 3 days × 1 slot = 3 slots, no repeats
+        const productSource = async () => [
+          ["prod_x", "X"],
+          ["prod_y", "Y"],
+          ["prod_z", "Z"],
+        ].map(([id, title]) => ({
+          id,
+          title,
+          handle: id,
+          variants: [
+            {
+              id: `var_${id}`,
+              inventory_quantity: 5,
+              prices: [{ amount: 100000, currency_code: "mur" }],
+              options: { color: "Pink", size: "M" },
+              images: [{ url: `https://x/${id}.jpg` }],
+            },
+          ],
+        }))
+
+        const plans = await service.createBatchPlans(
+          {
+            start_date: "2026-09-01",
+            days: 3,
+            category_distribution: distribution,
+            scheduled_times: times,
+          },
+          { productSource },
+        )
+
+        expect(plans).toHaveLength(3)
+        const allSlots = (
+          await Promise.all(plans.map((p) => service.listStorySlots({ plan_id: p.id })))
+        ).flat()
+        expect(allSlots).toHaveLength(3)
+        const ids = allSlots.map((s) => s.product_id).filter(Boolean)
+        expect(ids.length).toBe(3)
+        expect(new Set(ids).size).toBe(3) // no repeats across batch
+      })
+
+      it("uses the correct calendar dates starting from start_date", async () => {
+        const productSource = async () => []
+        const plans = await service.createBatchPlans(
+          {
+            start_date: "2026-09-01",
+            days: 3,
+            category_distribution: [{ category_id: "cat_a", count: 1 }],
+            scheduled_times: ["09:00"],
+          },
+          { productSource },
+        )
+        const dates = plans.map((p) =>
+          typeof p.plan_date === "string"
+            ? p.plan_date.slice(0, 10)
+            : (p.plan_date as Date).toISOString().slice(0, 10),
+        )
+        expect(dates).toEqual(["2026-09-01", "2026-09-02", "2026-09-03"])
+      })
+
+      it("rejects overlap with an existing plan in the range", async () => {
+        await service.createPlan({
+          plan_date: "2026-10-05",
+          category_distribution: [{ category_id: "cat_a", count: 1 }],
+          scheduled_times: ["09:00"],
+        })
+        const productSource = async () => []
+        await expect(
+          service.createBatchPlans(
+            {
+              start_date: "2026-10-04",
+              days: 3,
+              category_distribution: [{ category_id: "cat_a", count: 1 }],
+              scheduled_times: ["09:00"],
+            },
+            { productSource },
+          ),
+        ).rejects.toThrow(/2026-10-05/)
+      })
+    })
   },
 })
