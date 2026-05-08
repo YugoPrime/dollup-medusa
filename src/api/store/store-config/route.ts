@@ -54,6 +54,10 @@ async function getPublicShippingOptions(
       )
       if (prices.length === 0) continue
 
+      // Picks the first MUR price unconditionally; doesn't inspect price rules.
+      // Fine for current MU-only setup where each shipping option has one MUR price.
+      // If you ever add region-restricted prices on the same option, fetch
+      // `prices.rules` and prefer rule-less (default) prices.
       const murPrice =
         prices.find((p) => (p.currency_code ?? "").toLowerCase() === "mur") ??
         prices[0]
@@ -66,6 +70,10 @@ async function getPublicShippingOptions(
       out.push({
         id: row.id,
         name: row.name,
+        // `amount` is the raw value as stored by Medusa (minor units for most currencies).
+        // MUR rates in this DB are stored as major units already (e.g. 150 = Rs 150) per
+        // the live shipping options. Storefront displays the value as-is. If a future
+        // rate appears 100x too large, the DB still has minor-unit values — re-seed.
         amount: amountNum,
         currency_code: (murPrice.currency_code ?? "mur").toLowerCase(),
         ...(description ? { description } : {}),
@@ -76,8 +84,8 @@ async function getPublicShippingOptions(
     // Don't break the entire store-config response if shipping options can't
     // be fetched — log and return an empty list so the storefront can fall
     // back to its hardcoded defaults.
-    // eslint-disable-next-line no-console
-    console.error("[store-config] failed to load shipping options", err)
+    const logger = req.scope.resolve(ContainerRegistrationKeys.LOGGER)
+    logger.warn(`[store-config] failed to load shipping options: ${err instanceof Error ? err.message : err}`)
     return []
   }
 }
