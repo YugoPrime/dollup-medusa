@@ -5,7 +5,7 @@ export const GET = async (req: MedusaRequest, res: MedusaResponse) => {
   const chat: any = req.scope.resolve(CHAT_MODULE)
   const {
     channel,
-    status = "open",
+    status,
     q,
     limit = 50,
     offset = 0,

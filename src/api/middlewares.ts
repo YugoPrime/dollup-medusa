@@ -5,6 +5,11 @@ export default defineMiddlewares({
   routes: [
     {
       matcher: "/hooks/meta/*",
+      // Disable Medusa's built-in JSON body parser so it doesn't run before
+      // our raw() middleware. Without this, Medusa parses the body first and
+      // req.body is already a JS object by the time raw() sees it — HMAC would
+      // hash a re-serialized string, not the original bytes Meta signed.
+      bodyParser: false,
       middlewares: [
         // Parse the body as a raw Buffer up to 10MB. HMAC verification must
         // operate on the exact bytes Meta sent — JSON.parse + re-stringify
