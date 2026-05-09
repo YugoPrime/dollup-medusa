@@ -21,6 +21,13 @@ export function nextRefFromHandles(handles: readonly string[]): string {
  * Query Medusa products for current max IS\d+ handle and return next.
  * Uses the productModule.list with a regex-style filter via raw query
  * (Medusa v2 query.graph doesn't support regex; we filter in Postgres).
+ *
+ * Concurrency: read-then-allocate is racy. Two concurrent pushes can both
+ * read the same max and produce the same Ref. The actual safety net is
+ * Medusa's unique constraint on product.handle — the second writer fails
+ * with Postgres error 23505 and the orchestrator's per-item rollback
+ * clears the assigned ref so a retry re-allocates. Acceptable given pushes
+ * are admin-triggered (single operator, low concurrency).
  */
 export async function getNextRef(
   manager: { execute: (sql: string) => Promise<{ rows: Array<{ max: number | string | null }> }> },
