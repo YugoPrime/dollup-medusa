@@ -17,6 +17,11 @@ const DraftItem = model.define("DraftItem", {
   notes: model.text().nullable(),
   position: model.number().default(0),
   uploaded_image_r2_key: model.text().nullable(),
+  // Stage B additions
+  ref: model.text().nullable(),
+  selling_price_mur: model.number().nullable(),
+  published_product_id: model.text().nullable(),
+  published_at: model.dateTime().nullable(),
   variants: model.hasMany(() => DraftVariant, { mappedBy: "draft_item" }),
   cost_history: model.hasMany(() => DraftCostHistory, { mappedBy: "draft_item" }),
 })

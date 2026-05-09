@@ -17,6 +17,7 @@ const DraftOrder = model
     status: model.enum([...DRAFT_ORDER_STATUSES]).default("drafting"),
     currency: model.text().default("USD"),
     landed_cost_multiplier: model.number().default(1.5),
+    fx_rate: model.number().nullable(),
     notes: model.text().nullable(),
     paid_at: model.dateTime().nullable(),
     shipped_at: model.dateTime().nullable(),

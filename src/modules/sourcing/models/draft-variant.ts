@@ -8,6 +8,9 @@ const DraftVariant = model
     color: model.text().nullable(),
     size: model.text(),
     qty: model.number().default(0),
+    // Stage B additions
+    received_qty: model.number().nullable(),
+    override_price_mur: model.number().nullable(),
   })
   .indexes([
     {
