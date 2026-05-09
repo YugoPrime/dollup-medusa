@@ -111,6 +111,50 @@ medusaIntegrationTestRunner({
           await expect(service.assignItemRef(itemId, "123")).rejects.toThrow(/ref/i)
         })
       })
+
+      describe("published-item lock (server-side)", () => {
+        it("blocks setVariantOverridePrice on published items", async () => {
+          const { itemId } = await seed()
+          const variants = await service.listVariants(itemId)
+          await service.markItemPublished(itemId, "prod_test")
+          await expect(
+            service.setVariantOverridePrice(variants[0].id, 999),
+          ).rejects.toThrow(/locked|published/i)
+        })
+
+        it("blocks setReceivedQty on published items", async () => {
+          const { itemId } = await seed()
+          const variants = await service.listVariants(itemId)
+          await service.markItemPublished(itemId, "prod_test")
+          await expect(
+            service.setReceivedQty(variants[0].id, 5),
+          ).rejects.toThrow(/locked|published/i)
+        })
+
+        it("blocks replaceVariants on published items", async () => {
+          const { itemId } = await seed()
+          await service.markItemPublished(itemId, "prod_test")
+          await expect(
+            service.replaceVariants(itemId, [{ color: "blue", size: "S", qty: 1 }]),
+          ).rejects.toThrow(/locked|published/i)
+        })
+
+        it("blocks updateItem on published items", async () => {
+          const { itemId } = await seed()
+          await service.markItemPublished(itemId, "prod_test")
+          await expect(
+            service.updateItem(itemId, { working_name: "x" }),
+          ).rejects.toThrow(/locked|published/i)
+        })
+
+        it("blocks deleteItem on published items", async () => {
+          const { itemId } = await seed()
+          await service.markItemPublished(itemId, "prod_test")
+          await expect(service.deleteItem(itemId)).rejects.toThrow(
+            /locked|published/i,
+          )
+        })
+      })
     })
   },
 })

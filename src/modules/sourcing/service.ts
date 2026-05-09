@@ -73,6 +73,24 @@ class SourcingModuleService extends MedusaService({
   DraftVariant,
   DraftCostHistory,
 }) {
+  // ---------- Internal guards ----------
+
+  /**
+   * Throws if the item is published. Authoritative server-side boundary
+   * for all draft-mutation methods; the admin UI hides these controls
+   * when locked but a stale browser tab or direct curl could otherwise
+   * still mutate a published item and orphan its draft data.
+   */
+  private async assertItemEditable(itemId: string): Promise<void> {
+    const item = await this.retrieveItem(itemId)
+    if (item.published_product_id && String(item.published_product_id).length > 0) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        "Item is published — locked",
+      )
+    }
+  }
+
   // ---------- Suppliers ----------
 
   async createSupplier(input: CreateSupplierInput) {
@@ -465,6 +483,12 @@ class SourcingModuleService extends MedusaService({
     opts: { reason?: string } = {},
   ) {
     const item = await this.retrieveItem(id)
+    if (item.published_product_id && String(item.published_product_id).length > 0) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        "Item is published — locked",
+      )
+    }
     const draft = await this.retrieveDraft(item.draft_order_id)
     const requiresHistory = ["paid", "shipped", "received"].includes(draft.status)
 
@@ -533,6 +557,7 @@ class SourcingModuleService extends MedusaService({
   }
 
   async deleteItem(id: string) {
+    await this.assertItemEditable(id)
     const svc = this as unknown as {
       deleteDraftItems: (id: string) => Promise<void>
     }
@@ -545,6 +570,7 @@ class SourcingModuleService extends MedusaService({
     itemId: string,
     variants: Array<{ color: string | null; size: string; qty: number }>,
   ) {
+    await this.assertItemEditable(itemId)
     const seen = new Set<string>()
     for (const v of variants) {
       if (!v.size || v.size.trim().length === 0) {
@@ -568,7 +594,6 @@ class SourcingModuleService extends MedusaService({
       }
       seen.add(key)
     }
-    await this.retrieveItem(itemId)
     const filtered = variants.filter((v) => v.qty > 0)
 
     const svc = this as unknown as {
@@ -626,13 +651,7 @@ class SourcingModuleService extends MedusaService({
         "selling_price_mur must be > 0",
       )
     }
-    const item = await this.retrieveItem(itemId)
-    if (item.published_product_id && item.published_product_id.length > 0) {
-      throw new MedusaError(
-        MedusaError.Types.NOT_ALLOWED,
-        "Item is published — locked",
-      )
-    }
+    await this.assertItemEditable(itemId)
     const svc = this as unknown as {
       updateDraftItems: (data: Record<string, unknown>) => Promise<unknown>
     }
@@ -648,8 +667,11 @@ class SourcingModuleService extends MedusaService({
       )
     }
     const svc = this as unknown as {
+      retrieveDraftVariant: (id: string) => Promise<{ draft_item_id: string }>
       updateDraftVariants: (data: Record<string, unknown>) => Promise<unknown>
     }
+    const variant = await svc.retrieveDraftVariant(variantId)
+    await this.assertItemEditable(variant.draft_item_id)
     await svc.updateDraftVariants({ id: variantId, override_price_mur: priceMur })
   }
 
@@ -661,8 +683,11 @@ class SourcingModuleService extends MedusaService({
       )
     }
     const svc = this as unknown as {
+      retrieveDraftVariant: (id: string) => Promise<{ draft_item_id: string }>
       updateDraftVariants: (data: Record<string, unknown>) => Promise<unknown>
     }
+    const variant = await svc.retrieveDraftVariant(variantId)
+    await this.assertItemEditable(variant.draft_item_id)
     await svc.updateDraftVariants({ id: variantId, received_qty: qty })
   }
 
