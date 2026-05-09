@@ -92,6 +92,25 @@ medusaIntegrationTestRunner({
           await expect(service.setReceivedQty(variants[0].id, 10)).resolves.not.toThrow()
         })
       })
+
+      describe("assignItemRef", () => {
+        it("accepts valid IS-prefix numeric refs", async () => {
+          const { itemId } = await seed()
+          await expect(service.assignItemRef(itemId, "IS123")).resolves.not.toThrow()
+          await expect(service.assignItemRef(itemId, "IS9")).resolves.not.toThrow()
+          await expect(service.assignItemRef(itemId, "IS9999")).resolves.not.toThrow()
+        })
+
+        it("rejects bad refs", async () => {
+          const { itemId } = await seed()
+          await expect(service.assignItemRef(itemId, "is123")).rejects.toThrow(/ref/i)
+          await expect(service.assignItemRef(itemId, "IS-123")).rejects.toThrow(/ref/i)
+          await expect(service.assignItemRef(itemId, "IS 123")).rejects.toThrow(/ref/i)
+          await expect(service.assignItemRef(itemId, "IS")).rejects.toThrow(/ref/i)
+          await expect(service.assignItemRef(itemId, "")).rejects.toThrow(/ref/i)
+          await expect(service.assignItemRef(itemId, "123")).rejects.toThrow(/ref/i)
+        })
+      })
     })
   },
 })

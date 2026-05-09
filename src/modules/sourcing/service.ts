@@ -230,11 +230,12 @@ class SourcingModuleService extends MedusaService({
     const svc = this as unknown as {
       updateDraftOrders: (data: Record<string, unknown>) => Promise<unknown>
     }
-    await svc.updateDraftOrders(patch)
 
     if (to === "received") {
       await this.setReceivedQtyDefaults(id)
     }
+
+    await svc.updateDraftOrders(patch)
 
     if (!isForward && opts.reason) {
       const note = `\n[${now.toISOString()}] Reverted ${current} → ${to}: ${opts.reason}`
@@ -584,7 +585,7 @@ class SourcingModuleService extends MedusaService({
       )
     }
     const item = await this.retrieveItem(itemId)
-    if (item.published_product_id) {
+    if (item.published_product_id && item.published_product_id.length > 0) {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
         "Item is published — locked",
@@ -624,6 +625,12 @@ class SourcingModuleService extends MedusaService({
   }
 
   async markItemPublished(itemId: string, productId: string) {
+    if (!productId || productId.trim().length === 0) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        "productId is required",
+      )
+    }
     const svc = this as unknown as {
       updateDraftItems: (data: Record<string, unknown>) => Promise<unknown>
     }
