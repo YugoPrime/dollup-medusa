@@ -1,10 +1,19 @@
-import { MedusaError, MedusaService } from "@medusajs/framework/utils"
+import {
+  ContainerRegistrationKeys,
+  MedusaError,
+  MedusaService,
+} from "@medusajs/framework/utils"
+import {
+  createProductsWorkflow,
+  createInventoryLevelsWorkflow,
+} from "@medusajs/medusa/core-flows"
 
 import Supplier from "./models/supplier"
 import DraftOrder, { DRAFT_ORDER_STATUSES } from "./models/draft-order"
 import DraftItem from "./models/draft-item"
 import DraftVariant from "./models/draft-variant"
 import DraftCostHistory from "./models/draft-cost-history"
+import { getNextRef } from "./lib/ref-allocator"
 
 export type CreateSupplierInput = {
   name: string
@@ -30,6 +39,18 @@ export type PushValidationResult = {
     id: string
     ref_preview: string | null
     reasons: PushValidationReason[]
+  }>
+}
+
+export type PushDraftResult = {
+  pushed: Array<{
+    draft_item_id: string
+    ref: string
+    product_id: string
+  }>
+  failed: Array<{
+    draft_item_id: string
+    reason: string
   }>
 }
 
@@ -743,6 +764,239 @@ class SourcingModuleService extends MedusaService({
     }
 
     return { ok: reports.every((r) => r.reasons.length === 0), items: reports }
+  }
+
+  /**
+   * Push a 'received' draft to Medusa: for each unpublished item, allocate
+   * the next IS Ref, create a Medusa product (status=published) with a
+   * Color/Size or Size-only variant matrix, and seed inventory levels at the
+   * default stock location. Per-item rollback on failure clears the assigned
+   * Ref so a retry re-allocates; other items keep going.
+   *
+   * Idempotent: items with `published_product_id` already set are skipped.
+   *
+   * Container-using ops (core-flows + query.graph) read `this.__container__`
+   * which the MedusaService base class populates from its constructor — no
+   * need to override the constructor.
+   */
+  async pushDraftToMedusa(draftOrderId: string): Promise<PushDraftResult> {
+    const draft = await this.retrieveDraft(draftOrderId)
+    if (draft.status !== "received") {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        "Draft must be in 'received' status to push",
+      )
+    }
+    const validation = await this.validateForPush(draftOrderId)
+    if (!validation.ok) {
+      const failing = validation.items.filter((i) => i.reasons.length)
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        `Push validation failed: ${JSON.stringify(failing)}`,
+      )
+    }
+
+    const container = (this as unknown as { __container__: unknown })
+      .__container__ as {
+      resolve: (key: string) => unknown
+    }
+
+    const svc = this as unknown as {
+      listDraftItems: (filters: Record<string, unknown>) => Promise<unknown[]>
+      listDraftVariants: (
+        filters: Record<string, unknown>,
+      ) => Promise<unknown[]>
+    }
+
+    const items = (await svc.listDraftItems({
+      draft_order_id: draftOrderId,
+    })) as Array<{
+      id: string
+      working_name: string | null
+      selling_price_mur: string | number | null
+      scraped_image_url: string | null
+      uploaded_image_r2_key: string | null
+      published_product_id: string | null
+      ref: string | null
+    }>
+
+    const pushed: PushDraftResult["pushed"] = []
+    const failed: PushDraftResult["failed"] = []
+
+    const salesChannelId =
+      process.env.MEDUSA_DEFAULT_SALES_CHANNEL_ID ??
+      "sc_01KN07JKHRN9DP25TM5S664C5W"
+    const stockLocationId =
+      process.env.MEDUSA_DEFAULT_STOCK_LOCATION_ID ??
+      "sloc_01KN48PYHQ0DTXXN2N0JWZSAYV"
+    const r2PublicUrl = process.env.R2_PUBLIC_URL ?? ""
+
+    for (const item of items) {
+      if (item.published_product_id) continue
+
+      let assignedRef: string | null = null
+      try {
+        const manager = (
+          container.resolve(ContainerRegistrationKeys.MANAGER) as {
+            execute: (sql: string) => Promise<{
+              rows?: Array<{ max: number | string | null }>
+            }>
+          }
+        )
+        assignedRef = await getNextRef({
+          execute: async (sql: string) => {
+            const res = await manager.execute(sql)
+            return { rows: res.rows ?? [] }
+          },
+        })
+        await this.assignItemRef(item.id, assignedRef)
+
+        const variants = (await svc.listDraftVariants({
+          draft_item_id: item.id,
+        })) as Array<{
+          id: string
+          color: string | null
+          size: string
+          qty: number
+          received_qty: number | null
+          override_price_mur: string | number | null
+        }>
+        const usable = variants.filter(
+          (v) => Number(v.received_qty ?? 0) > 0,
+        )
+        if (usable.length === 0) {
+          throw new Error("no_received_qty")
+        }
+
+        const hasColors = usable.some(
+          (v) => v.color !== null && v.color !== "",
+        )
+        const colors = Array.from(
+          new Set(
+            usable.map((v) => v.color).filter((c): c is string => !!c),
+          ),
+        )
+        const sizes = Array.from(new Set(usable.map((v) => v.size)))
+
+        const itemPriceMur = Number(item.selling_price_mur ?? 0)
+        const productOptions = hasColors
+          ? [
+              { title: "Color", values: colors },
+              { title: "Size", values: sizes },
+            ]
+          : [{ title: "Size", values: sizes }]
+
+        const productVariants = usable.map((v) => {
+          const priceMur =
+            v.override_price_mur !== null
+              ? Number(v.override_price_mur)
+              : itemPriceMur
+          const sku = `${assignedRef}-${v.size}${v.color ? "-" + v.color : ""}`
+          const variantOptions: Record<string, string> = hasColors
+            ? { Color: v.color ?? "", Size: v.size }
+            : { Size: v.size }
+          return {
+            title: v.color ? `${v.color} / ${v.size}` : v.size,
+            sku,
+            manage_inventory: true,
+            options: variantOptions,
+            prices: [
+              {
+                amount: Math.round(priceMur * 100),
+                currency_code: "mur",
+              },
+            ],
+          }
+        })
+
+        const imageUrl = item.uploaded_image_r2_key
+          ? `${r2PublicUrl.replace(/\/$/, "")}/${item.uploaded_image_r2_key}`
+          : item.scraped_image_url ?? null
+
+        const productInput = {
+          title: (item.working_name && item.working_name.trim()) || assignedRef,
+          handle: assignedRef.toLowerCase(),
+          status: "published" as const,
+          options: productOptions,
+          variants: productVariants,
+          sales_channels: [{ id: salesChannelId }],
+          ...(imageUrl
+            ? { images: [{ url: imageUrl }], thumbnail: imageUrl }
+            : {}),
+        }
+        const { result: prodResult } = await createProductsWorkflow(
+          container as never,
+        ).run({
+          input: { products: [productInput] },
+        })
+        const product = prodResult[0] as { id: string }
+        const productId: string = product.id
+
+        const skuToQty = new Map<string, number>()
+        for (const v of usable) {
+          const sku = `${assignedRef}-${v.size}${v.color ? "-" + v.color : ""}`
+          skuToQty.set(sku, Number(v.received_qty ?? 0))
+        }
+
+        const remoteQuery = container.resolve(
+          ContainerRegistrationKeys.QUERY,
+        ) as {
+          graph: (input: {
+            entity: string
+            fields: string[]
+            filters?: Record<string, unknown>
+          }) => Promise<{ data: unknown[] }>
+        }
+        const { data: variantData } = await remoteQuery.graph({
+          entity: "variant",
+          fields: ["id", "sku", "inventory_items.inventory.id"],
+          filters: { product_id: productId },
+        })
+
+        const levelInputs: Array<{
+          inventory_item_id: string
+          location_id: string
+          stocked_quantity: number
+        }> = []
+        for (const v of variantData as Array<{
+          sku: string
+          inventory_items?: Array<{ inventory?: { id: string } }>
+        }>) {
+          const qty = skuToQty.get(v.sku) ?? 0
+          const invItemId = v.inventory_items?.[0]?.inventory?.id
+          if (!invItemId) continue
+          levelInputs.push({
+            inventory_item_id: invItemId,
+            location_id: stockLocationId,
+            stocked_quantity: qty,
+          })
+        }
+        if (levelInputs.length > 0) {
+          await createInventoryLevelsWorkflow(container as never).run({
+            input: { inventory_levels: levelInputs },
+          })
+        }
+
+        await this.markItemPublished(item.id, productId)
+        pushed.push({
+          draft_item_id: item.id,
+          ref: assignedRef,
+          product_id: productId,
+        })
+      } catch (err) {
+        if (assignedRef) {
+          try {
+            await this.clearItemRef(item.id)
+          } catch {
+            // best-effort
+          }
+        }
+        const e = err as Error
+        failed.push({ draft_item_id: item.id, reason: e.message })
+      }
+    }
+
+    return { pushed, failed }
   }
 
   async setReceivedQtyDefaults(draftOrderId: string) {
