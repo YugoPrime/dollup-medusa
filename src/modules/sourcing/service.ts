@@ -14,6 +14,15 @@ export type CreateSupplierInput = {
 
 export type UpdateSupplierInput = Partial<CreateSupplierInput>
 
+export type PushValidationResult = {
+  ok: boolean
+  items: Array<{
+    id: string
+    ref_preview: string | null
+    reasons: string[]
+  }>
+}
+
 type DraftStatus = (typeof DRAFT_ORDER_STATUSES)[number]
 
 const FORWARD: Record<DraftStatus, DraftStatus | null> = {
@@ -659,6 +668,72 @@ class SourcingModuleService extends MedusaService({
       updateDraftItems: (data: Record<string, unknown>) => Promise<unknown>
     }
     await svc.updateDraftItems({ id: itemId, ref: null })
+  }
+
+  async validateForPush(draftOrderId: string): Promise<PushValidationResult> {
+    const draft = await this.retrieveDraft(draftOrderId)
+    if (draft.status !== "received") {
+      return {
+        ok: false,
+        items: [
+          {
+            id: draftOrderId,
+            ref_preview: null,
+            reasons: ["draft_not_received"],
+          },
+        ],
+      }
+    }
+    const svc = this as unknown as {
+      listDraftItems: (filters: Record<string, unknown>) => Promise<unknown[]>
+      listDraftVariants: (filters: Record<string, unknown>) => Promise<unknown[]>
+    }
+    const rawItems = (await svc.listDraftItems({
+      draft_order_id: draftOrderId,
+    })) as Array<{
+      id: string
+      selling_price_mur: number | null
+      scraped_image_url: string | null
+      uploaded_image_r2_key: string | null
+      published_product_id: string | null
+      ref: string | null
+    }>
+
+    const reports: PushValidationResult["items"] = []
+    for (const item of rawItems) {
+      const reasons: string[] = []
+      if (item.published_product_id) {
+        reports.push({ id: item.id, ref_preview: item.ref, reasons: [] })
+        continue
+      }
+      if (item.selling_price_mur === null || Number(item.selling_price_mur) <= 0) {
+        reasons.push("missing_selling_price")
+      }
+      if (!item.scraped_image_url && !item.uploaded_image_r2_key) {
+        reasons.push("missing_image")
+      }
+      const variants = (await svc.listDraftVariants({
+        draft_item_id: item.id,
+      })) as Array<{ received_qty: number | null; override_price_mur: number | null }>
+      const totalReceived = variants.reduce(
+        (acc, v) => acc + (v.received_qty ?? 0),
+        0,
+      )
+      if (totalReceived <= 0) reasons.push("no_received_qty")
+      for (const v of variants) {
+        if (
+          v.override_price_mur !== null &&
+          (!Number.isFinite(Number(v.override_price_mur)) ||
+            Number(v.override_price_mur) <= 0)
+        ) {
+          reasons.push("invalid_variant_override_price")
+          break
+        }
+      }
+      reports.push({ id: item.id, ref_preview: null, reasons })
+    }
+
+    return { ok: reports.every((r) => r.reasons.length === 0), items: reports }
   }
 
   async setReceivedQtyDefaults(draftOrderId: string) {
