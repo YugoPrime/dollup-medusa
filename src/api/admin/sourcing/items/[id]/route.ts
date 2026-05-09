@@ -5,20 +5,35 @@ import type {
 import { SOURCING_MODULE } from "../../../../../modules/sourcing"
 import type SourcingModuleService from "../../../../../modules/sourcing/service"
 
+function logError(
+  req: AuthenticatedMedusaRequest,
+  context: string,
+  err: Error,
+): void {
+  try {
+    const logger = req.scope.resolve<{
+      error: (msg: string, meta?: unknown) => void
+    }>("logger")
+    logger.error(`${context}: ${err.message}`, { stack: err.stack })
+  } catch {
+    // best-effort
+  }
+}
+
 export const GET = async (
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
 ) => {
-  const service = req.scope.resolve<SourcingModuleService>(SOURCING_MODULE)
   try {
+    const service = req.scope.resolve<SourcingModuleService>(SOURCING_MODULE)
     const item = await service.retrieveItem(req.params.id)
     const variants = await service.listVariants(item.id)
     const history = await service.listCostHistory(item.id)
     res.json({ item: { ...item, variants, cost_history: history } })
   } catch (err) {
-    res.status(404).json({
-      message: (err as Error).message ?? "Item not found",
-    })
+    const e = err as Error
+    logError(req, `GET /admin/sourcing/items/${req.params.id}`, e)
+    res.status(404).json({ message: e.message ?? "Item not found" })
   }
 }
 
@@ -26,9 +41,9 @@ export const PATCH = async (
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
 ) => {
-  const body = (req.body ?? {}) as Record<string, unknown>
-  const service = req.scope.resolve<SourcingModuleService>(SOURCING_MODULE)
   try {
+    const body = (req.body ?? {}) as Record<string, unknown>
+    const service = req.scope.resolve<SourcingModuleService>(SOURCING_MODULE)
     const item = await service.updateItem(
       req.params.id,
       {
@@ -58,9 +73,9 @@ export const PATCH = async (
     )
     res.json({ item })
   } catch (err) {
-    res.status(400).json({
-      message: (err as Error).message ?? "Failed to update item",
-    })
+    const e = err as Error
+    logError(req, `PATCH /admin/sourcing/items/${req.params.id}`, e)
+    res.status(400).json({ message: e.message ?? "Failed to update item" })
   }
 }
 
@@ -68,13 +83,13 @@ export const DELETE = async (
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
 ) => {
-  const service = req.scope.resolve<SourcingModuleService>(SOURCING_MODULE)
   try {
+    const service = req.scope.resolve<SourcingModuleService>(SOURCING_MODULE)
     await service.deleteItem(req.params.id)
     res.json({ ok: true })
   } catch (err) {
-    res.status(400).json({
-      message: (err as Error).message ?? "Failed to delete item",
-    })
+    const e = err as Error
+    logError(req, `DELETE /admin/sourcing/items/${req.params.id}`, e)
+    res.status(400).json({ message: e.message ?? "Failed to delete item" })
   }
 }
