@@ -75,7 +75,7 @@ medusaIntegrationTestRunner({
         expect(result.items.find((i) => i.id === item.id)?.reasons).toEqual([])
       })
 
-      it("flags invalid variant override price", async () => {
+      it("flags invalid variant override price (defense-in-depth)", async () => {
         const { draftId } = await setup()
         const item = await service.createItem({
           draft_order_id: draftId,
@@ -88,13 +88,22 @@ medusaIntegrationTestRunner({
         ])
         await service.setItemPrice(item.id, 1500)
         await transitionToReceived(draftId)
+
+        // Bypass the public setter — write an invalid override directly via the
+        // generated module method. Simulates a manual SQL edit or migration bug.
         const variants = await service.listVariants(item.id)
-        await service.setReceivedQty(variants[0].id, 5)
-        // Force-set an invalid override (bypass setter validation by direct DB)
-        // We use the public setter — should reject
-        await expect(
-          service.setVariantOverridePrice(variants[0].id, 0),
-        ).rejects.toThrow()
+        const svc = service as unknown as {
+          updateDraftVariants: (data: Record<string, unknown>) => Promise<unknown>
+        }
+        await svc.updateDraftVariants({
+          id: variants[0].id,
+          override_price_mur: 0,
+        })
+
+        const result = await service.validateForPush(draftId)
+        const itemReport = result.items.find((i) => i.id === item.id)
+        expect(itemReport?.reasons).toContain("invalid_variant_override_price")
+        expect(result.ok).toBe(false)
       })
 
       it("excludes already-published items from validation", async () => {

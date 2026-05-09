@@ -14,12 +14,22 @@ export type CreateSupplierInput = {
 
 export type UpdateSupplierInput = Partial<CreateSupplierInput>
 
+export const PUSH_VALIDATION_REASONS = [
+  "draft_not_received",
+  "missing_selling_price",
+  "missing_image",
+  "no_received_qty",
+  "invalid_variant_override_price",
+] as const
+
+export type PushValidationReason = (typeof PUSH_VALIDATION_REASONS)[number]
+
 export type PushValidationResult = {
   ok: boolean
   items: Array<{
     id: string
     ref_preview: string | null
-    reasons: string[]
+    reasons: PushValidationReason[]
   }>
 }
 
@@ -692,7 +702,7 @@ class SourcingModuleService extends MedusaService({
       draft_order_id: draftOrderId,
     })) as Array<{
       id: string
-      selling_price_mur: number | null
+      selling_price_mur: string | number | null
       scraped_image_url: string | null
       uploaded_image_r2_key: string | null
       published_product_id: string | null
@@ -701,7 +711,7 @@ class SourcingModuleService extends MedusaService({
 
     const reports: PushValidationResult["items"] = []
     for (const item of rawItems) {
-      const reasons: string[] = []
+      const reasons: PushValidationReason[] = []
       if (item.published_product_id) {
         reports.push({ id: item.id, ref_preview: item.ref, reasons: [] })
         continue
@@ -714,22 +724,21 @@ class SourcingModuleService extends MedusaService({
       }
       const variants = (await svc.listDraftVariants({
         draft_item_id: item.id,
-      })) as Array<{ received_qty: number | null; override_price_mur: number | null }>
+      })) as Array<{
+        received_qty: string | number | null
+        override_price_mur: string | number | null
+      }>
       const totalReceived = variants.reduce(
-        (acc, v) => acc + (v.received_qty ?? 0),
+        (acc, v) => acc + Number(v.received_qty ?? 0),
         0,
       )
       if (totalReceived <= 0) reasons.push("no_received_qty")
-      for (const v of variants) {
-        if (
-          v.override_price_mur !== null &&
-          (!Number.isFinite(Number(v.override_price_mur)) ||
-            Number(v.override_price_mur) <= 0)
-        ) {
-          reasons.push("invalid_variant_override_price")
-          break
-        }
-      }
+      const hasInvalidOverride = variants.some((v) => {
+        if (v.override_price_mur === null) return false
+        const n = Number(v.override_price_mur)
+        return !Number.isFinite(n) || n <= 0
+      })
+      if (hasInvalidOverride) reasons.push("invalid_variant_override_price")
       reports.push({ id: item.id, ref_preview: null, reasons })
     }
 
