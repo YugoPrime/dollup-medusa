@@ -32,8 +32,13 @@ export const GET = async (
           return { rows: rows as Array<{ max: number | string | null }> }
         },
       })
-    } catch {
-      // best-effort; UI shows '?' if preview fails
+    } catch (err) {
+      // Best-effort: UI falls back to '?' if preview fails. Log so we
+      // notice regressions instead of waiting for a customer report.
+      const e = err as Error
+      req.scope
+        .resolve<{ warn: (msg: string, meta?: unknown) => void }>("logger")
+        .warn(`next_ref preview failed for draft ${req.params.id}: ${e.message}`)
     }
     res.json({ validation, next_ref_preview: nextRef })
   } catch (err) {
