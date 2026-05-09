@@ -69,6 +69,50 @@ module.exports = defineConfig({
         ],
       },
     },
+    // File storage. R2 (S3-compatible) is used in production so admin
+    // product image uploads survive Coolify redeploys and horizontal scale.
+    // Falls back to file-local when R2_* env vars aren't set, so dev still
+    // works with a writable container disk.
+    {
+      resolve: "@medusajs/medusa/file",
+      options: {
+        providers: [
+          ...(process.env.R2_ENDPOINT &&
+          process.env.R2_BUCKET &&
+          process.env.R2_ACCESS_KEY_ID &&
+          process.env.R2_SECRET_ACCESS_KEY &&
+          process.env.R2_PUBLIC_URL
+            ? [
+                {
+                  resolve: "@medusajs/medusa/file-s3",
+                  id: "s3",
+                  options: {
+                    file_url: process.env.R2_PUBLIC_URL,
+                    access_key_id: process.env.R2_ACCESS_KEY_ID,
+                    secret_access_key: process.env.R2_SECRET_ACCESS_KEY,
+                    // R2 ignores the region but the SDK requires the field;
+                    // "auto" is Cloudflare's documented value.
+                    region: "auto",
+                    bucket: process.env.R2_BUCKET,
+                    endpoint: process.env.R2_ENDPOINT,
+                    // R2 needs path-style addressing — virtual-host-style
+                    // (bucket.endpoint) doesn't work on the default workers
+                    // domain.
+                    additional_client_config: {
+                      forcePathStyle: true,
+                    },
+                  },
+                },
+              ]
+            : [
+                {
+                  resolve: "@medusajs/medusa/file-local",
+                  id: "local",
+                },
+              ]),
+        ],
+      },
+    },
     {
       resolve: "@medusajs/medusa/auth",
       dependencies: [Modules.CACHE, ContainerRegistrationKeys.LOGGER],

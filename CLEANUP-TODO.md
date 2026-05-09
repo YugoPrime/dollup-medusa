@@ -166,11 +166,22 @@ Future upgrade note: when bumping backend Medusa, update `@medusajs/admin-sdk`, 
 
 ## Backlog (nice to have)
 
-### 10. No notification provider
-No emails on order confirmation / password reset / abandoned cart. Add `@medusajs/notification-sendgrid` (or Resend / Postmark) when you want to turn email flows on.
+### 10. Notification provider — DONE 2026-05-09
+Custom local module at `src/modules/notification-resend` ships emails via Resend on the `email` channel; `notification-local` retains the `feed` channel for the admin UI. Module gates on `RESEND_API_KEY` + `RESEND_FROM_EMAIL` env vars (optional `RESEND_FROM_NAME`, `RESEND_REPLY_TO`). Set both in Coolify to activate; otherwise the email channel silently no-ops. See `medusa-config.ts:96-128`.
 
-### 11. Local file uploads — won't survive redeploys
-Default Medusa file module writes to local disk. Coolify volumes might persist, but you also can't horizontally scale. Configure S3 (or Cloudflare R2 — same API) before relying on admin product image uploads. Currently the storefront images may be coming from somewhere else (CDN?) — verify.
+### 11. R2 file storage provider — DONE 2026-05-09
+`@medusajs/medusa/file` module wired in `medusa-config.ts` with conditional `@medusajs/medusa/file-s3` provider that uses Cloudflare R2 settings. Falls back to `file-local` when `R2_*` env vars are missing (so dev keeps working).
+
+To activate in Coolify, set all five (server-only, NOT build-time):
+- `R2_ENDPOINT` — `https://<account-id>.r2.cloudflarestorage.com`
+- `R2_BUCKET` — bucket name
+- `R2_ACCESS_KEY_ID` — R2 access key
+- `R2_SECRET_ACCESS_KEY` — R2 secret
+- `R2_PUBLIC_URL` — `https://cdn.dollupboutique.com` (or your R2 public domain — must match the bucket's public URL)
+
+Restart the Medusa container after setting. Verify by uploading a test image in admin → Products → it should resolve to the `R2_PUBLIC_URL` host, not localhost / container disk.
+
+R2-specific notes: `region: "auto"`, `forcePathStyle: true` (R2 doesn't support virtual-host-style addressing on the workers domain). Same `@aws-sdk/client-s3` already used by `src/lib/sourcing/r2-upload.ts`.
 
 ### 12. No real tax provider
 Mauritius has VAT (15%). Medusa core does flat-rate taxes via region settings, but if you need product-level tax categories, configure properly. Otherwise document explicitly that prices are tax-inclusive.
@@ -201,8 +212,16 @@ The system provider keeps auto-registering even with a non-empty providers array
 ### 14. Observability disabled
 `instrumentation.ts` exists but is commented out. Enable OpenTelemetry exports when traffic justifies — Honeycomb / Grafana Cloud / Axiom all have free tiers.
 
-### 15. `@medusajs/draft-order` not configured
-Logs show repeated `No link to load from /app/node_modules/@medusajs/draft-order/.medusa/server/src/links. skipped.` If you don't need draft orders, remove the package; if you do, configure it properly.
+### 15. `@medusajs/draft-order` not configured — WON'T FIX
+Logs show: `No link to load from /app/node_modules/@medusajs/draft-order/.medusa/server/src/links. skipped.`
+
+Investigated 2026-05-09 — the package is a **transitive dep** of `@medusajs/medusa@2.13.1` (not listed in our `package.json`), so we can't `yarn remove` it without forking Medusa. The log line is the framework's module-discovery loader iterating `node_modules/@medusajs/*/.medusa/server/src/links` and skipping packages that don't ship a links directory. Benign — it's a `info`-level message, not an error, and doesn't block boot.
+
+Options if it ever becomes worth silencing:
+- Enable the module: add `{ resolve: "@medusajs/medusa/draft-order" }` to `medusa-config.ts` modules. Doll Up doesn't use draft orders (B2C COD-only), so this just adds a table for nothing.
+- Wait for Medusa upstream to either ship the links dir empty or downgrade the log level.
+
+Leaving as-is.
 
 ---
 
