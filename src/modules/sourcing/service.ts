@@ -6,6 +6,8 @@ import {
 import {
   createProductsWorkflow,
   createInventoryLevelsWorkflow,
+  updateProductsWorkflow,
+  deleteProductsWorkflow,
 } from "@medusajs/medusa/core-flows"
 
 import Supplier from "./models/supplier"
@@ -796,6 +798,10 @@ class SourcingModuleService extends MedusaService({
       )
     }
 
+    // MedusaService base class assigns the DI container to `this.__container__`
+    // in its constructor; v2 doesn't expose a public accessor. We need the
+    // container to invoke core-flow workflows and query.graph, neither of
+    // which are reachable from MedusaService alone.
     const container = (this as unknown as { __container__: unknown })
       .__container__ as {
       resolve: (key: string) => unknown
@@ -835,6 +841,7 @@ class SourcingModuleService extends MedusaService({
       if (item.published_product_id) continue
 
       let assignedRef: string | null = null
+      let createdProductId: string | null = null
       try {
         const manager = (
           container.resolve(ContainerRegistrationKeys.MANAGER) as {
@@ -916,7 +923,7 @@ class SourcingModuleService extends MedusaService({
         const productInput = {
           title: (item.working_name && item.working_name.trim()) || assignedRef,
           handle: assignedRef.toLowerCase(),
-          status: "published" as const,
+          status: "draft" as const,
           options: productOptions,
           variants: productVariants,
           sales_channels: [{ id: salesChannelId }],
@@ -931,6 +938,7 @@ class SourcingModuleService extends MedusaService({
         })
         const product = prodResult[0] as { id: string }
         const productId: string = product.id
+        createdProductId = productId
 
         const skuToQty = new Map<string, number>()
         for (const v of usable) {
@@ -971,11 +979,21 @@ class SourcingModuleService extends MedusaService({
             stocked_quantity: qty,
           })
         }
-        if (levelInputs.length > 0) {
-          await createInventoryLevelsWorkflow(container as never).run({
-            input: { inventory_levels: levelInputs },
-          })
+        if (levelInputs.length !== usable.length) {
+          throw new Error(
+            `inventory_link_resolution_failed: expected ${usable.length} inventory items, got ${levelInputs.length}`,
+          )
         }
+
+        await createInventoryLevelsWorkflow(container as never).run({
+          input: { inventory_levels: levelInputs },
+        })
+
+        // Flip product to published only after inventory levels are seeded.
+        // Until this succeeds the product is invisible to the storefront.
+        await updateProductsWorkflow(container as never).run({
+          input: { products: [{ id: productId, status: "published" }] },
+        })
 
         await this.markItemPublished(item.id, productId)
         pushed.push({
@@ -984,6 +1002,18 @@ class SourcingModuleService extends MedusaService({
           product_id: productId,
         })
       } catch (err) {
+        // Best-effort: delete orphaned draft product if we got that far.
+        // It's still in draft so it's invisible to the storefront; this
+        // just keeps the admin product list clean.
+        if (createdProductId) {
+          try {
+            await deleteProductsWorkflow(container as never).run({
+              input: { ids: [createdProductId] },
+            })
+          } catch {
+            // best-effort
+          }
+        }
         if (assignedRef) {
           try {
             await this.clearItemRef(item.id)
@@ -991,8 +1021,14 @@ class SourcingModuleService extends MedusaService({
             // best-effort
           }
         }
-        const e = err as Error
-        failed.push({ draft_item_id: item.id, reason: e.message })
+        const e = err as Error & { code?: string; type?: string }
+        const reason =
+          e.code === "23505" && /handle/i.test(e.message)
+            ? "ref_collision_retry"
+            : e.code
+              ? `${e.code}: ${e.message}`
+              : e.message
+        failed.push({ draft_item_id: item.id, reason })
       }
     }
 

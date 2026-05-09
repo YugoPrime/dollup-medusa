@@ -58,6 +58,22 @@ medusaIntegrationTestRunner({
         expect(a?.ref).not.toBe(b?.ref)
         const aItem = await service.retrieveItem(itemAId)
         expect(aItem.published_product_id).toBe(a?.product_id)
+
+        // Asserts inventory items got created + linked for every variant —
+        // catches the C2 silent-failure regression where query.graph field
+        // path drift returns empty levelInputs.
+        const aProductId = a?.product_id
+        const aProductRes = await api.get(
+          `/admin/products/${aProductId}?fields=variants.inventory_items.id,variants.sku`,
+        )
+        const variants = aProductRes.data.product.variants as Array<{
+          sku: string
+          inventory_items?: unknown[]
+        }>
+        for (const v of variants) {
+          expect(v.inventory_items).toBeDefined()
+          expect((v.inventory_items as unknown[]).length).toBeGreaterThan(0)
+        }
       })
 
       it("locks pushed items from edits", async () => {
