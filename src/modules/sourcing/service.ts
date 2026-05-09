@@ -232,6 +232,10 @@ class SourcingModuleService extends MedusaService({
     }
     await svc.updateDraftOrders(patch)
 
+    if (to === "received") {
+      await this.setReceivedQtyDefaults(id)
+    }
+
     if (!isForward && opts.reason) {
       const note = `\n[${now.toISOString()}] Reverted ${current} → ${to}: ${opts.reason}`
       await svc.updateDraftOrders({
@@ -387,6 +391,10 @@ class SourcingModuleService extends MedusaService({
       notes: string | null
       position: number
       uploaded_image_r2_key: string | null
+      ref: string | null
+      selling_price_mur: string | number | null
+      published_product_id: string | null
+      published_at: Date | null
     }
   }
 
@@ -548,6 +556,8 @@ class SourcingModuleService extends MedusaService({
       color: string | null
       size: string
       qty: number
+      received_qty: number | null
+      override_price_mur: string | number | null
     }>
   }
 
@@ -562,6 +572,105 @@ class SourcingModuleService extends MedusaService({
       reason: string
       changed_at: Date
     }>
+  }
+
+  // ---------- Stage B: pricing, receiving, publish, ref ----------
+
+  async setItemPrice(itemId: string, priceMur: number) {
+    if (!Number.isFinite(priceMur) || priceMur <= 0) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        "selling_price_mur must be > 0",
+      )
+    }
+    const item = await this.retrieveItem(itemId)
+    if (item.published_product_id) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        "Item is published — locked",
+      )
+    }
+    const svc = this as unknown as {
+      updateDraftItems: (data: Record<string, unknown>) => Promise<unknown>
+    }
+    await svc.updateDraftItems({ id: itemId, selling_price_mur: priceMur })
+    return await this.retrieveItem(itemId)
+  }
+
+  async setVariantOverridePrice(variantId: string, priceMur: number | null) {
+    if (priceMur !== null && (!Number.isFinite(priceMur) || priceMur <= 0)) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        "override_price_mur must be > 0 or null",
+      )
+    }
+    const svc = this as unknown as {
+      updateDraftVariants: (data: Record<string, unknown>) => Promise<unknown>
+    }
+    await svc.updateDraftVariants({ id: variantId, override_price_mur: priceMur })
+  }
+
+  async setReceivedQty(variantId: string, qty: number) {
+    if (!Number.isFinite(qty) || qty < 0 || !Number.isInteger(qty)) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        "received_qty must be a non-negative integer",
+      )
+    }
+    const svc = this as unknown as {
+      updateDraftVariants: (data: Record<string, unknown>) => Promise<unknown>
+    }
+    await svc.updateDraftVariants({ id: variantId, received_qty: qty })
+  }
+
+  async markItemPublished(itemId: string, productId: string) {
+    const svc = this as unknown as {
+      updateDraftItems: (data: Record<string, unknown>) => Promise<unknown>
+    }
+    await svc.updateDraftItems({
+      id: itemId,
+      published_product_id: productId,
+      published_at: new Date(),
+    })
+  }
+
+  async assignItemRef(itemId: string, ref: string) {
+    if (!/^IS\d+$/.test(ref)) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        "ref must match IS\\d+",
+      )
+    }
+    const svc = this as unknown as {
+      updateDraftItems: (data: Record<string, unknown>) => Promise<unknown>
+    }
+    await svc.updateDraftItems({ id: itemId, ref })
+  }
+
+  async clearItemRef(itemId: string) {
+    const svc = this as unknown as {
+      updateDraftItems: (data: Record<string, unknown>) => Promise<unknown>
+    }
+    await svc.updateDraftItems({ id: itemId, ref: null })
+  }
+
+  async setReceivedQtyDefaults(draftOrderId: string) {
+    // Called on transition into 'received' to default received_qty = qty
+    // for any variants where received_qty is null.
+    const svc = this as unknown as {
+      listDraftItems: (filters: Record<string, unknown>) => Promise<Array<{ id: string }>>
+      listDraftVariants: (filters: Record<string, unknown>) => Promise<Array<{ id: string; qty: number; received_qty: number | null }>>
+      updateDraftVariants: (data: Record<string, unknown>) => Promise<unknown>
+    }
+    const items = await svc.listDraftItems({ draft_order_id: draftOrderId })
+    for (const item of items) {
+      const variants = await svc.listDraftVariants({ draft_item_id: item.id })
+      for (const v of variants) {
+        if (v.received_qty === null || v.received_qty === undefined) {
+          await svc.updateDraftVariants({ id: v.id, received_qty: v.qty })
+        }
+      }
+    }
   }
 }
 
