@@ -89,6 +89,9 @@ module.exports = defineConfig({
     {
       resolve: "./src/modules/sourcing",
     },
+    {
+      resolve: "./src/modules/chat",
+    },
     // Notification module — local 'feed' for admin UI + Resend for email.
     {
       resolve: "@medusajs/medusa/notification",
