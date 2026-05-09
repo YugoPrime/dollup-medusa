@@ -1,4 +1,4 @@
-import { MedusaService } from "@medusajs/framework/utils"
+import { MedusaError, MedusaService } from "@medusajs/framework/utils"
 import SourcingSettings from "./models/sourcing-settings"
 
 export type SettingsRow = {
@@ -43,22 +43,49 @@ class SourcingSettingsService extends MedusaService({
     }
     const patch: Record<string, unknown> = { id: SINGLETON_ID }
     if (input.fx_rate !== undefined) {
-      if (input.fx_rate <= 0) throw new Error("fx_rate must be > 0")
+      if (!Number.isFinite(input.fx_rate) || input.fx_rate <= 0) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          "fx_rate must be a finite number > 0",
+        )
+      }
       patch.fx_rate = input.fx_rate
     }
     if (input.landed_multiplier_default !== undefined) {
-      if (input.landed_multiplier_default <= 0)
-        throw new Error("landed_multiplier_default must be > 0")
+      if (
+        !Number.isFinite(input.landed_multiplier_default) ||
+        input.landed_multiplier_default <= 0
+      ) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          "landed_multiplier_default must be a finite number > 0",
+        )
+      }
       patch.landed_multiplier_default = input.landed_multiplier_default
     }
     if (input.markup_multiplier !== undefined) {
-      if (input.markup_multiplier <= 0)
-        throw new Error("markup_multiplier must be > 0")
+      if (
+        !Number.isFinite(input.markup_multiplier) ||
+        input.markup_multiplier <= 0
+      ) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          "markup_multiplier must be a finite number > 0",
+        )
+      }
       patch.markup_multiplier = input.markup_multiplier
     }
     if (input.round_step !== undefined) {
-      if (input.round_step <= 0 || !Number.isInteger(input.round_step))
-        throw new Error("round_step must be a positive integer")
+      if (
+        !Number.isFinite(input.round_step) ||
+        input.round_step <= 0 ||
+        !Number.isInteger(input.round_step)
+      ) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          "round_step must be a positive integer",
+        )
+      }
       patch.round_step = input.round_step
     }
     await svc.updateSourcingSettings(patch)

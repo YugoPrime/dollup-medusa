@@ -31,16 +31,35 @@ medusaIntegrationTestRunner({
       })
 
       it("rejects non-positive values", async () => {
-        await expect(service.updateSettings({ fx_rate: 0 })).rejects.toThrow()
+        await expect(
+          service.updateSettings({ fx_rate: 0 }),
+        ).rejects.toThrow(/fx_rate/)
         await expect(
           service.updateSettings({ markup_multiplier: -1 }),
-        ).rejects.toThrow()
+        ).rejects.toThrow(/markup_multiplier/)
       })
 
       it("rejects non-integer round_step", async () => {
         await expect(
           service.updateSettings({ round_step: 2.5 }),
-        ).rejects.toThrow()
+        ).rejects.toThrow(/round_step/)
+      })
+
+      it("rejects NaN and Infinity", async () => {
+        await expect(
+          service.updateSettings({ fx_rate: Number.NaN }),
+        ).rejects.toThrow(/fx_rate/)
+        await expect(
+          service.updateSettings({
+            landed_multiplier_default: Number.POSITIVE_INFINITY,
+          }),
+        ).rejects.toThrow(/landed_multiplier_default/)
+      })
+
+      it("rejects null (sent as JSON)", async () => {
+        await expect(
+          service.updateSettings({ fx_rate: null as unknown as number }),
+        ).rejects.toThrow(/fx_rate/)
       })
     })
   },
