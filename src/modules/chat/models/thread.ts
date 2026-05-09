@@ -12,6 +12,6 @@ export const Thread = model
     last_inbound_at: model.dateTime().nullable(),
     unread_count: model.number().default(0),
     assignee_id: model.text().nullable(),
-    messages: model.hasMany(() => Message),
+    messages: model.hasMany(() => Message, { mappedBy: "thread" }),
   })
   .indexes([{ on: ["channel", "contact_id"], unique: true }])
