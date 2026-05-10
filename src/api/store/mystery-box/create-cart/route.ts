@@ -112,24 +112,64 @@ export const POST = async (req: MedusaStoreRequest, res: MedusaResponse) => {
     return
   }
 
-  const { data: variants } = await query.graph({
-    entity: "product_variant",
+  // `inventory_quantity` is not a real column on product_variant — it is
+  // hydrated through the product → inventory module link. Querying
+  // entity:"product_variant" returns it undefined, which falsely flags every
+  // managed variant as out of stock. Route through the product entity instead,
+  // matching the storefront's sdk.store.product.list path.
+  const { data: products } = await query.graph({
+    entity: "product",
     fields: [
       "id",
-      "sku",
       "title",
-      "manage_inventory",
-      "allow_backorder",
-      "inventory_quantity",
-      "options.value",
-      "product.id",
-      "product.title",
-      "product.discountable",
+      "discountable",
+      "variants.id",
+      "variants.sku",
+      "variants.title",
+      "variants.manage_inventory",
+      "variants.allow_backorder",
+      "variants.inventory_quantity",
+      "variants.options.value",
     ],
-    filters: { id: uniqueVariantIds },
+    filters: { variants: { id: uniqueVariantIds } },
   })
 
-  if (!variants || variants.length !== uniqueVariantIds.length) {
+  const requestedVariantIds = new Set(uniqueVariantIds)
+  const variants: ProductVariantForBox[] = []
+  for (const product of (products ?? []) as Array<{
+    id: string
+    title?: string | null
+    discountable?: boolean | null
+    variants?: Array<{
+      id: string
+      sku?: string | null
+      title?: string | null
+      manage_inventory?: boolean | null
+      allow_backorder?: boolean | null
+      inventory_quantity?: number | null
+      options?: Array<{ value?: string | null }>
+    }> | null
+  }>) {
+    for (const variant of product.variants ?? []) {
+      if (!requestedVariantIds.has(variant.id)) continue
+      variants.push({
+        id: variant.id,
+        sku: variant.sku ?? null,
+        title: variant.title ?? null,
+        manage_inventory: variant.manage_inventory ?? null,
+        allow_backorder: variant.allow_backorder ?? null,
+        inventory_quantity: variant.inventory_quantity ?? null,
+        options: variant.options,
+        product: {
+          id: product.id,
+          title: product.title ?? null,
+          discountable: product.discountable ?? null,
+        },
+      })
+    }
+  }
+
+  if (variants.length !== uniqueVariantIds.length) {
     res.status(404).json({ message: "One or more variants not found" })
     return
   }
@@ -139,7 +179,7 @@ export const POST = async (req: MedusaStoreRequest, res: MedusaResponse) => {
   const wrongSize: string[] = []
   const notDiscountable: string[] = []
 
-  for (const variant of variants as ProductVariantForBox[]) {
+  for (const variant of variants) {
     const requestedQuantity = variantQuantities.get(variant.id) ?? 1
 
     if (variant.product?.discountable === false) {
