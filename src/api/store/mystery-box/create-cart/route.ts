@@ -175,13 +175,16 @@ export const POST = async (req: MedusaStoreRequest, res: MedusaResponse) => {
   }
 
   const requestedSizeUpper = size.toUpperCase()
-  const outOfStock: string[] = []
   const wrongSize: string[] = []
   const notDiscountable: string[] = []
 
+  // Stock is enforced by addToCartWorkflow further down — that is Medusa's
+  // canonical stock check and uses the inventory module directly. Pre-checking
+  // inventory_quantity here via query.graph proved unreliable because the
+  // product → inventory link doesn't always hydrate that virtual field on a
+  // graph traversal, leading to false 409s even when the storefront listing
+  // showed the variants in stock.
   for (const variant of variants) {
-    const requestedQuantity = variantQuantities.get(variant.id) ?? 1
-
     if (variant.product?.discountable === false) {
       notDiscountable.push(variant.id)
     }
@@ -192,22 +195,8 @@ export const POST = async (req: MedusaStoreRequest, res: MedusaResponse) => {
     if (!matchesSize) {
       wrongSize.push(variant.id)
     }
-
-    if (variant.manage_inventory && !variant.allow_backorder) {
-      const quantity = Number(variant.inventory_quantity ?? 0)
-      if (!Number.isFinite(quantity) || quantity < requestedQuantity) {
-        outOfStock.push(variant.id)
-      }
-    }
   }
 
-  if (outOfStock.length > 0) {
-    res.status(409).json({
-      message: "Some items are out of stock",
-      out_of_stock_variant_ids: outOfStock,
-    })
-    return
-  }
   if (wrongSize.length > 0) {
     res.status(400).json({
       message: "Some items do not match the requested size",
@@ -307,6 +296,18 @@ export const POST = async (req: MedusaStoreRequest, res: MedusaResponse) => {
       softDeleteCarts: (ids: string[]) => Promise<void>
     }
     await cartModule.softDeleteCarts([cartId]).catch(() => undefined)
+
+    // addToCartWorkflow throws when a managed, non-backorderable variant
+    // can't satisfy the requested quantity. Surface that as a 409 (matching
+    // the previous shape so the storefront can keep its existing error UI).
+    const message = err instanceof Error ? err.message : ""
+    if (/inventory|stock|not stocked|insufficient/i.test(message)) {
+      res.status(409).json({
+        message: "Some items are out of stock",
+        detail: message,
+      })
+      return
+    }
 
     if (err instanceof MedusaError) {
       throw err
