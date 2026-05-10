@@ -3,7 +3,7 @@ import {
   buildLoyaltyLineItemAdjustments,
   calculateMaxRedeemablePoints,
   calculateRedemptionDiscount,
-  LOYALTY_ADJUSTMENT_CODE,
+  LOYALTY_ADJUSTMENT_PROVIDER_ID,
 } from "../apply-loyalty-discount"
 
 describe("loyalty cart discount helpers", () => {
@@ -39,14 +39,19 @@ describe("loyalty cart discount helpers", () => {
       expect.objectContaining({
         item_id: "item_1",
         amount: 100,
-        code: LOYALTY_ADJUSTMENT_CODE,
+        provider_id: LOYALTY_ADJUSTMENT_PROVIDER_ID,
       }),
       expect.objectContaining({
         item_id: "item_2",
         amount: 150,
-        code: LOYALTY_ADJUSTMENT_CODE,
+        provider_id: LOYALTY_ADJUSTMENT_PROVIDER_ID,
       }),
     ])
+    // Manual adjustments must NOT carry a `code` — Medusa's promotion module
+    // strips every coded line-item adjustment on the next refreshCartItems.
+    for (const adjustment of adjustments) {
+      expect(adjustment).not.toHaveProperty("code")
+    }
   })
 
   it("refuses completion when redemption metadata has no matching adjustment", () => {
@@ -81,7 +86,7 @@ describe("loyalty cart discount helpers", () => {
             id: "item_1",
             adjustments: [
               {
-                code: LOYALTY_ADJUSTMENT_CODE,
+                provider_id: LOYALTY_ADJUSTMENT_PROVIDER_ID,
                 amount: 250,
               },
             ],

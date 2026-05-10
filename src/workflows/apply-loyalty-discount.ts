@@ -8,7 +8,12 @@ import { refreshPaymentCollectionForCartWorkflow } from "@medusajs/medusa/core-f
 
 import type { LoyaltySettingsDTO } from "../modules/loyalty/service"
 
-export const LOYALTY_ADJUSTMENT_CODE = "DOLL_REWARDS"
+// We deliberately do NOT set `code` on the manual line-item adjustments —
+// Medusa's promotion module strips every coded line-item adjustment whenever
+// refreshCartItemsWorkflow runs (e.g. via cart.addShippingMethod / cart.update),
+// even when the code matches no real promotion. Matching by `provider_id`
+// instead keeps the adjustment invisible to that sweep.
+export const LOYALTY_ADJUSTMENT_PROVIDER_ID = "loyalty"
 export const LOYALTY_ADJUSTMENT_DESCRIPTION = "Doll Rewards redemption"
 
 type LoyaltyRedeemMetadata = {
@@ -21,6 +26,7 @@ type LoyaltyRedeemMetadata = {
 type CartAdjustment = {
   id?: string
   code?: string | null
+  provider_id?: string | null
   amount?: number | string | { value?: string | number } | null
 }
 
@@ -132,7 +138,6 @@ export function buildLoyaltyLineItemAdjustments(
   })
   const adjustments: {
     item_id: string
-    code: string
     amount: number
     description: string
     provider_id: string
@@ -150,10 +155,9 @@ export function buildLoyaltyLineItemAdjustments(
 
     adjustments.push({
       item_id: item.id,
-      code: LOYALTY_ADJUSTMENT_CODE,
       amount,
       description: LOYALTY_ADJUSTMENT_DESCRIPTION,
-      provider_id: "loyalty",
+      provider_id: LOYALTY_ADJUSTMENT_PROVIDER_ID,
     })
     remaining -= amount
   }
@@ -184,7 +188,10 @@ export function assertCartHasLoyaltyDiscount(cart: LoyaltyCart) {
 
   const loyaltyAdjustmentTotal = (cart.items ?? [])
     .flatMap((item) => item.adjustments ?? [])
-    .filter((adjustment) => adjustment.code === LOYALTY_ADJUSTMENT_CODE)
+    .filter(
+      (adjustment) =>
+        adjustment.provider_id === LOYALTY_ADJUSTMENT_PROVIDER_ID,
+    )
     .reduce((sum, adjustment) => sum + moneyNumber(adjustment.amount), 0)
 
   if (Math.floor(loyaltyAdjustmentTotal) !== redemption.discount_mur) {
@@ -245,7 +252,10 @@ export async function applyLoyaltyDiscountToCart({
 
   const existingAdjustmentIds = (cart.items ?? [])
     .flatMap((item) => item.adjustments ?? [])
-    .filter((adjustment) => adjustment.code === LOYALTY_ADJUSTMENT_CODE)
+    .filter(
+      (adjustment) =>
+        adjustment.provider_id === LOYALTY_ADJUSTMENT_PROVIDER_ID,
+    )
     .map((adjustment) => adjustment.id)
     .filter((id): id is string => Boolean(id))
 

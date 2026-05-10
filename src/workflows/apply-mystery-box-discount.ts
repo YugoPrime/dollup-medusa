@@ -7,7 +7,12 @@ import {
 import { refreshPaymentCollectionForCartWorkflow } from "@medusajs/medusa/core-flows"
 
 export const MYSTERY_BOX_FLAT_PRICE_MUR = 3500
-export const MYSTERY_BOX_ADJUSTMENT_CODE = "MYSTERY_BOX"
+// We deliberately do NOT set `code` on the manual line-item adjustments —
+// Medusa's promotion module strips every coded line-item adjustment whenever
+// refreshCartItemsWorkflow runs (e.g. via cart.addShippingMethod / cart.update),
+// even when the code matches no real promotion. Matching by `provider_id`
+// instead keeps the adjustment invisible to that sweep.
+export const MYSTERY_BOX_ADJUSTMENT_PROVIDER_ID = "mystery_box"
 export const MYSTERY_BOX_ADJUSTMENT_DESCRIPTION =
   "Mystery Box flat-rate discount"
 
@@ -22,6 +27,7 @@ export type MysteryBoxMetadata = {
 type CartAdjustment = {
   id?: string
   code?: string | null
+  provider_id?: string | null
   amount?: number | string | { value?: string | number } | null
 }
 
@@ -113,7 +119,6 @@ export function buildMysteryBoxLineItemAdjustments(
   })
   const adjustments: {
     item_id: string
-    code: string
     amount: number
     description: string
     provider_id: string
@@ -131,10 +136,9 @@ export function buildMysteryBoxLineItemAdjustments(
 
     adjustments.push({
       item_id: item.id,
-      code: MYSTERY_BOX_ADJUSTMENT_CODE,
       amount,
       description: MYSTERY_BOX_ADJUSTMENT_DESCRIPTION,
-      provider_id: "mystery_box",
+      provider_id: MYSTERY_BOX_ADJUSTMENT_PROVIDER_ID,
     })
     remaining -= amount
   }
@@ -166,7 +170,10 @@ export function assertCartHasMysteryBoxDiscount(cart: MysteryBoxCart) {
 
   const adjustmentTotal = (cart.items ?? [])
     .flatMap((item) => item.adjustments ?? [])
-    .filter((adjustment) => adjustment.code === MYSTERY_BOX_ADJUSTMENT_CODE)
+    .filter(
+      (adjustment) =>
+        adjustment.provider_id === MYSTERY_BOX_ADJUSTMENT_PROVIDER_ID,
+    )
     .reduce((sum, adjustment) => sum + moneyNumber(adjustment.amount), 0)
 
   if (Math.floor(adjustmentTotal) !== expectedDiscount) {
@@ -231,7 +238,10 @@ export async function applyMysteryBoxDiscountToCart({
 
   const existingAdjustmentIds = (cart.items ?? [])
     .flatMap((item) => item.adjustments ?? [])
-    .filter((adjustment) => adjustment.code === MYSTERY_BOX_ADJUSTMENT_CODE)
+    .filter(
+      (adjustment) =>
+        adjustment.provider_id === MYSTERY_BOX_ADJUSTMENT_PROVIDER_ID,
+    )
     .map((adjustment) => adjustment.id)
     .filter((id): id is string => Boolean(id))
 

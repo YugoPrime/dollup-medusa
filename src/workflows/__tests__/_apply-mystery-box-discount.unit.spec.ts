@@ -2,7 +2,7 @@ import {
   assertCartHasMysteryBoxDiscount,
   buildMysteryBoxLineItemAdjustments,
   calculateMysteryBoxDiscount,
-  MYSTERY_BOX_ADJUSTMENT_CODE,
+  MYSTERY_BOX_ADJUSTMENT_PROVIDER_ID,
   MYSTERY_BOX_FLAT_PRICE_MUR,
   readMysteryBoxMetadata,
 } from "../apply-mystery-box-discount"
@@ -42,14 +42,19 @@ describe("mystery box cart discount helpers", () => {
       expect.objectContaining({
         item_id: "item_1",
         amount: 1000,
-        code: MYSTERY_BOX_ADJUSTMENT_CODE,
+        provider_id: MYSTERY_BOX_ADJUSTMENT_PROVIDER_ID,
       }),
       expect.objectContaining({
         item_id: "item_2",
         amount: 500,
-        code: MYSTERY_BOX_ADJUSTMENT_CODE,
+        provider_id: MYSTERY_BOX_ADJUSTMENT_PROVIDER_ID,
       }),
     ])
+    // Manual adjustments must NOT carry a `code` — Medusa's promotion module
+    // strips every coded line-item adjustment on the next refreshCartItems.
+    for (const adjustment of adjustments) {
+      expect(adjustment).not.toHaveProperty("code")
+    }
   })
 
   it("skips non-discountable line items", () => {
@@ -68,7 +73,7 @@ describe("mystery box cart discount helpers", () => {
       expect.objectContaining({
         item_id: "item_2",
         amount: 500,
-        code: MYSTERY_BOX_ADJUSTMENT_CODE,
+        provider_id: MYSTERY_BOX_ADJUSTMENT_PROVIDER_ID,
       }),
     ])
   })
@@ -159,7 +164,10 @@ describe("mystery box cart discount helpers", () => {
           {
             id: "item_1",
             adjustments: [
-              { code: MYSTERY_BOX_ADJUSTMENT_CODE, amount: 1500 },
+              {
+                provider_id: MYSTERY_BOX_ADJUSTMENT_PROVIDER_ID,
+                amount: 1500,
+              },
             ],
           },
         ],
