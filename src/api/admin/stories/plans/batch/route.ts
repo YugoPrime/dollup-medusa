@@ -40,7 +40,9 @@ export const POST = async (req: AuthenticatedMedusaRequest, res: MedusaResponse)
         "id",
         "title",
         "handle",
+        "metadata",
         "images.url",
+        "categories.handle",
         "variants.id",
         "variants.sku",
         "variants.title",
@@ -58,7 +60,7 @@ export const POST = async (req: AuthenticatedMedusaRequest, res: MedusaResponse)
         variants: { calculated_price: QueryContext({ currency_code: "mur" }) },
       },
     })
-    return products.map(toProductLike)
+    return products.filter((p: any) => !isIntimatesProduct(p)).map(toProductLike)
   }
 
   try {
@@ -83,6 +85,14 @@ function computeInventoryQuantity(v: any): number {
     }
   }
   return Math.max(0, total)
+}
+
+function isIntimatesProduct(p: any): boolean {
+  const cats: Array<{ handle?: string }> = p.categories ?? []
+  if (cats.some((c) => (c?.handle ?? "").toLowerCase() === "intimates")) return true
+  const meta = (p.metadata ?? null) as Record<string, unknown> | null
+  if (meta && meta.unlisted === true) return true
+  return false
 }
 
 function toProductLike(p: any): ProductLike {

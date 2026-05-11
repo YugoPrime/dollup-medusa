@@ -1,3 +1,5 @@
+import { randomBytes, timingSafeEqual } from "node:crypto"
+
 import { MedusaError, MedusaService } from "@medusajs/framework/utils"
 
 import EmailSettings from "./models/email-settings"
@@ -35,6 +37,7 @@ export type StoreSettingsDTO = {
   tiktok_url: string
   whatsapp_url: string
   footer_copyright: string
+  intimates_unlock_token: string
 }
 
 export type UpdateEmailSettingsInput = Partial<
@@ -71,6 +74,7 @@ export const DEFAULT_STORE_SETTINGS: Omit<StoreSettingsDTO, "id"> = {
   whatsapp_url: "https://wa.me/23059416359",
   footer_copyright:
     "Doll Up Boutique Limited. BRN C18159019 - VAT 27646277.",
+  intimates_unlock_token: "",
 }
 
 class StoreConfigModuleService extends MedusaService({
@@ -234,6 +238,9 @@ class StoreConfigModuleService extends MedusaService({
 
     this.validateStoreSettings({ ...current, ...next })
 
+    // intimates_unlock_token is rotated/cleared via dedicated methods, not
+    // by hand-typing into this form — silently drop it if it sneaks through.
+
     const service = this as unknown as {
       updateStoreSettings: (
         input: Partial<StoreSettingsDTO> & { id: string },
@@ -273,6 +280,7 @@ class StoreConfigModuleService extends MedusaService({
 
   private validateStoreSettings(settings: UpdateStoreSettingsInput) {
     for (const [key, value] of Object.entries(settings)) {
+      if (key === "intimates_unlock_token") continue
       if (typeof value !== "string" || value.trim().length === 0) {
         throw new MedusaError(
           MedusaError.Types.INVALID_DATA,
@@ -286,6 +294,47 @@ class StoreConfigModuleService extends MedusaService({
         )
       }
     }
+  }
+
+  async rotateIntimatesUnlockToken(): Promise<string> {
+    await this.getStoreSettings()
+    const token = randomBytes(24).toString("hex") // 48-char hex string
+    const service = this as unknown as {
+      updateStoreSettings: (
+        input: Partial<StoreSettingsDTO> & { id: string },
+      ) => Promise<StoreSettingsDTO>
+    }
+    await service.updateStoreSettings({
+      id: STORE_SETTINGS_ID,
+      intimates_unlock_token: token,
+    })
+    return token
+  }
+
+  async clearIntimatesUnlockToken(): Promise<void> {
+    await this.getStoreSettings()
+    const service = this as unknown as {
+      updateStoreSettings: (
+        input: Partial<StoreSettingsDTO> & { id: string },
+      ) => Promise<StoreSettingsDTO>
+    }
+    await service.updateStoreSettings({
+      id: STORE_SETTINGS_ID,
+      intimates_unlock_token: "",
+    })
+  }
+
+  // Constant-time compare. Empty stored token always returns false so the
+  // private catalog stays locked when not provisioned.
+  async verifyIntimatesUnlockToken(candidate: string): Promise<boolean> {
+    if (typeof candidate !== "string" || candidate.length === 0) return false
+    const settings = await this.getStoreSettings()
+    const stored = settings.intimates_unlock_token
+    if (!stored || stored.length === 0) return false
+    const a = Buffer.from(stored)
+    const b = Buffer.from(candidate)
+    if (a.length !== b.length) return false
+    return timingSafeEqual(a, b)
   }
 }
 

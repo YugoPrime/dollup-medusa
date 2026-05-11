@@ -18,6 +18,9 @@ const StoreSettings = model.define("StoreSettings", {
   footer_copyright: model
     .text()
     .default("Doll Up Boutique Limited. BRN C18159019 - VAT 27646277."),
+  // Rotatable token for the private "Intimates" catalog. Empty string means
+  // the private catalog is currently inaccessible to anyone.
+  intimates_unlock_token: model.text().default(""),
 })
 
 export default StoreSettings

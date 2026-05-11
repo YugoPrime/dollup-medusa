@@ -34,7 +34,9 @@ export const POST = async (req: AuthenticatedMedusaRequest, res: MedusaResponse)
         "id",
         "title",
         "handle",
+        "metadata",
         "images.url",
+        "categories.handle",
         "variants.id",
         "variants.sku",
         "variants.title",
@@ -54,7 +56,8 @@ export const POST = async (req: AuthenticatedMedusaRequest, res: MedusaResponse)
         },
       },
     })
-    return products.map(toProductLike)
+    // Story planner must never auto-pick Intimates products (18+, partly private).
+    return products.filter((p: any) => !isIntimatesProduct(p)).map(toProductLike)
   }
 
   try {
@@ -82,6 +85,16 @@ function computeInventoryQuantity(v: any): number {
     }
   }
   return Math.max(0, total)
+}
+
+// A product is "Intimates" if any of its categories has the `intimates`
+// handle, OR if metadata.unlisted is true (also treated as adult-tier).
+function isIntimatesProduct(p: any): boolean {
+  const cats: Array<{ handle?: string }> = p.categories ?? []
+  if (cats.some((c) => (c?.handle ?? "").toLowerCase() === "intimates")) return true
+  const meta = (p.metadata ?? null) as Record<string, unknown> | null
+  if (meta && meta.unlisted === true) return true
+  return false
 }
 
 function toProductLike(p: any): ProductLike {

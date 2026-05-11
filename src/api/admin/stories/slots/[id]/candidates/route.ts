@@ -46,7 +46,9 @@ export const GET = async (req: AuthenticatedMedusaRequest, res: MedusaResponse) 
       "title",
       "handle",
       "thumbnail",
+      "metadata",
       "images.url",
+      "categories.handle",
       "variants.id",
       "variants.manage_inventory",
       "variants.inventory_items.inventory.location_levels.stocked_quantity",
@@ -60,6 +62,15 @@ export const GET = async (req: AuthenticatedMedusaRequest, res: MedusaResponse) 
     },
   })
 
+  // Stories must never feature Intimates products (18+, partly private).
+  const visibleProducts = (products as any[]).filter((p) => {
+    const cats: Array<{ handle?: string }> = p.categories ?? []
+    if (cats.some((c) => (c?.handle ?? "").toLowerCase() === "intimates")) return false
+    const meta = (p.metadata ?? null) as Record<string, unknown> | null
+    if (meta && meta.unlisted === true) return false
+    return true
+  })
+
   type Candidate = {
     id: string
     title: string
@@ -71,7 +82,7 @@ export const GET = async (req: AuthenticatedMedusaRequest, res: MedusaResponse) 
   }
 
   const candidates: Candidate[] = []
-  for (const p of products as any[]) {
+  for (const p of visibleProducts) {
     if (p.id === slot.product_id) continue  // skip currently-picked
 
     let inStock = 0
