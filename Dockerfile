@@ -13,10 +13,6 @@ COPY . .
 # Build for production (backend + admin dashboard)
 RUN yarn build
 
-# Build admin dashboard (needs NODE_ENV=development for build tools)
-RUN NODE_ENV=development npx medusa build --admin-only
-ENV NODE_ENV=production
-
 # Ensure admin build is in the expected location
 RUN mkdir -p /app/public && \
     cp -r /app/.medusa/server/public/admin /app/public/admin 2>/dev/null || true
