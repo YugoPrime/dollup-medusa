@@ -17,6 +17,7 @@ export type ProductLike = {
 
 export type SnapshotVariant = {
   id: string
+  sku: string | null
   color: string | null
   color_code: string | null
   sizes: string[]
@@ -56,6 +57,7 @@ export function buildSnapshot(product: ProductLike): ProductSnapshot {
     if (!byColor.has(key)) {
       byColor.set(key, {
         id: v.id,
+        sku: v.sku ?? null,
         color,
         color_code: colorCode,
         sizes: [],

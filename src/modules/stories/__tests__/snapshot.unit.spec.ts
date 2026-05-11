@@ -48,12 +48,14 @@ describe("buildSnapshot", () => {
     expect(snap.variants_in_stock).toHaveLength(2)
     const pink = snap.variants_in_stock.find((v) => v.color === "Pink")!
     expect(pink.sizes).toEqual(["S"])
+    expect(pink.sku).toBe("IS2328-PINK-S")
     expect(pink.image_urls).toEqual([
       "https://r2/IS2328.jpg",
       "https://r2/IS2328-b.jpg",
     ])
     const blue = snap.variants_in_stock.find((v) => v.color === "Blue")!
     expect(blue.sizes).toEqual(["S"])
+    expect(blue.sku).toBe("IS2328-BLUE-S")
   })
 
   it("excludes products entirely if no variant is in stock", () => {
