@@ -80,9 +80,9 @@ export default function WelcomeEmail(data: WelcomeEmailData) {
       ) : null}
 
       <Paragraph>
-        Earn 1 point per Rs 100 spent. Redeem 100 points for Rs 50 off your
-        next order. Birthday bonus, early access drops, and member-only
-        offers — that's the deal.
+        Earn 2 points per Rs 100 spent. 1 point = Rs 1 off your next order,
+        from 150 points minimum. Birthday bonus, early access drops, and
+        member-only offers — that's the deal.
       </Paragraph>
 
       <Section style={{ padding: "16px 0 8px 0" }}>
@@ -97,8 +97,7 @@ export default function WelcomeEmail(data: WelcomeEmailData) {
         >
           Instagram
         </a>{" "}
-        for new drops, styling looks, and behind-the-scenes from our
-        Pereybere shop.
+        for new drops, styling looks, and behind-the-scenes.
       </Paragraph>
     </EmailLayout>
   )

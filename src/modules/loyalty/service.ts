@@ -22,9 +22,9 @@ export type UpdateLoyaltySettingsInput = Partial<
 >
 
 export const DEFAULT_LOYALTY_SETTINGS: Omit<LoyaltySettingsDTO, "id"> = {
-  earn_rate_per_100_mur: 1,
-  redeem_rate_mur_per_100_pts: 50,
-  min_redeem_points: 500,
+  earn_rate_per_100_mur: 2,
+  redeem_rate_mur_per_100_pts: 100,
+  min_redeem_points: 150,
   welcome_bonus_points: 100,
   points_expiry_months: null,
 }
