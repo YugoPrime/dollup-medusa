@@ -144,9 +144,11 @@ export async function runExport(container: MedusaContainer): Promise<ExportResul
       "display_id",
       "created_at",
       "metadata",
-      "discount_total",
-      "shipping_total",
-      "total",
+      // Medusa v2 order totals are calculated fields — without a "+" prefix
+      // query.graph returns 0/null instead of the real values.
+      "+discount_total",
+      "+shipping_total",
+      "+total",
       "items.id",
       "items.title",
       "items.quantity",

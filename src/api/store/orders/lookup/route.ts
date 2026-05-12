@@ -32,9 +32,11 @@ const ORDER_FIELDS = [
   "status",
   "fulfillment_status",
   "currency_code",
-  "subtotal",
-  "total",
-  "shipping_total",
+  // Medusa v2 order totals are calculated fields — without a "+" prefix
+  // query.graph returns 0/null instead of the real values.
+  "+subtotal",
+  "+total",
+  "+shipping_total",
   "metadata",
   "created_at",
   "updated_at",
@@ -51,7 +53,7 @@ const ORDER_FIELDS = [
   "items.product_title",
   "items.variant_title",
   "items.quantity",
-  "items.unit_price",
+  "+items.unit_price",
   "items.thumbnail",
   "fulfillments.id",
   "fulfillments.metadata",
