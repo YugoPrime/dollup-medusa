@@ -59,7 +59,7 @@ export default async function emailOnOrderPlaced({
         "metadata",
         "items.title",
         "items.quantity",
-        "+items.unit_price",
+        "items.unit_price",
         "items.thumbnail",
         "shipping_address.first_name",
         "shipping_address.last_name",

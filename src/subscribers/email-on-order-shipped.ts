@@ -80,7 +80,7 @@ export default async function emailOnOrderShipped({
         "+total",
         "items.title",
         "items.quantity",
-        "+items.unit_price",
+        "items.unit_price",
         "items.thumbnail",
         "shipping_address.first_name",
       ],

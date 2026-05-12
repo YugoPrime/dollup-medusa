@@ -53,7 +53,7 @@ const ORDER_FIELDS = [
   "items.product_title",
   "items.variant_title",
   "items.quantity",
-  "+items.unit_price",
+  "items.unit_price",
   "items.thumbnail",
   "fulfillments.id",
   "fulfillments.metadata",
