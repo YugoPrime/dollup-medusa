@@ -104,9 +104,13 @@ export default async function emailOnOrderPlaced({
           unit_price: num(item.unit_price),
           thumbnail: (item.thumbnail as string | null) ?? null,
         })),
-      subtotal: num(order.subtotal),
-      shippingTotal: num(order.shipping_total),
-      total: num(order.total),
+      // Medusa v2 BigNumber objects coerce to the numeric value via
+      // valueOf(), which Number() invokes. The custom num() helper falls
+      // through to 0 because BigNumber doesn't have a top-level `value`
+      // property — only loyalty-award.ts's direct Number() cast works.
+      subtotal: Number(order.subtotal ?? 0),
+      shippingTotal: Number(order.shipping_total ?? 0),
+      total: Number(order.total ?? 0),
       shippingAddress: {
         address_1: (order.shipping_address?.address_1 as string | null) ?? null,
         city: (order.shipping_address?.city as string | null) ?? null,
