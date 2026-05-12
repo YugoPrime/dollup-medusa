@@ -30,6 +30,32 @@ function normalizeDeliveryMethod(raw: unknown): string {
   return "post_office"
 }
 
+function num(value: unknown): number {
+  if (typeof value === "number") return value
+  if (typeof value === "string") return Number(value) || 0
+  if (value && typeof value === "object" && "value" in value) {
+    const v = (value as { value?: string | number }).value
+    return Number(v) || 0
+  }
+  return 0
+}
+
+// Mirrors dollup-admin's "is paid" rule: sale_type === "paid" (admin
+// manually marked it) OR Medusa's payment_status is captured/paid.
+function detectIsPaid(
+  metadata: Record<string, unknown>,
+  paymentStatus: unknown,
+): boolean {
+  if (metadata.sale_type === "paid") return true
+  if (typeof paymentStatus === "string") {
+    const s = paymentStatus.toLowerCase()
+    if (s === "captured" || s === "paid" || s === "partially_captured") {
+      return true
+    }
+  }
+  return false
+}
+
 export default async function emailOnOrderShipped({
   event,
   container,
@@ -47,6 +73,15 @@ export default async function emailOnOrderShipped({
         "display_id",
         "email",
         "metadata",
+        "payment_status",
+        // Calculated fields — Medusa v2 needs the "+" prefix in query.graph.
+        "+subtotal",
+        "+shipping_total",
+        "+total",
+        "items.title",
+        "items.quantity",
+        "+items.unit_price",
+        "items.thumbnail",
         "shipping_address.first_name",
       ],
       filters: { id: orderId },
@@ -70,14 +105,32 @@ export default async function emailOnOrderShipped({
         ? metadata.tracking_number
         : null
 
+    const isPaid = detectIsPaid(metadata, order.payment_status)
+
     const data: OrderShippedEmailData = {
       storefrontUrl: STOREFRONT_URL,
       customerFirstName:
         (order.shipping_address?.first_name as string | null) ?? "",
       displayId: order.display_id ?? order.id,
       deliveryMethod,
+      shippingMethodLabel:
+        typeof metadata.delivery_method === "string"
+          ? metadata.delivery_method
+          : null,
       deliveryDate,
       trackingNumber,
+      isPaid,
+      items: (order.items ?? [])
+        .filter((item): item is NonNullable<typeof item> => item != null)
+        .map((item) => ({
+          title: (item.title as string) ?? "Item",
+          quantity: num(item.quantity) || 1,
+          unit_price: num(item.unit_price),
+          thumbnail: (item.thumbnail as string | null) ?? null,
+        })),
+      subtotal: num(order.subtotal),
+      shippingTotal: num(order.shipping_total),
+      total: num(order.total),
     }
 
     const notificationService = container.resolve<INotificationModuleService>(

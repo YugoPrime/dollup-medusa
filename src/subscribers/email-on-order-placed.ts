@@ -100,6 +100,12 @@ export default async function emailOnOrderPlaced({
         phone: (order.shipping_address?.phone as string | null) ?? null,
       },
       deliveryMethod: normalizeDeliveryMethod(metadata.delivery_method),
+      // Raw label from the storefront (e.g. "Express Postage", "Rodrigues
+      // Postage") so the email shows the exact method the customer picked.
+      shippingMethodLabel:
+        typeof metadata.delivery_method === "string"
+          ? metadata.delivery_method
+          : null,
       deliveryDate:
         typeof metadata.delivery_date === "string"
           ? metadata.delivery_date

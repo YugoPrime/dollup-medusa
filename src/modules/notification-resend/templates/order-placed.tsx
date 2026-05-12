@@ -3,7 +3,6 @@ import * as React from "react"
 
 import {
   BRAND,
-  Button,
   EmailLayout,
   Heading,
   Paragraph,
@@ -30,13 +29,51 @@ export type OrderPlacedEmailData = {
     phone?: string | null
   }
   deliveryMethod?: string | null
+  // Raw label from cart metadata (e.g. "Express Postage", "Rodrigues Postage")
+  // so the email shows exactly what the customer picked, not the flattened
+  // 3-bucket version used elsewhere.
+  shippingMethodLabel?: string | null
   deliveryDate?: string | null
 }
 
-const deliveryLabel: Record<string, string> = {
-  home_delivery: "Home delivery",
-  post_office: "Post office",
-  pickup: "Pickup at Pereybere",
+const fallbackDeliveryLabel: Record<string, string> = {
+  home_delivery: "Home / Office Delivery",
+  post_office: "Postage",
+  pickup: "Pick up in Pereybere",
+}
+
+function displayDeliveryLabel(
+  shippingMethodLabel: string | null | undefined,
+  deliveryMethod: string | null | undefined,
+): string {
+  if (shippingMethodLabel) {
+    // Keep the location explicit for pickup; pass everything else through.
+    if (shippingMethodLabel === "Pick Up") return "Pick up in Pereybere"
+    if (shippingMethodLabel === "Home Delivery") return "Home / Office Delivery"
+    return shippingMethodLabel
+  }
+  if (deliveryMethod && fallbackDeliveryLabel[deliveryMethod]) {
+    return fallbackDeliveryLabel[deliveryMethod]
+  }
+  return "To be confirmed"
+}
+
+function isPickupMethod(
+  shippingMethodLabel: string | null | undefined,
+  deliveryMethod: string | null | undefined,
+): boolean {
+  if (shippingMethodLabel === "Pick Up") return true
+  return deliveryMethod === "pickup"
+}
+
+function isPostageMethod(
+  shippingMethodLabel: string | null | undefined,
+  deliveryMethod: string | null | undefined,
+): boolean {
+  if (shippingMethodLabel) {
+    return shippingMethodLabel.toLowerCase().includes("postage")
+  }
+  return deliveryMethod === "post_office"
 }
 
 export default function OrderPlacedEmail(data: OrderPlacedEmailData) {
@@ -50,11 +87,11 @@ export default function OrderPlacedEmail(data: OrderPlacedEmailData) {
     total,
     shippingAddress,
     deliveryMethod,
-    deliveryDate,
+    shippingMethodLabel,
   } = data
-  const orderUrl = `${storefrontUrl}/track-order?id=${encodeURIComponent(
-    String(displayId),
-  )}`
+  const methodLabel = displayDeliveryLabel(shippingMethodLabel, deliveryMethod)
+  const isPickup = isPickupMethod(shippingMethodLabel, deliveryMethod)
+  const isPostage = isPostageMethod(shippingMethodLabel, deliveryMethod)
 
   return (
     <EmailLayout
@@ -63,8 +100,7 @@ export default function OrderPlacedEmail(data: OrderPlacedEmailData) {
     >
       <Heading>Hi {customerFirstName || "there"} — order received</Heading>
       <Paragraph>
-        Thanks for shopping with Doll Up Boutique. We're packing your
-        order now and will update you as soon as it's on the way.
+        Thanks for shopping with Doll Up Boutique. We're preparing your order now and will update you as soon as it's ready for the next step.
       </Paragraph>
 
       <Text
@@ -167,34 +203,83 @@ export default function OrderPlacedEmail(data: OrderPlacedEmailData) {
             textTransform: "uppercase",
           }}
         >
-          Delivery
+          Delivery Method
         </Text>
         <Text
           style={{
-            color: BRAND.inkSoft,
+            color: BRAND.ink,
             fontSize: "14px",
+            fontWeight: 600,
             lineHeight: "22px",
             margin: 0,
           }}
         >
-          {deliveryMethod
-            ? deliveryLabel[deliveryMethod] ?? deliveryMethod
-            : "To be confirmed"}
-          {deliveryDate ? ` · ${deliveryDate}` : ""}
-          {shippingAddress.address_1
-            ? ` · ${shippingAddress.address_1}, ${shippingAddress.city ?? ""}`
-            : ""}
+          {methodLabel}
         </Text>
+        {!isPickup && shippingAddress.address_1 ? (
+          <Text
+            style={{
+              color: BRAND.inkSoft,
+              fontSize: "14px",
+              lineHeight: "22px",
+              margin: "2px 0 0 0",
+            }}
+          >
+            {shippingAddress.address_1}
+            {shippingAddress.city ? `, ${shippingAddress.city}` : ""}
+          </Text>
+        ) : null}
       </Section>
 
-      <Section style={{ padding: "24px 0 8px 0" }}>
-        <Button href={orderUrl}>Track your order</Button>
-      </Section>
+      {isPostage ? (
+        <Section
+          style={{
+            backgroundColor: BRAND.blush,
+            borderRadius: "8px",
+            padding: "16px",
+            margin: "16px 0 0 0",
+          }}
+        >
+          <Text
+            style={{
+              color: BRAND.inkMuted,
+              fontSize: "12px",
+              fontWeight: 700,
+              letterSpacing: "0.14em",
+              margin: "0 0 8px 0",
+              textTransform: "uppercase",
+            }}
+          >
+            Payment
+          </Text>
+          <Text
+            style={{
+              color: BRAND.ink,
+              fontSize: "14px",
+              lineHeight: "22px",
+              margin: "0 0 10px 0",
+            }}
+          >
+            Your order will be processed only once payment is received. If
+            you've already paid, you'll get an update with tracking shortly.
+          </Text>
+          <Text
+            style={{
+              color: BRAND.ink,
+              fontSize: "14px",
+              lineHeight: "22px",
+              margin: 0,
+            }}
+          >
+            Otherwise, please transfer to our MCB account{" "}
+            <strong>000446948071</strong> and send a screenshot by replying
+            to this email or via WhatsApp <strong>+230 5941 6359</strong>.
+          </Text>
+        </Section>
+      ) : null}
 
       <Paragraph>
-        Payment is collected on delivery (Cash, Juice, Bank Transfer or myT
-        Money). Need anything? Just reply to this email — a real person
-        reads every message.
+        Need anything? Just reply to this email — we read every message.
       </Paragraph>
     </EmailLayout>
   )

@@ -156,24 +156,42 @@ export function Button({
   href: string
   children: React.ReactNode
 }) {
+  // Wrap in a centered table — `align="center"` on the table itself is the
+  // most reliable way to horizontally center a button across Gmail, Apple
+  // Mail, and Outlook. `text-align: center` on the parent doesn't work in
+  // all clients.
   return (
-    <Link
-      href={href}
-      style={{
-        backgroundColor: BRAND.coral,
-        borderRadius: "8px",
-        color: "#ffffff",
-        display: "inline-block",
-        fontSize: "14px",
-        fontWeight: 600,
-        letterSpacing: "0.04em",
-        padding: "12px 24px",
-        textDecoration: "none",
-        textTransform: "uppercase",
-      }}
+    <table
+      align="center"
+      cellPadding={0}
+      cellSpacing={0}
+      role="presentation"
+      style={{ borderCollapse: "collapse", margin: "0 auto" }}
     >
-      {children}
-    </Link>
+      <tbody>
+        <tr>
+          <td>
+            <Link
+              href={href}
+              style={{
+                backgroundColor: BRAND.coral,
+                borderRadius: "8px",
+                color: "#ffffff",
+                display: "inline-block",
+                fontSize: "14px",
+                fontWeight: 600,
+                letterSpacing: "0.04em",
+                padding: "12px 24px",
+                textDecoration: "none",
+                textTransform: "uppercase",
+              }}
+            >
+              {children}
+            </Link>
+          </td>
+        </tr>
+      </tbody>
+    </table>
   )
 }
 
