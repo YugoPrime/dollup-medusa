@@ -105,7 +105,10 @@ export default async function emailOnOrderShipped({
         ? metadata.tracking_number
         : null
 
-    const isPaid = detectIsPaid(metadata, order.payment_status)
+    const isPaid = detectIsPaid(
+      metadata,
+      (order as { payment_status?: unknown }).payment_status,
+    )
 
     const data: OrderShippedEmailData = {
       storefrontUrl: STOREFRONT_URL,
