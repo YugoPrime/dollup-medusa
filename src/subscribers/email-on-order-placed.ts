@@ -100,8 +100,10 @@ export default async function emailOnOrderPlaced({
         .filter((item): item is NonNullable<typeof item> => item != null)
         .map((item) => ({
           title: (item.title as string) ?? "Item",
-          quantity: num(item.quantity) || 1,
-          unit_price: num(item.unit_price),
+          // Same BigNumber gotcha as the top-level totals: use Number()
+          // so the unit_price field on the line item coerces via valueOf().
+          quantity: Number(item.quantity ?? 0) || 1,
+          unit_price: Number(item.unit_price ?? 0),
           thumbnail: (item.thumbnail as string | null) ?? null,
         })),
       // Medusa v2 BigNumber objects coerce to the numeric value via
