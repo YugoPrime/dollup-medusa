@@ -65,28 +65,41 @@ export default async function emailOnOrderShipped({
   if (!orderId) return
 
   try {
-    const query = container.resolve(ContainerRegistrationKeys.QUERY)
-    const { data: orders } = await query.graph({
-      entity: "order",
-      fields: [
+    // Medusa v2 query.graph silently returns 0 for calculated totals.
+    // retrieveOrder via OrderModuleService runs the totals calculator and
+    // returns real values (same pattern used by loyalty-award.ts).
+    const orderModuleService = container.resolve(Modules.ORDER)
+    const order = (await orderModuleService.retrieveOrder(orderId, {
+      select: [
         "id",
         "display_id",
         "email",
         "metadata",
         "payment_status",
-        // Calculated fields — Medusa v2 needs the "+" prefix in query.graph.
-        "+subtotal",
-        "+shipping_total",
-        "+total",
-        "items.title",
-        "items.quantity",
-        "items.unit_price",
-        "items.thumbnail",
-        "shipping_address.first_name",
+        "subtotal",
+        "shipping_total",
+        "total",
       ],
-      filters: { id: orderId },
-    })
-    const order = orders?.[0]
+      relations: ["items", "shipping_address"],
+    })) as unknown as {
+      id: string
+      display_id?: number | null
+      email?: string | null
+      metadata?: Record<string, unknown> | null
+      payment_status?: string | null
+      subtotal?: number | { value?: string | number } | null
+      shipping_total?: number | { value?: string | number } | null
+      total?: number | { value?: string | number } | null
+      items?: Array<{
+        title?: string | null
+        quantity?: number | null
+        unit_price?: number | { value?: string | number } | null
+        thumbnail?: string | null
+      }> | null
+      shipping_address?: {
+        first_name?: string | null
+      } | null
+    }
     if (!order || !order.email) {
       logger.warn(
         `[email] dm.order.shipped: no order or email for ${orderId}, skipping`,

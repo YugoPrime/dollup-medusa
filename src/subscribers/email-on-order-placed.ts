@@ -43,33 +43,46 @@ export default async function emailOnOrderPlaced({
   if (!orderId) return
 
   try {
-    const query = container.resolve(ContainerRegistrationKeys.QUERY)
-    const { data: orders } = await query.graph({
-      entity: "order",
-      fields: [
+    // Medusa v2 query.graph silently returns 0 for calculated totals
+    // (subtotal/shipping_total/total). The OrderModuleService.retrieveOrder
+    // path runs the totals calculator and returns real values — same pattern
+    // used by loyalty-award.ts.
+    const orderModuleService = container.resolve(Modules.ORDER)
+    const order = (await orderModuleService.retrieveOrder(orderId, {
+      select: [
         "id",
         "display_id",
         "email",
         "currency_code",
-        // Medusa v2 totals are calculated fields — must be opted in with
-        // a "+" prefix in query.graph or the values come back as 0/null.
-        "+subtotal",
-        "+shipping_total",
-        "+total",
+        "subtotal",
+        "shipping_total",
+        "total",
         "metadata",
-        "items.title",
-        "items.quantity",
-        "items.unit_price",
-        "items.thumbnail",
-        "shipping_address.first_name",
-        "shipping_address.last_name",
-        "shipping_address.address_1",
-        "shipping_address.city",
-        "shipping_address.phone",
       ],
-      filters: { id: orderId },
-    })
-    const order = orders?.[0]
+      relations: ["items", "shipping_address"],
+    })) as unknown as {
+      id: string
+      display_id?: number | null
+      email?: string | null
+      currency_code?: string | null
+      subtotal?: number | { value?: string | number } | null
+      shipping_total?: number | { value?: string | number } | null
+      total?: number | { value?: string | number } | null
+      metadata?: Record<string, unknown> | null
+      items?: Array<{
+        title?: string | null
+        quantity?: number | null
+        unit_price?: number | { value?: string | number } | null
+        thumbnail?: string | null
+      }> | null
+      shipping_address?: {
+        first_name?: string | null
+        last_name?: string | null
+        address_1?: string | null
+        city?: string | null
+        phone?: string | null
+      } | null
+    }
     if (!order || !order.email) {
       logger.warn(
         `[email] order.placed: no order or email for ${orderId}, skipping`,
