@@ -24,3 +24,6 @@ build
 !.yarn/versions
 
 .medusa
+
+# react-email preview server build cache (used by `yarn email:dev`)
+.react-email
