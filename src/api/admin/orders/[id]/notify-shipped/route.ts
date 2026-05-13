@@ -10,17 +10,17 @@ import {
 import { ORDER_SHIPPED_EVENT } from "../../../../../subscribers/email-on-order-shipped"
 
 /**
- * Admin route that finalizes the "shipped" state on a DM order.
+ * Admin route that fires the shipped-customer email for a DM order.
  *
- *   - Sets metadata.dm_status = "shipped"
+ *   - Stamps metadata.shipped_at (audit only, no reader)
  *   - Optionally writes metadata.tracking_number from the request body
  *   - Emits the custom `dm.order.shipped` event so the email subscriber
  *     fires exactly once per shipping action.
  *
- * Called by the storefront's /admin/prep page after the user clicks
- * "Mark shipped". Existing markOrderShipped() in admin-orders.ts handles
- * the dm_status flip + fulfillment creation through the SDK; this route is
- * specifically the email trigger so it can be re-fired manually if needed.
+ * dm_status is owned exclusively by setDmStatus() in dollup-admin. This route
+ * MUST NOT touch dm_status — readDmStatus() in admin-orders.ts treats anything
+ * other than "ready" as "preparation", so writing "shipped" here used to drop
+ * Home Delivery / Pickup orders back into Mark Ready after every click.
  */
 export const POST = async (
   req: AuthenticatedMedusaRequest,
@@ -55,7 +55,6 @@ export const POST = async (
   const orderModule = req.scope.resolve(Modules.ORDER)
   const newMetadata = {
     ...((order.metadata ?? {}) as Record<string, unknown>),
-    dm_status: "shipped",
     shipped_at: new Date().toISOString(),
     ...(trackingNumber ? { tracking_number: trackingNumber } : {}),
   }
