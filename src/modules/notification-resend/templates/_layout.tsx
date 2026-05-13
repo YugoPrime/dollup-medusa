@@ -19,7 +19,7 @@ type EmailLayoutProps = {
 }
 
 export const BRAND = {
-  coral: "#5e423dff",
+  coral: "#bea39eff",
   coralDark: "#C84A36",
   blush: "#FCE4E0",
   cream: "#FFF7F2",
