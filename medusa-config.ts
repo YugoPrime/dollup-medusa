@@ -142,6 +142,9 @@ module.exports = defineConfig({
     {
       resolve: "./src/modules/leads",
     },
+    {
+      resolve: "./src/modules/size-requests",
+    },
     // Notification module — local 'feed' for admin UI + Resend for email.
     {
       resolve: "@medusajs/medusa/notification",
