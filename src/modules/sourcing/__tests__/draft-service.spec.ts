@@ -130,6 +130,58 @@ moduleIntegrationTestRunner<SourcingModuleService>({
         await service.transitionDraft(d2.id, "negotiating")
         await expect(service.deleteDraftStrict(d2.id)).rejects.toThrow(/drafting/)
       })
+
+      it("summarizes supplier draft cards without per-draft retrieval", async () => {
+        const draft = await service.createDraft({ supplier_id: supplierId })
+        const itemA = await service.createItem({
+          draft_order_id: draft.id,
+          working_name: "Dress",
+          cost_usd: 5,
+        })
+        await service.replaceVariants(itemA.id, [
+          { size: "S", qty: 2, color: "Pink" },
+          { size: "M", qty: 3, color: "Pink" },
+        ])
+        const itemB = await service.createItem({
+          draft_order_id: draft.id,
+          working_name: "Skirt",
+          cost_usd: 7.5,
+        })
+        await service.replaceVariants(itemB.id, [
+          { size: "One Size", qty: 4, color: null },
+        ])
+
+        const [withSummary] = await service.listDraftsForSupplierWithSummary(
+          supplierId,
+        )
+
+        expect(withSummary.summary).toEqual({
+          item_count: 2,
+          total_pcs: 9,
+          total_usd: 55,
+        })
+      })
+
+      it("counts active and paid supplier drafts in one call", async () => {
+        const active = await service.createDraft({ supplier_id: supplierId })
+        await service.transitionDraft(active.id, "negotiating")
+
+        const paid = await service.createDraft({ supplier_id: supplierId })
+        const item = await service.createItem({
+          draft_order_id: paid.id,
+          working_name: "Ready",
+          cost_usd: 5,
+        })
+        await service.replaceVariants(item.id, [
+          { size: "S", qty: 1, color: null },
+        ])
+        await service.transitionDraft(paid.id, "negotiating")
+        await service.transitionDraft(paid.id, "paid")
+
+        const counts = await service.countDraftsForSuppliers([supplierId])
+
+        expect(counts[supplierId]).toEqual({ active: 1, paid: 1 })
+      })
     })
   },
 })

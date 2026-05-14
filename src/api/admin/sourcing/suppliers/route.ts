@@ -28,12 +28,19 @@ export const GET = async (
   try {
     const service = req.scope.resolve<SourcingModuleService>(SOURCING_MODULE)
     const filter = String(req.query.filter ?? "active")
+    const includeCounts = req.query.include_counts === "1"
     const suppliers =
       filter === "all"
         ? await service.listAllSuppliers()
         : filter === "archived"
           ? (await service.listAllSuppliers()).filter((s) => s.archived_at)
           : await service.listActiveSuppliers()
+    if (includeCounts) {
+      const draftCounts = await service.countDraftsForSuppliers(
+        suppliers.map((supplier) => supplier.id),
+      )
+      return res.json({ suppliers, draftCounts })
+    }
     res.json({ suppliers })
   } catch (err) {
     const e = err as Error

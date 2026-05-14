@@ -58,6 +58,17 @@ export type PushDraftResult = {
 
 type DraftStatus = (typeof DRAFT_ORDER_STATUSES)[number]
 
+export type SupplierDraftCounts = {
+  active: number
+  paid: number
+}
+
+export type DraftSummary = {
+  item_count: number
+  total_pcs: number
+  total_usd: number
+}
+
 const FORWARD: Record<DraftStatus, DraftStatus | null> = {
   drafting: "negotiating",
   negotiating: "paid",
@@ -65,6 +76,9 @@ const FORWARD: Record<DraftStatus, DraftStatus | null> = {
   shipped: "received",
   received: null,
 }
+
+const ACTIVE_DRAFT_STATUSES = new Set<DraftStatus>(["drafting", "negotiating"])
+const PAID_DRAFT_STATUSES = new Set<DraftStatus>(["paid", "shipped", "received"])
 
 class SourcingModuleService extends MedusaService({
   Supplier,
@@ -179,6 +193,33 @@ class SourcingModuleService extends MedusaService({
     }>
   }
 
+  async countDraftsForSuppliers(
+    supplierIds: string[],
+  ): Promise<Record<string, SupplierDraftCounts>> {
+    const ids = [...new Set(supplierIds.filter(Boolean))]
+    const counts = Object.fromEntries(
+      ids.map((id) => [id, { active: 0, paid: 0 }]),
+    ) as Record<string, SupplierDraftCounts>
+    if (ids.length === 0) return counts
+
+    const svc = this as unknown as {
+      listDraftOrders: (filters: Record<string, unknown>) => Promise<Array<{
+        supplier_id: string
+        status: DraftStatus
+        archived_at: Date | null
+      }>>
+    }
+    const drafts = await svc.listDraftOrders({ supplier_id: ids })
+    for (const draft of drafts) {
+      if (draft.archived_at) continue
+      const row = counts[draft.supplier_id]
+      if (!row) continue
+      if (ACTIVE_DRAFT_STATUSES.has(draft.status)) row.active += 1
+      else if (PAID_DRAFT_STATUSES.has(draft.status)) row.paid += 1
+    }
+    return counts
+  }
+
   async deleteSupplierStrict(id: string) {
     const svc = this as unknown as {
       listDraftOrders: (filters: Record<string, unknown>) => Promise<Array<{ status: string }>>
@@ -247,6 +288,70 @@ class SourcingModuleService extends MedusaService({
     return (await svc.listDraftOrders(filters)) as Array<
       Awaited<ReturnType<typeof this.retrieveDraft>>
     >
+  }
+
+  async summarizeDrafts(draftIds: string[]): Promise<Record<string, DraftSummary>> {
+    const ids = [...new Set(draftIds.filter(Boolean))]
+    const summaries = Object.fromEntries(
+      ids.map((id) => [
+        id,
+        { item_count: 0, total_pcs: 0, total_usd: 0 },
+      ]),
+    ) as Record<string, DraftSummary>
+    if (ids.length === 0) return summaries
+
+    const svc = this as unknown as {
+      listDraftItems: (filters: Record<string, unknown>) => Promise<Array<{
+        id: string
+        draft_order_id: string
+        cost_usd: string | number
+      }>>
+      listDraftVariants: (filters: Record<string, unknown>) => Promise<Array<{
+        draft_item_id: string
+        qty: number
+      }>>
+    }
+    const items = await svc.listDraftItems({ draft_order_id: ids })
+    const itemIds = items.map((item) => item.id)
+    const qtyByItemId = new Map<string, number>()
+    if (itemIds.length > 0) {
+      const variants = await svc.listDraftVariants({ draft_item_id: itemIds })
+      for (const variant of variants) {
+        qtyByItemId.set(
+          variant.draft_item_id,
+          (qtyByItemId.get(variant.draft_item_id) ?? 0) + Number(variant.qty ?? 0),
+        )
+      }
+    }
+
+    for (const item of items) {
+      const summary = summaries[item.draft_order_id]
+      if (!summary) continue
+      const qty = qtyByItemId.get(item.id) ?? 0
+      summary.item_count += 1
+      summary.total_pcs += qty
+      summary.total_usd += Number(item.cost_usd ?? 0) * qty
+    }
+    for (const summary of Object.values(summaries)) {
+      summary.total_usd = Math.round(summary.total_usd * 100) / 100
+    }
+    return summaries
+  }
+
+  async listDraftsForSupplierWithSummary(
+    supplierId: string,
+    opts: { includeArchived?: boolean } = {},
+  ) {
+    const drafts = await this.listDraftsForSupplier(supplierId, opts)
+    const summaries = await this.summarizeDrafts(drafts.map((draft) => draft.id))
+    return drafts.map((draft) => ({
+      ...draft,
+      summary: summaries[draft.id] ?? {
+        item_count: 0,
+        total_pcs: 0,
+        total_usd: 0,
+      },
+    }))
   }
 
   async transitionDraft(

@@ -27,9 +27,14 @@ export const GET = async (
   try {
     const service = req.scope.resolve<SourcingModuleService>(SOURCING_MODULE)
     const includeArchived = req.query.archived === "1"
-    const drafts = await service.listDraftsForSupplier(req.params.id, {
-      includeArchived,
-    })
+    const includeSummary = req.query.include_summary === "1"
+    const drafts = includeSummary
+      ? await service.listDraftsForSupplierWithSummary(req.params.id, {
+          includeArchived,
+        })
+      : await service.listDraftsForSupplier(req.params.id, {
+          includeArchived,
+        })
     res.json({ drafts })
   } catch (err) {
     const e = err as Error
