@@ -1,0 +1,40 @@
+{
+  "slug": "how-to-order",
+  "name": "Shop on Website",
+  "category": "ops",
+  "duration_seconds": 7,
+  "wave": 1,
+  "slots": [],
+  "text_overrides": [
+    {
+      "id": "headline",
+      "default": "SHOP ONLINE",
+      "max_chars": 20
+    },
+    {
+      "id": "feature1",
+      "default": "Search 'red dress size small'",
+      "max_chars": 42
+    },
+    {
+      "id": "feature2",
+      "default": "Earn loyalty points & rewards",
+      "max_chars": 36
+    },
+    {
+      "id": "feature3",
+      "default": "Order history & fast checkout",
+      "max_chars": 36
+    },
+    {
+      "id": "feature4",
+      "default": "Live stock — order anytime",
+      "max_chars": 36
+    },
+    {
+      "id": "url",
+      "default": "dollupboutique.com",
+      "max_chars": 32
+    }
+  ]
+}

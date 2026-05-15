@@ -1,0 +1,19 @@
+* { margin: 0; padding: 0; box-sizing: border-box; list-style: none; }
+html, body { width: var(--story-w); height: var(--story-h); overflow: hidden; }
+.canvas { width: var(--story-w); height: var(--story-h); background: linear-gradient(180deg, var(--dub-cream) 0%, var(--dub-blush) 100%); }
+.scene { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 80px 60px 60px; gap: 36px; }
+.headline { font-family: var(--dub-font-display); font-weight: 700; font-size: 132px; color: var(--dub-ink); letter-spacing: 8px; text-align: center; line-height: 0.95; animation: rise 0.7s ease-out 0.2s both; }
+.features { display: flex; flex-direction: column; gap: 30px; align-self: stretch; padding: 0 30px; }
+.features li { font-family: var(--dub-font-body); font-weight: 600; font-size: 38px; color: var(--dub-ink); padding-left: 64px; position: relative; line-height: 1.25; }
+.features li::before { content: "→"; position: absolute; left: 0; top: 0; color: var(--dub-pink); font-weight: 700; font-size: 44px; }
+.features li:nth-child(1) { animation: slideR 0.6s ease-out 0.55s both; }
+.features li:nth-child(2) { animation: slideR 0.6s ease-out 0.85s both; }
+.features li:nth-child(3) { animation: slideR 0.6s ease-out 1.15s both; }
+.features li:nth-child(4) { animation: slideR 0.6s ease-out 1.45s both; }
+.url-pill { font-family: var(--dub-font-display); font-weight: 700; font-size: 56px; color: var(--dub-ink); background: white; padding: 22px 44px; border-radius: 999px; letter-spacing: 4px; box-shadow: 0 16px 36px rgba(0,0,0,0.12); animation: rise 0.7s ease-out 1.9s both, pulse 2.2s ease-in-out 2.6s infinite; }
+@keyframes rise { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes slideR { from { opacity: 0; transform: translateX(-40px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.03); } }
+
+.url-wrap { position: relative; display: inline-block; margin-top: 8px; }
+.url-wrap .cursor-tap { top: 35%; right: -50px; }

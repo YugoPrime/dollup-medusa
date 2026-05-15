@@ -15,6 +15,7 @@ const StorySlot = model
     category_id: model.text(),
     product_id: model.text().nullable(),
     product_snapshot: model.json().nullable(),
+    metadata: model.json().nullable(),
     fallback_used: model.boolean().default(false),
     posted_at: model.dateTime().nullable(),
     pick_attempt: model.number().default(1),

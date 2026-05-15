@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 144">
+  <defs>
+    <style>
+      .pill{fill:#fff8f0;stroke:#c75d4b;stroke-width:3}
+      .title{font-family:Playfair Display,Georgia,serif;font-weight:700;font-size:42px;fill:#2b2b2b}
+      .url{font-family:Playfair Display,Georgia,serif;font-weight:500;font-size:22px;fill:#c75d4b;letter-spacing:1px}
+      .line{stroke:#c75d4b;stroke-width:1.5}
+      .arrow{font-family:Georgia,serif;font-size:32px;fill:#c75d4b}
+    </style>
+  </defs>
+  <rect class="pill" x="20" y="14" width="440" height="116" rx="58"/>
+  <text class="title" x="240" y="64" text-anchor="middle">Shop now</text>
+  <line class="line" x1="155" y1="80" x2="225" y2="80"/>
+  <circle cx="232" cy="80" r="3" fill="#c75d4b"/>
+  <circle cx="240" cy="74" r="3" fill="#c75d4b" opacity="0.9"/>
+  <circle cx="248" cy="80" r="3" fill="#c75d4b"/>
+  <circle cx="240" cy="86" r="3" fill="#c75d4b" opacity="0.9"/>
+  <line class="line" x1="255" y1="80" x2="325" y2="80"/>
+  <text class="url" x="240" y="112" text-anchor="middle">dollupboutique.com</text>
+  <text class="arrow" x="425" y="78">→</text>
+</svg>

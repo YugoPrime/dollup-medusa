@@ -1,0 +1,30 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: var(--story-w); height: var(--story-h); overflow: hidden; }
+.canvas {
+  width: var(--story-w);
+  height: var(--story-h);
+  background: var(--dub-cream);
+}
+.scene {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 120px 60px 80px;
+  gap: 24px;
+  position: relative;
+  inset: 0;
+}
+.stamp { position: absolute; top: 80px; right: 60px; transform: rotate(-12deg); background: var(--dub-pink); color: var(--dub-ink); padding: 24px 32px; border-radius: 12px; font-family: var(--dub-font-display); font-weight: 700; font-size: 56px; letter-spacing: 8px; box-shadow: 4px 4px 0 var(--dub-ink); animation: stampIn 0.5s cubic-bezier(.6,1.4,.4,1) 0.4s both; z-index: 2; }
+.hero-wrap { flex: 1; width: 100%; border-radius: 24px; overflow: hidden; animation: zoom 5s ease-out both; }
+.hero { width: 100%; height: 100%; object-fit: cover; display: block; background: var(--dub-blush); }
+.prices { display: flex; align-items: baseline; gap: 24px; animation: rise 0.6s ease-out 0.9s both; }
+.old { font-family: var(--dub-font-display); font-size: 56px; color: var(--dub-ink); opacity: 0.5; text-decoration: line-through; }
+.new { font-family: var(--dub-font-display); font-weight: 700; font-size: 88px; color: var(--dub-red); line-height: 1; }
+.sku { font-family: var(--dub-font-body); font-weight: 600; font-size: 22px; color: var(--dub-ink); background: rgba(43,43,43,0.08); padding: 5px 14px; border-radius: 999px; letter-spacing: 2px; }
+.footer { font-family: var(--dub-font-body); font-weight: 700; font-size: 32px; color: var(--dub-ink); letter-spacing: 4px; animation: rise 0.6s ease-out 1.4s both; }
+
+.size { font-family: var(--dub-font-body); font-weight: 700; font-size: 36px; color: var(--dub-ink); background: var(--dub-soft); padding: 10px 24px; border-radius: 999px; letter-spacing: 2px; animation: rise 0.6s ease-out 1.2s both; }
+@keyframes stampIn { from { opacity: 0; transform: rotate(-12deg) scale(2); } to { opacity: 1; transform: rotate(-12deg) scale(1); } }
+@keyframes zoom { from { transform: scale(1.06); } to { transform: scale(1); } }
+@keyframes rise { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+

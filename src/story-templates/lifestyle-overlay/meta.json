@@ -1,0 +1,47 @@
+{
+  "slug": "lifestyle-overlay",
+  "name": "Lifestyle Overlay",
+  "category": "single-product",
+  "duration_seconds": 5,
+  "wave": 1,
+  "slots": [
+    {
+      "id": "lifestyle",
+      "hint": "lifestyle",
+      "label": "Lifestyle photo",
+      "required": true
+    }
+  ],
+  "text_overrides": [
+    {
+      "id": "status",
+      "default": "IN STOCK",
+      "max_chars": 16
+    },
+    {
+      "id": "size",
+      "default": "Size: S, M, L",
+      "max_chars": 24
+    },
+    {
+      "id": "price",
+      "default": "Rs.0",
+      "max_chars": 12
+    },
+    {
+      "id": "sku",
+      "default": "IS0000",
+      "max_chars": 10
+    },
+    {
+      "id": "footer",
+      "default": "DM to ORDER",
+      "max_chars": 20
+    },
+    {
+      "id": "footer_url",
+      "default": "shop dollupboutique.com",
+      "max_chars": 32
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "slug": "_smoke",
+  "name": "Smoke Test",
+  "category": "ops",
+  "duration_seconds": 3,
+  "wave": 0,
+  "slots": [],
+  "text_overrides": []
+}
+

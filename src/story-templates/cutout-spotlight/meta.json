@@ -1,0 +1,47 @@
+{
+  "slug": "cutout-spotlight",
+  "name": "Cutout Spotlight (transparent BG)",
+  "category": "single-product",
+  "duration_seconds": 6,
+  "wave": 1,
+  "slots": [
+    {
+      "id": "product_cutout",
+      "hint": "cutout",
+      "label": "Product photo with transparent background (PNG cutout)",
+      "required": true
+    }
+  ],
+  "text_overrides": [
+    {
+      "id": "kicker",
+      "default": "MUST HAVE",
+      "max_chars": 20
+    },
+    {
+      "id": "headline",
+      "default": "IN STOCK",
+      "max_chars": 20
+    },
+    {
+      "id": "price",
+      "default": "Rs.0",
+      "max_chars": 12
+    },
+    {
+      "id": "sku",
+      "default": "IS0000",
+      "max_chars": 10
+    },
+    {
+      "id": "size",
+      "default": "Size: S, M, L",
+      "max_chars": 28
+    },
+    {
+      "id": "footer",
+      "default": "DM to ORDER",
+      "max_chars": 20
+    }
+  ]
+}

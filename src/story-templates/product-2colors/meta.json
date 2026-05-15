@@ -1,0 +1,54 @@
+{
+  "slug": "product-2colors",
+  "name": "Product · 2 Colors",
+  "category": "single-product-multi-image",
+  "duration_seconds": 6,
+  "wave": 1,
+  "slots": [
+    {
+      "id": "front_a",
+      "hint": "front",
+      "label": "Front · color A",
+      "required": true
+    },
+    {
+      "id": "front_b",
+      "hint": "front",
+      "label": "Front · color B",
+      "required": true
+    },
+    {
+      "id": "back",
+      "hint": "back",
+      "label": "Back view",
+      "required": true
+    }
+  ],
+  "text_overrides": [
+    {
+      "id": "headline",
+      "default": "2 COLORS AVAILABLE",
+      "max_chars": 24
+    },
+    {
+      "id": "price",
+      "default": "Rs.0",
+      "max_chars": 12
+    },
+    {
+      "id": "sku",
+      "default": "IS0000",
+      "max_chars": 10
+    },
+    {
+      "id": "footer",
+      "default": "DM to ORDER",
+      "max_chars": 20
+    },
+    {
+      "id": "footer_url",
+      "default": "shop dollupboutique.com",
+      "max_chars": 32
+    }
+  ]
+}

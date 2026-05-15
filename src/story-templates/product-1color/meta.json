@@ -1,0 +1,48 @@
+{
+  "slug": "product-1color",
+  "name": "Product · 1 Color (Front + Back)",
+  "category": "single-product-multi-image",
+  "duration_seconds": 6,
+  "wave": 1,
+  "slots": [
+    {
+      "id": "front",
+      "hint": "front",
+      "label": "Front view",
+      "required": true
+    },
+    {
+      "id": "back",
+      "hint": "back",
+      "label": "Back view",
+      "required": true
+    }
+  ],
+  "text_overrides": [
+    {
+      "id": "headline",
+      "default": "FRONT & BACK",
+      "max_chars": 16
+    },
+    {
+      "id": "price",
+      "default": "Rs.0",
+      "max_chars": 12
+    },
+    {
+      "id": "sku",
+      "default": "IS0000",
+      "max_chars": 10
+    },
+    {
+      "id": "footer",
+      "default": "DM to ORDER",
+      "max_chars": 20
+    },
+    {
+      "id": "footer_url",
+      "default": "shop dollupboutique.com",
+      "max_chars": 32
+    }
+  ]
+}

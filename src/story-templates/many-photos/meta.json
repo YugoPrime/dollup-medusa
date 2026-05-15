@@ -1,0 +1,84 @@
+{
+  "slug": "many-photos",
+  "name": "Many Photos · 2x2 Flip Carousel",
+  "category": "single-product-multi-image",
+  "duration_seconds": 8,
+  "wave": 1,
+  "slots": [
+    {
+      "id": "photo_1",
+      "hint": "front",
+      "label": "Card 1 · primary",
+      "required": true
+    },
+    {
+      "id": "photo_2",
+      "hint": "front",
+      "label": "Card 2 · primary",
+      "required": true
+    },
+    {
+      "id": "photo_3",
+      "hint": "front",
+      "label": "Card 3 · primary",
+      "required": true
+    },
+    {
+      "id": "photo_4",
+      "hint": "back",
+      "label": "Card 4 · primary",
+      "required": true
+    },
+    {
+      "id": "photo_5",
+      "hint": "detail",
+      "label": "Card 1 · flip-to",
+      "required": true
+    },
+    {
+      "id": "photo_6",
+      "hint": "detail",
+      "label": "Card 2 · flip-to",
+      "required": true
+    },
+    {
+      "id": "photo_7",
+      "hint": "detail",
+      "label": "Card 3 · flip-to",
+      "required": true
+    },
+    {
+      "id": "photo_8",
+      "hint": "detail",
+      "label": "Card 4 · flip-to",
+      "required": true
+    }
+  ],
+  "text_overrides": [
+    {
+      "id": "headline",
+      "default": "Your new fav",
+      "max_chars": 24
+    },
+    {
+      "id": "price",
+      "default": "Rs.0",
+      "max_chars": 12
+    },
+    {
+      "id": "sku",
+      "default": "IS0000",
+      "max_chars": 10
+    },
+    {
+      "id": "footer",
+      "default": "DM to ORDER",
+      "max_chars": 20
+    },
+    {
+      "id": "footer_url",
+      "default": "shop dollupboutique.com",
+      "max_chars": 32
+    }
+  ]
+}

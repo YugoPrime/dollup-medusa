@@ -128,6 +128,9 @@ module.exports = defineConfig({
       resolve: "./src/modules/stories",
     },
     {
+      resolve: "./src/modules/stories-render",
+    },
+    {
       resolve: "./src/modules/store-config",
     },
     {

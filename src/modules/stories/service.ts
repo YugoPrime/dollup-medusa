@@ -186,6 +186,21 @@ class StoriesModuleService extends MedusaService({
     })
   }
 
+  async updateSlotMetadata(
+    slotId: string,
+    patch: Record<string, unknown>,
+  ): Promise<void> {
+    const [slot] = await this.listStorySlots({ id: slotId })
+    if (!slot) throw new Error(`Slot ${slotId} not found`)
+    await this.updateStorySlots({
+      id: slotId,
+      metadata: {
+        ...((slot.metadata ?? {}) as Record<string, unknown>),
+        ...patch,
+      },
+    } as unknown as Parameters<this["updateStorySlots"]>[0])
+  }
+
   /**
    * Returns deduped product IDs that have been posted within the last
    * `days` days. Used by the picker to enforce anti-repeat.
