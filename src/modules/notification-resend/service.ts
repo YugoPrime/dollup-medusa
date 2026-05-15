@@ -28,6 +28,27 @@ export enum EmailTemplate {
   PASSWORD_RESET = "password-reset",
 }
 
+// RFC 2606 reserved TLDs that will never resolve on the public internet.
+// dollup-admin synthesizes `dm-<phone>@dollupboutique.local` for DM orders
+// where the customer has no real email — sending to them guarantees a bounce
+// and erodes Resend domain reputation.
+const NON_SENDABLE_TLDS = new Set([
+  "local",
+  "localhost",
+  "test",
+  "invalid",
+  "example",
+])
+
+export function isSendableEmail(addr: string): boolean {
+  if (typeof addr !== "string") return false
+  const at = addr.lastIndexOf("@")
+  if (at < 1 || at === addr.length - 1) return false
+  const domain = addr.slice(at + 1).toLowerCase()
+  const tld = domain.includes(".") ? domain.split(".").pop()! : domain
+  return !NON_SENDABLE_TLDS.has(tld)
+}
+
 type TemplateRenderer = (data: unknown) => React.ReactNode
 
 const renderers: Record<EmailTemplate, TemplateRenderer> = {
@@ -140,6 +161,13 @@ class ResendNotificationProviderService extends AbstractNotificationProviderServ
     if (!notification.to) {
       this.logger.warn(
         `notification-resend: missing recipient for template ${notification.template}`,
+      )
+      return {}
+    }
+
+    if (!isSendableEmail(notification.to)) {
+      this.logger.info(
+        `notification-resend: skipping ${notification.template} → ${notification.to} (non-sendable placeholder address)`,
       )
       return {}
     }
