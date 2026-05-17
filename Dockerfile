@@ -57,14 +57,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Source: hyperframes/dist/cli.js reads `env("PRODUCER_HEADLESS_SHELL_PATH")`.
 ENV PRODUCER_HEADLESS_SHELL_PATH=/usr/bin/chromium
 
-# Install Node deps
+# Install Node deps + immediately purge the yarn berry cache. The cache
+# holds .zip copies of every installed package (~1.4GB on this project)
+# which gets baked into the image layer and isn't needed at runtime.
+# Without this, every Coolify rebuild adds ~3GB to the host's image
+# store and we eventually hit "no space left on device" at unpack time.
 COPY package.json yarn.lock .yarnrc.yml ./
 COPY .yarn .yarn
-RUN yarn install --immutable
+RUN yarn install --immutable && \
+    rm -rf .yarn/cache /root/.yarn /root/.cache/yarn 2>/dev/null || true
 
 # Copy source + build (backend + admin dashboard)
 COPY . .
-RUN yarn build
+RUN yarn build && \
+    rm -rf .yarn/cache /root/.yarn /root/.cache/yarn 2>/dev/null || true
 
 # Ensure admin build is in the expected location
 RUN mkdir -p /app/public && \
