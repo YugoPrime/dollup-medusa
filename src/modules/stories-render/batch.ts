@@ -1,0 +1,152 @@
+import type { MedusaContainer } from "@medusajs/framework/types"
+
+import { uploadStoryRenderToR2 } from "../../lib/r2-story-uploader"
+import { STORIES_MODULE } from "../stories"
+import type StoriesModuleService from "../stories/service"
+import type { ProductSnapshot } from "../stories/snapshot"
+import { STORIES_RENDER_MODULE } from "./index"
+import { pickTemplate } from "./picker"
+import type StoriesRenderModuleService from "./service"
+import type { RenderResult } from "./types"
+
+export type BatchSlotResult =
+  | {
+      slot_id: string
+      slot_index: number
+      status: "ok"
+      template_slug: string
+      mp4_url: string
+      duration_ms: number
+    }
+  | {
+      slot_id: string
+      slot_index: number
+      status: "skipped"
+      reason: string
+      template_slug?: string
+      mp4_url?: string
+    }
+  | {
+      slot_id: string
+      slot_index: number
+      status: "error"
+      message: string
+      stderr_tail?: string
+    }
+
+/**
+ * Sequentially renders every unposted slot of a plan via the auto-picker.
+ * Concurrency = 1: ffmpeg + HyperFrames each pin a CPU, running them in
+ * parallel just thrashes the box. Per-slot errors don't abort the batch.
+ *
+ * Already-rendered slots are skipped unless `force: true`. Slots without
+ * a snapshot or images are skipped with a descriptive reason.
+ *
+ * No HTTP / locking concerns — callers (route + cron) layer those on top.
+ */
+export async function batchRenderPlan(
+  scope: MedusaContainer,
+  planId: string,
+  opts: { force?: boolean } = {},
+): Promise<BatchSlotResult[]> {
+  const force = opts.force === true
+  const stories = scope.resolve<StoriesModuleService>(STORIES_MODULE)
+
+  const [plan] = await stories.listStoryPlans({ id: planId })
+  if (!plan) throw new Error(`Plan not found: ${planId}`)
+
+  const slots = (await stories.listStorySlots({ plan_id: planId })).sort(
+    (a, b) => a.slot_index - b.slot_index,
+  )
+
+  const renderSvc =
+    scope.resolve<StoriesRenderModuleService>(STORIES_RENDER_MODULE)
+  renderSvc.uploadToR2 = uploadStoryRenderToR2
+
+  const results: BatchSlotResult[] = []
+
+  for (const slot of slots) {
+    if (slot.posted_at) {
+      results.push({
+        slot_id: slot.id,
+        slot_index: slot.slot_index,
+        status: "skipped",
+        reason: "already posted",
+      })
+      continue
+    }
+
+    const existing = readExistingRender(slot.metadata)
+    if (existing && !force) {
+      results.push({
+        slot_id: slot.id,
+        slot_index: slot.slot_index,
+        status: "skipped",
+        reason: "already rendered",
+        template_slug: existing.template_slug,
+        mp4_url: existing.mp4_url,
+      })
+      continue
+    }
+
+    const snapshot = (slot.product_snapshot ?? null) as ProductSnapshot | null
+    const picked = pickTemplate(snapshot, slot.slot_index)
+    if (!picked) {
+      results.push({
+        slot_id: slot.id,
+        slot_index: slot.slot_index,
+        status: "skipped",
+        reason: snapshot
+          ? "no in-stock photos to render"
+          : "no product picked for this slot",
+      })
+      continue
+    }
+
+    try {
+      const render = await renderSvc.render(slot.id, picked)
+      await stories.updateSlotMetadata(slot.id, { render })
+      results.push({
+        slot_id: slot.id,
+        slot_index: slot.slot_index,
+        status: "ok",
+        template_slug: render.template_slug,
+        mp4_url: render.mp4_url,
+        duration_ms: render.duration_ms,
+      })
+    } catch (err) {
+      const e = err as { message?: string; stderrTail?: string }
+      results.push({
+        slot_id: slot.id,
+        slot_index: slot.slot_index,
+        status: "error",
+        message: e.message ?? "Render failed",
+        ...(e.stderrTail ? { stderr_tail: e.stderrTail } : {}),
+      })
+    }
+  }
+
+  return results
+}
+
+export function summarizeBatch(results: BatchSlotResult[]): {
+  ok: number
+  skipped: number
+  error: number
+} {
+  return {
+    ok: results.filter((r) => r.status === "ok").length,
+    skipped: results.filter((r) => r.status === "skipped").length,
+    error: results.filter((r) => r.status === "error").length,
+  }
+}
+
+function readExistingRender(metadata: unknown): RenderResult | null {
+  if (!metadata || typeof metadata !== "object") return null
+  const m = metadata as Record<string, unknown>
+  const render = m.render
+  if (!render || typeof render !== "object") return null
+  const r = render as Record<string, unknown>
+  if (typeof r.template_slug !== "string" || typeof r.mp4_url !== "string") return null
+  return render as RenderResult
+}

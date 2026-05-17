@@ -8,8 +8,8 @@ import {
 } from "@medusajs/framework/utils"
 
 import { STORIES_MODULE } from "../../../../../../modules/stories"
+import { toProductLike } from "../../../../../../modules/stories/product-source"
 import type StoriesModuleService from "../../../../../../modules/stories/service"
-import type { ProductLike } from "../../../../../../modules/stories/snapshot"
 
 /**
  * Manually swap the product picked for a slot. Rejects posted slots.
@@ -67,55 +67,5 @@ export const PUT = async (req: AuthenticatedMedusaRequest, res: MedusaResponse) 
     const msg = (err as Error)?.message ?? "Swap failed"
     const status = /posted/i.test(msg) ? 409 : /not found/i.test(msg) ? 404 : 400
     res.status(status).json({ message: msg })
-  }
-}
-
-function computeInventoryQuantity(v: any): number {
-  if (v.manage_inventory === false) return Number.MAX_SAFE_INTEGER
-  let total = 0
-  for (const ii of v.inventory_items ?? []) {
-    for (const lvl of ii.inventory?.location_levels ?? []) {
-      total += Number(lvl.stocked_quantity ?? 0) - Number(lvl.reserved_quantity ?? 0)
-    }
-  }
-  return Math.max(0, total)
-}
-
-function toProductLike(p: any): ProductLike {
-  return {
-    id: p.id,
-    title: p.title,
-    handle: p.handle,
-    created_at: p.created_at,
-    variants: (p.variants ?? []).map((v: any) => {
-      const calc = v.calculated_price
-      const displayAmount = calc?.calculated_amount
-      const amount = displayAmount != null ? Number(displayAmount) * 100 : null
-      const prices =
-        amount != null && Number.isFinite(amount)
-          ? [{ amount, currency_code: String(calc?.currency_code ?? "mur") }]
-          : []
-      const originalDisplay = calc?.original_amount
-      const compareAtAmount =
-        originalDisplay != null ? Number(originalDisplay) * 100 : null
-      return {
-        id: v.id,
-        sku: v.sku,
-        title: v.title,
-        inventory_quantity: computeInventoryQuantity(v),
-        prices,
-        compare_at_amount:
-          compareAtAmount != null && Number.isFinite(compareAtAmount)
-            ? compareAtAmount
-            : null,
-        options: Object.fromEntries(
-          (v.options ?? []).map((o: any) => [
-            o.option?.title?.toLowerCase() ?? "opt",
-            o.value,
-          ]),
-        ),
-        images: (p.images ?? []).map((img: any) => ({ url: img.url })),
-      }
-    }),
   }
 }
