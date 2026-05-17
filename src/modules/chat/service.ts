@@ -4,6 +4,8 @@ import { Contact } from "./models/contact"
 import { Thread } from "./models/thread"
 import { Message } from "./models/message"
 
+const MESSENGER_24H_MS = 24 * 60 * 60 * 1000
+
 class ChatModuleService extends MedusaService({
   ChannelAccount,
   Contact,
@@ -109,6 +111,150 @@ class ChatModuleService extends MedusaService({
     } as unknown as Parameters<this["updateThreads"]>[0])) as any
 
     return { message, thread, contact }
+  }
+
+  /**
+   * Send an outbound text message on a Messenger thread.
+   *
+   * Calls Meta's Send API and writes one chat_message row regardless of
+   * outcome. On success the row carries the Meta `mid` so future webhook
+   * echoes (which we already filter out) line up. On failure the row's
+   * meta_status is `failed` and meta_error holds the upstream message —
+   * this lets the inbox UI render failed sends without a separate table.
+   *
+   * The 24h customer-engagement window is enforced here (not at the route)
+   * so any caller — composer, scheduled sender, future AI agent — gets the
+   * same gate. Pass `tag: "HUMAN_AGENT"` to send past 24h; Meta still
+   * requires the page to be allowlisted for that tag in production.
+   */
+  async sendOutboundMessenger(input: {
+    threadId: string
+    text: string
+    senderUserId?: string | null
+    tag?: "HUMAN_AGENT" | null
+  }): Promise<{ message: any; thread: any }> {
+    const text = input.text?.trim()
+    if (!text) {
+      throw new Error("Cannot send empty message")
+    }
+
+    const [thread] = await this.listThreads({ id: input.threadId })
+    if (!thread) {
+      throw new Error(`Thread not found: ${input.threadId}`)
+    }
+    if (thread.channel !== "messenger") {
+      throw new Error(
+        `sendOutboundMessenger called on ${thread.channel} thread`
+      )
+    }
+    const [contact] = await this.listContacts({ id: thread.contact_id })
+    if (!contact) {
+      throw new Error(`Contact not found for thread ${input.threadId}`)
+    }
+
+    // 24h gate — Meta rejects MESSAGE_TAG-less sends past the window
+    const lastInbound = thread.last_inbound_at
+      ? new Date(thread.last_inbound_at).getTime()
+      : 0
+    const outsideWindow = !lastInbound || Date.now() - lastInbound > MESSENGER_24H_MS
+    if (outsideWindow && !input.tag) {
+      throw new Error(
+        "Outside 24h window — pass tag: 'HUMAN_AGENT' to send (page must be allowlisted)"
+      )
+    }
+
+    const accessToken = process.env.META_PAGE_ACCESS_TOKEN
+    const graphVersion = process.env.META_GRAPH_VERSION || "v20.0"
+    if (!accessToken) {
+      // Persist a failed row so the staff sees what happened in the UI
+      const failed = await this.createMessages({
+        thread_id: thread.id,
+        direction: "outbound",
+        external_id: null,
+        sender_kind: "staff",
+        sender_user_id: input.senderUserId ?? null,
+        body: text,
+        attachments: null,
+        meta_status: "failed",
+        meta_error: "META_PAGE_ACCESS_TOKEN not configured",
+      } as unknown as Parameters<this["createMessages"]>[0])
+      return { message: failed, thread }
+    }
+
+    const url = `https://graph.facebook.com/${graphVersion}/me/messages?access_token=${encodeURIComponent(
+      accessToken
+    )}`
+    const body: Record<string, unknown> = {
+      recipient: { id: contact.external_id },
+      message: { text },
+      messaging_type: input.tag ? "MESSAGE_TAG" : "RESPONSE",
+    }
+    if (input.tag) body.tag = input.tag
+
+    let metaMid: string | null = null
+    let metaError: string | null = null
+    try {
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
+      const json = (await resp.json().catch(() => ({}))) as {
+        message_id?: string
+        error?: { message?: string; code?: number; type?: string }
+      }
+      if (!resp.ok || json.error) {
+        metaError =
+          json.error?.message ||
+          `Meta send failed (${resp.status} ${resp.statusText})`
+      } else {
+        metaMid = json.message_id ?? null
+      }
+    } catch (err) {
+      metaError = (err as Error).message || "network error"
+    }
+
+    const now = new Date()
+    const message = await this.createMessages({
+      thread_id: thread.id,
+      direction: "outbound",
+      external_id: metaMid,
+      sender_kind: "staff",
+      sender_user_id: input.senderUserId ?? null,
+      body: text,
+      attachments: null,
+      meta_status: metaError ? "failed" : "sent",
+      meta_error: metaError,
+    } as unknown as Parameters<this["createMessages"]>[0])
+
+    // Bump last_message_at on success so the thread floats to the top of
+    // the list. On failure leave it alone — a failed send shouldn't reorder.
+    let updatedThread = thread
+    if (!metaError) {
+      updatedThread = (await this.updateThreads({
+        id: thread.id,
+        last_message_at: now,
+      } as unknown as Parameters<this["updateThreads"]>[0])) as any
+    }
+
+    return { message, thread: updatedThread }
+  }
+
+  /**
+   * Aggregate counts for the nav badge + dashboard tile. Cheap enough to
+   * call on every nav render at v1 volume; revisit with a materialized
+   * counter if it ever shows up in slow-query logs.
+   */
+  async getInboxSummary(): Promise<{
+    unread_total: number
+    open_count: number
+  }> {
+    const openThreads = await this.listThreads({ status: "open" })
+    let unread = 0
+    for (const t of openThreads) {
+      unread += (t as any).unread_count ?? 0
+    }
+    return { unread_total: unread, open_count: openThreads.length }
   }
 }
 
