@@ -67,6 +67,75 @@ describe("buildSnapshot", () => {
     expect(buildSnapshot(allOut).variant_in_stock_count).toBe(0)
   })
 
+  it("sets compare_at_price_mur when compare_at_amount on first in-stock variant is greater than price", () => {
+    const onSale: ProductLike = {
+      id: "prod_2",
+      title: "Sale Dress",
+      handle: "sale-dress",
+      variants: [
+        {
+          id: "v1",
+          sku: "S-1",
+          title: null,
+          inventory_quantity: 4,
+          prices: [{ amount: 99000, currency_code: "mur" }],
+          compare_at_amount: 149000,
+          options: { color: "Pink", size: "S" },
+          images: [{ url: "https://r2/s.jpg" }],
+        },
+      ],
+    }
+    const snap = buildSnapshot(onSale)
+    expect(snap.price_mur).toBe(990)
+    expect(snap.compare_at_price_mur).toBe(1490)
+  })
+
+  it("ignores compare_at_amount when it is not strictly greater than active price", () => {
+    const notOnSale: ProductLike = {
+      id: "prod_3",
+      title: "Regular",
+      handle: "regular",
+      variants: [
+        {
+          id: "v1",
+          sku: null,
+          title: null,
+          inventory_quantity: 4,
+          prices: [{ amount: 149000, currency_code: "mur" }],
+          compare_at_amount: 149000,
+          options: { color: "Pink", size: "S" },
+          images: [{ url: "https://r2/r.jpg" }],
+        },
+      ],
+    }
+    expect(buildSnapshot(notOnSale).compare_at_price_mur).toBeNull()
+  })
+
+  it("leaves compare_at_price_mur null when compare_at_amount is undefined", () => {
+    const snap = buildSnapshot(baseProduct)
+    expect(snap.compare_at_price_mur).toBeNull()
+  })
+
+  it("marks is_new_arrival=true when product.created_at is within 30 days", () => {
+    const fresh: ProductLike = {
+      ...baseProduct,
+      created_at: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
+    }
+    expect(buildSnapshot(fresh).is_new_arrival).toBe(true)
+  })
+
+  it("marks is_new_arrival=false when product.created_at is older than 30 days", () => {
+    const old: ProductLike = {
+      ...baseProduct,
+      created_at: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString(),
+    }
+    expect(buildSnapshot(old).is_new_arrival).toBe(false)
+  })
+
+  it("defaults is_new_arrival=false when product.created_at is absent", () => {
+    expect(buildSnapshot(baseProduct).is_new_arrival).toBe(false)
+  })
+
   it("price_mur reflects display rupees, not display × 100 nor display ÷ 100", () => {
     // Regression: toProductLike previously fed raw_calculated_amount.value
     // (which equals display, e.g. "1290") into prices[].amount, then

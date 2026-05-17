@@ -34,6 +34,7 @@ export const POST = async (req: AuthenticatedMedusaRequest, res: MedusaResponse)
         "id",
         "title",
         "handle",
+        "created_at",
         "metadata",
         "images.url",
         "categories.handle",
@@ -102,6 +103,7 @@ function toProductLike(p: any): ProductLike {
     id: p.id,
     title: p.title,
     handle: p.handle,
+    created_at: p.created_at,
     variants: (p.variants ?? []).map((v: any) => {
       const calc = v.calculated_price
       const displayAmount = calc?.calculated_amount
@@ -110,12 +112,21 @@ function toProductLike(p: any): ProductLike {
         amount != null && Number.isFinite(amount)
           ? [{ amount, currency_code: String(calc?.currency_code ?? "mur") }]
           : []
+      // Price-List discounts surface as a higher original_amount than
+      // calculated_amount — pass through so the snapshot/picker can detect sale.
+      const originalDisplay = calc?.original_amount
+      const compareAtAmount =
+        originalDisplay != null ? Number(originalDisplay) * 100 : null
       return {
         id: v.id,
         sku: v.sku,
         title: v.title,
         inventory_quantity: computeInventoryQuantity(v),
         prices,
+        compare_at_amount:
+          compareAtAmount != null && Number.isFinite(compareAtAmount)
+            ? compareAtAmount
+            : null,
         options: Object.fromEntries(
           (v.options ?? []).map((o: any) => [
             o.option?.title?.toLowerCase() ?? "opt",
