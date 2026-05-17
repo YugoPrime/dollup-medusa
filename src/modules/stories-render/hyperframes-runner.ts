@@ -30,17 +30,14 @@ export async function spawnRender(args: SpawnRenderArgs): Promise<void> {
   const { tmpDir, outPath, timeoutMs = 60_000 } = args
   return new Promise((resolve, reject) => {
     const cliPath = path.resolve(process.cwd(), "node_modules/hyperframes/dist/cli.js")
-    // --docker tells HyperFrames to use container-friendly Chrome flags
-    // (--no-sandbox, --disable-dev-shm-usage, --disable-gpu) and adjusts its
-    // capture pipeline for the limited resources of a container. Without it
-    // the browser launches but produces ~80px-wide garbage frames that ffmpeg
-    // can't encode (HyperFrames itself prints "Try --docker for containerized
-    // rendering" in the error tail). Opt out locally with HYPERFRAMES_LOCAL=1.
-    const cliArgs = [cliPath, "render", tmpDir, "-o", outPath, "--quiet"]
-    if (process.env.HYPERFRAMES_LOCAL !== "1") {
-      cliArgs.push("--docker")
-    }
-    const proc = spawn(process.execPath, cliArgs, {
+    // NOTE: --docker is intentionally NOT passed. That flag tells HyperFrames
+    // to spin up its OWN Docker container for rendering (Docker-in-Docker) —
+    // which fails inside our already-containerized backend with "spawnSync
+    // docker ENOENT". HyperFrames detects /.dockerenv on its own and applies
+    // container-friendly Chrome flags (--no-sandbox, --disable-dev-shm-usage)
+    // automatically. The Chrome binary is located via env var
+    // PRODUCER_HEADLESS_SHELL_PATH (set in the Dockerfile to /usr/bin/chromium).
+    const proc = spawn(process.execPath, [cliPath, "render", tmpDir, "-o", outPath, "--quiet"], {
       stdio: ["ignore", "ignore", "pipe"],
     })
     let settled = false

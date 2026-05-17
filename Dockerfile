@@ -4,11 +4,17 @@ WORKDIR /app
 
 # System dependencies:
 #   - ffmpeg: HyperFrames audio mix + final MP4 encode
-#   - Chrome runtime libs: headless-shell needs glibc + a stack of X/font libs
-#     (Alpine + musl can't run the prebuilt Chrome binary HyperFrames downloads,
-#     which is why this image is Debian slim, not Alpine).
+#   - chromium + its runtime libs: HyperFrames renders templates via headless
+#     Chrome. We use the system chromium package so we don't need to manage
+#     Puppeteer's chrome-headless-shell download/cache path (HyperFrames
+#     probes its own cache path that doesn't match Puppeteer's, so the
+#     simpler answer is "give it a system Chrome and tell it where").
+#   - The libxss / libnss / libgtk packages are dragged in transitively by
+#     chromium on Bookworm — listing them explicitly so future image bumps
+#     don't silently lose them.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ffmpeg \
+      chromium \
       ca-certificates \
       fonts-liberation \
       libasound2 \
@@ -46,17 +52,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       xdg-utils \
     && rm -rf /var/lib/apt/lists/*
 
+# Point HyperFrames at the system chromium so it doesn't probe its own
+# puppeteer cache path (which doesn't get populated by `apt-get install`).
+# Source: hyperframes/dist/cli.js reads `env("PRODUCER_HEADLESS_SHELL_PATH")`.
+ENV PRODUCER_HEADLESS_SHELL_PATH=/usr/bin/chromium
+
 # Install Node deps
 COPY package.json yarn.lock .yarnrc.yml ./
 COPY .yarn .yarn
 RUN yarn install --immutable
-
-# Pre-download chrome-headless-shell into HyperFrames' cache dir so the first
-# render doesn't try to download Chrome at runtime (which fails on cold start
-# and shows up as ENOENT spawning the binary). Cache location matches what
-# HyperFrames probes for: /root/.cache/hyperframes/chrome
-RUN PUPPETEER_CACHE_DIR=/root/.cache/hyperframes/chrome \
-    npx -y @puppeteer/browsers install chrome-headless-shell@stable
 
 # Copy source + build (backend + admin dashboard)
 COPY . .
