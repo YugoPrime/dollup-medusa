@@ -2,6 +2,9 @@ FROM node:20-alpine
 
 WORKDIR /app
 
+# Install system dependencies (FFmpeg for story video rendering)
+RUN apk add --no-cache ffmpeg
+
 # Install dependencies
 COPY package.json yarn.lock .yarnrc.yml ./
 COPY .yarn .yarn
