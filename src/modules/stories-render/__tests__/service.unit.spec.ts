@@ -12,7 +12,7 @@ async function cleanup(tmpTemplateDir: string) {
 
 describe("StoriesRenderModuleService", () => {
   it("materializes template into tmpdir with inputs injected", async () => {
-    const svc = new StoriesRenderModuleService({ templatesRoot: TEMPLATES_ROOT, skipCli: true })
+    const svc = new StoriesRenderModuleService(null, { templatesRoot: TEMPLATES_ROOT, skipCli: true })
     const tmpDir = await svc.materializeTemplate("in-stock-hero", {
       slot_inputs: { hero: "https://example.com/test.jpg" },
       text_overrides: { headline: "MY HEADLINE" },
@@ -25,7 +25,7 @@ describe("StoriesRenderModuleService", () => {
   })
 
   it("uses default text when override is absent", async () => {
-    const svc = new StoriesRenderModuleService({ templatesRoot: TEMPLATES_ROOT, skipCli: true })
+    const svc = new StoriesRenderModuleService(null, { templatesRoot: TEMPLATES_ROOT, skipCli: true })
     const tmpDir = await svc.materializeTemplate("in-stock-hero", {
       slot_inputs: { hero: "x" },
       text_overrides: {},
@@ -36,14 +36,14 @@ describe("StoriesRenderModuleService", () => {
   })
 
   it("validates required slots", async () => {
-    const svc = new StoriesRenderModuleService({ templatesRoot: TEMPLATES_ROOT, skipCli: true })
+    const svc = new StoriesRenderModuleService(null, { templatesRoot: TEMPLATES_ROOT, skipCli: true })
     await expect(
       svc.materializeTemplate("in-stock-hero", { slot_inputs: {}, text_overrides: {} }),
     ).rejects.toThrow(/Required slot 'hero' is empty/)
   })
 
   it("copies the brand directory next to the materialized template", async () => {
-    const svc = new StoriesRenderModuleService({ templatesRoot: TEMPLATES_ROOT, skipCli: true })
+    const svc = new StoriesRenderModuleService(null, { templatesRoot: TEMPLATES_ROOT, skipCli: true })
     const tmpDir = await svc.materializeTemplate("in-stock-hero", {
       slot_inputs: { hero: "x" },
       text_overrides: {},

@@ -29,10 +29,16 @@ export default class StoriesRenderModuleService {
   private readonly skipCli: boolean
   uploadToR2: R2Uploader | null
 
-  constructor(opts: ServiceOptions = {}) {
-    this.templatesRoot = opts.templatesRoot ?? path.resolve(process.cwd(), "src/story-templates")
-    this.uploadToR2 = opts.uploadToR2 ?? null
-    this.skipCli = opts.skipCli ?? false
+  // Medusa registers module services with awilix in PROXY mode: the first
+  // constructor arg is the container proxy, the second is the plain options
+  // object from medusa-config. We ignore the container and read options from
+  // the second arg. Touching properties of the proxy (even via `?.`) would
+  // trigger awilix to resolve those names from the container and crash boot.
+  constructor(_container: unknown, opts: ServiceOptions = {}) {
+    const o = opts ?? {}
+    this.templatesRoot = o.templatesRoot ?? path.resolve(process.cwd(), "src/story-templates")
+    this.uploadToR2 = o.uploadToR2 ?? null
+    this.skipCli = o.skipCli ?? false
   }
 
   async list(): Promise<TemplateMeta[]> {

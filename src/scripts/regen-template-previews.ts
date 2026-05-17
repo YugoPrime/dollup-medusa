@@ -40,7 +40,7 @@ const SAMPLE_TEXT: Record<string, string> = {
 }
 
 async function main() {
-  const svc = new StoriesRenderModuleService({ templatesRoot: ROOT, skipCli: true })
+  const svc = new StoriesRenderModuleService(null, { templatesRoot: ROOT, skipCli: true })
   const templates = await svc.list()
   for (const template of templates) {
     const slotInputs = Object.fromEntries(
