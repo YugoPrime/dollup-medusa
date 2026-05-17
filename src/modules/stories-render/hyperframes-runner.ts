@@ -30,7 +30,17 @@ export async function spawnRender(args: SpawnRenderArgs): Promise<void> {
   const { tmpDir, outPath, timeoutMs = 60_000 } = args
   return new Promise((resolve, reject) => {
     const cliPath = path.resolve(process.cwd(), "node_modules/hyperframes/dist/cli.js")
-    const proc = spawn(process.execPath, [cliPath, "render", tmpDir, "-o", outPath, "--quiet"], {
+    // --docker tells HyperFrames to use container-friendly Chrome flags
+    // (--no-sandbox, --disable-dev-shm-usage, --disable-gpu) and adjusts its
+    // capture pipeline for the limited resources of a container. Without it
+    // the browser launches but produces ~80px-wide garbage frames that ffmpeg
+    // can't encode (HyperFrames itself prints "Try --docker for containerized
+    // rendering" in the error tail). Opt out locally with HYPERFRAMES_LOCAL=1.
+    const cliArgs = [cliPath, "render", tmpDir, "-o", outPath, "--quiet"]
+    if (process.env.HYPERFRAMES_LOCAL !== "1") {
+      cliArgs.push("--docker")
+    }
+    const proc = spawn(process.execPath, cliArgs, {
       stdio: ["ignore", "ignore", "pipe"],
     })
     let settled = false
