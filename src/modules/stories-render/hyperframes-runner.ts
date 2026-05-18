@@ -28,6 +28,8 @@ export type SpawnRenderArgs = {
   fps?: number
   quality?: RenderQuality
   useDocker?: boolean
+  /** Slot ID used to tag log lines so multiple in-flight renders can be told apart. */
+  slotId?: string
 }
 
 type RenderQuality = "draft" | "standard" | "high"
@@ -101,7 +103,8 @@ export function buildRenderCliArgs(args: SpawnRenderArgs): string[] {
 }
 
 export async function spawnRender(args: SpawnRenderArgs): Promise<void> {
-  const { tmpDir, outPath, timeoutMs = 60_000 } = args
+  const { tmpDir, outPath, timeoutMs = 60_000, slotId } = args
+  const startedAt = Date.now()
   return new Promise((resolve, reject) => {
     // NOTE: --docker is intentionally NOT passed. That flag tells HyperFrames
     // to spin up its OWN Docker container for rendering (Docker-in-Docker) -
@@ -111,20 +114,38 @@ export async function spawnRender(args: SpawnRenderArgs): Promise<void> {
     // automatically. The Chrome binary is located via env var
     // PRODUCER_HEADLESS_SHELL_PATH (set in the Dockerfile).
     const detached = process.platform !== "win32"
-    const proc = spawn(process.execPath, buildRenderCliArgs({ ...args, tmpDir, outPath }), {
+    const cliArgs = buildRenderCliArgs({ ...args, tmpDir, outPath })
+    const childEnv = {
+      ...process.env,
+      HYPERFRAMES_NO_UPDATE_CHECK: "1",
+      PRODUCER_ENABLE_STREAMING_ENCODE:
+        process.env.PRODUCER_ENABLE_STREAMING_ENCODE ?? "false",
+      PRODUCER_FORCE_SCREENSHOT:
+        process.env.PRODUCER_FORCE_SCREENSHOT ?? "true",
+      PRODUCER_MAX_CONCURRENT_RENDERS:
+        process.env.PRODUCER_MAX_CONCURRENT_RENDERS ?? "1",
+    }
+    const proc = spawn(process.execPath, cliArgs, {
       detached,
-      env: {
-        ...process.env,
-        HYPERFRAMES_NO_UPDATE_CHECK: "1",
-        PRODUCER_ENABLE_STREAMING_ENCODE:
-          process.env.PRODUCER_ENABLE_STREAMING_ENCODE ?? "false",
-        PRODUCER_FORCE_SCREENSHOT:
-          process.env.PRODUCER_FORCE_SCREENSHOT ?? "true",
-        PRODUCER_MAX_CONCURRENT_RENDERS:
-          process.env.PRODUCER_MAX_CONCURRENT_RENDERS ?? "1",
-      },
+      env: childEnv,
       stdio: ["ignore", "ignore", "pipe"],
     })
+
+    logRunnerEvent("spawn", {
+      slotId,
+      pid: proc.pid,
+      detached,
+      cmd: `${process.execPath} ${cliArgs.join(" ")}`,
+      chromium_path: process.env.PRODUCER_HEADLESS_SHELL_PATH ?? null,
+      force_screenshot: childEnv.PRODUCER_FORCE_SCREENSHOT,
+      streaming_encode: childEnv.PRODUCER_ENABLE_STREAMING_ENCODE,
+      max_concurrent_renders: childEnv.PRODUCER_MAX_CONCURRENT_RENDERS,
+      render_quality: process.env.RENDER_QUALITY ?? "standard",
+      render_workers: process.env.RENDER_WORKERS ?? "1",
+      render_fps: process.env.RENDER_FPS ?? "30",
+      timeout_ms: timeoutMs,
+    })
+
     let settled = false
     let stderrBuf = ""
 
@@ -137,6 +158,17 @@ export async function spawnRender(args: SpawnRenderArgs): Promise<void> {
     }
 
     const timer = setTimeout(() => {
+      logRunnerEvent("timeout", {
+        slotId,
+        pid: proc.pid,
+        timeout_ms: timeoutMs,
+        elapsed_ms: Date.now() - startedAt,
+        stderr_bytes: stderrBuf.length,
+        // Dump the FULL raw stderr accumulated so far. Coolify logs are the
+        // only place we'll see whatever chromium/ffmpeg was complaining about
+        // before we SIGKILL'd the process group.
+        stderr_raw: stderrBuf,
+      })
       killRenderProcess(proc.pid, detached)
       finish(new RenderTimeoutError(timeoutMs))
     }, timeoutMs)
@@ -147,12 +179,65 @@ export async function spawnRender(args: SpawnRenderArgs): Promise<void> {
         stderrBuf = stderrBuf.slice(-STDERR_BUFFER_LIMIT)
       }
     })
-    proc.on("error", (err) => finish(err))
+    proc.on("error", (err) => {
+      logRunnerEvent("spawn_error", {
+        slotId,
+        pid: proc.pid,
+        error_name: err.name,
+        error_message: err.message,
+      })
+      finish(err)
+    })
     proc.on("exit", (code) => {
-      if (code === 0) finish()
-      else finish(new RenderCliError(normalizeRenderStderr(stderrBuf), code ?? -1))
+      const durationMs = Date.now() - startedAt
+      if (code === 0) {
+        logRunnerEvent("exit_ok", {
+          slotId,
+          pid: proc.pid,
+          duration_ms: durationMs,
+          stderr_bytes: stderrBuf.length,
+        })
+        finish()
+        return
+      }
+      // Dump FULL raw stderr (not the normalized tail) so we see whatever
+      // ffmpeg/chromium actually wrote — the slot.metadata copy only keeps
+      // the cleaned-up last 4KB after ffmpeg progress lines are stripped.
+      logRunnerEvent("exit_fail", {
+        slotId,
+        pid: proc.pid,
+        exit_code: code,
+        duration_ms: durationMs,
+        stderr_bytes: stderrBuf.length,
+        stderr_raw: stderrBuf,
+        stderr_normalized: normalizeRenderStderr(stderrBuf),
+      })
+      finish(new RenderCliError(normalizeRenderStderr(stderrBuf), code ?? -1))
     })
   })
+}
+
+function logRunnerEvent(
+  event:
+    | "spawn"
+    | "spawn_error"
+    | "timeout"
+    | "exit_ok"
+    | "exit_fail",
+  extra: Record<string, unknown>,
+): void {
+  const payload = {
+    msg: "[stories-render:runner]",
+    event,
+    ts: new Date().toISOString(),
+    ...extra,
+  }
+  const line = JSON.stringify(payload)
+  if (event === "exit_fail" || event === "spawn_error" || event === "timeout") {
+    console.error(line)
+  } else {
+    console.log(line)
+  }
 }
 
 export function normalizeRenderStderr(stderr: string): string {

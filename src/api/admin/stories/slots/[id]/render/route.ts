@@ -17,6 +17,17 @@ type RenderBody = Partial<RenderRequest>
 export async function POST(req: AuthenticatedMedusaRequest, res: MedusaResponse) {
   const slotId = req.params.id
   const body = (req.body ?? {}) as RenderBody
+  console.log(
+    JSON.stringify({
+      msg: "[stories-render:route]",
+      event: "request",
+      slotId,
+      template_slug: body.template_slug,
+      slot_input_keys: body.slot_inputs ? Object.keys(body.slot_inputs) : [],
+      text_override_keys: body.text_overrides ? Object.keys(body.text_overrides) : [],
+      ts: new Date().toISOString(),
+    }),
+  )
 
   if (typeof body.template_slug !== "string" || body.template_slug.length === 0) {
     res.status(400).json({ message: "template_slug required" })
@@ -79,8 +90,29 @@ export async function POST(req: AuthenticatedMedusaRequest, res: MedusaResponse)
           render_started_at: null,
           render_error: null,
         })
+        console.log(
+          JSON.stringify({
+            msg: "[stories-render:route]",
+            event: "render_succeeded",
+            slotId,
+            mp4_url: render.mp4_url,
+            duration_ms: render.duration_ms,
+            ts: new Date().toISOString(),
+          }),
+        )
       } catch (err) {
-        console.error("[stories-render] background render failed", err)
+        const e = err as { name?: string; message?: string; renderStage?: string }
+        console.error(
+          JSON.stringify({
+            msg: "[stories-render:route]",
+            event: "render_failed",
+            slotId,
+            stage: e.renderStage ?? null,
+            error_name: e.name,
+            error_message: e.message,
+            ts: new Date().toISOString(),
+          }),
+        )
         await persistRenderError(stories, slotId, err)
       } finally {
         inFlight.delete(slotId)
@@ -128,12 +160,23 @@ async function persistRenderError(
   slotId: string,
   err: unknown,
 ): Promise<void> {
-  const e = err as { name?: string; message?: string; stderrTail?: string }
+  const e = err as {
+    name?: string
+    message?: string
+    stderrTail?: string
+    exitCode?: number
+    renderStage?: string
+  }
   try {
     await stories.updateSlotMetadata(slotId, {
       render_error: {
         message: e.message ?? "Render failed",
         name: e.name ?? "Error",
+        // Which pipeline stage threw — load_template / materialize /
+        // spawn_render / audio_mix / r2_upload. Admin UI uses this to tell
+        // the user where it died instead of just "render failed".
+        stage: e.renderStage ?? null,
+        exit_code: e.exitCode ?? null,
         stderr_tail: e.stderrTail ?? null,
         failed_at: new Date().toISOString(),
       },

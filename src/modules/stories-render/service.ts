@@ -24,6 +24,40 @@ export class TextOverrideTooLongError extends Error {
   name = "TextOverrideTooLongError"
 }
 
+export type RenderStage =
+  | "validate"
+  | "load_template"
+  | "materialize"
+  | "spawn_render"
+  | "audio_mix"
+  | "r2_upload"
+
+function logStage(
+  slotId: string,
+  stage: RenderStage,
+  event: "start" | "done" | "skipped" | "error",
+  extra: Record<string, unknown> = {},
+): void {
+  const payload = {
+    msg: "[stories-render]",
+    slotId,
+    stage,
+    event,
+    ts: new Date().toISOString(),
+    ...extra,
+  }
+  const line = JSON.stringify(payload)
+  if (event === "error") console.error(line)
+  else console.log(line)
+}
+
+function tagError(err: unknown, stage: RenderStage): never {
+  if (err && typeof err === "object") {
+    Object.assign(err, { renderStage: stage })
+  }
+  throw err
+}
+
 export default class StoriesRenderModuleService {
   private readonly templatesRoot: string
   private readonly skipCli: boolean
@@ -87,13 +121,53 @@ export default class StoriesRenderModuleService {
     if (!this.uploadToR2) throw new Error("uploadToR2 not configured")
 
     const startedAt = Date.now()
-    const meta = await this.get(req.template_slug)
-    const tmpTemplateDir = await this.materializeTemplate(req.template_slug, {
-      slot_inputs: req.slot_inputs,
-      text_overrides: req.text_overrides,
+    const elapsed = () => Date.now() - startedAt
+
+    logStage(slotId, "load_template", "start", {
+      template_slug: req.template_slug,
+      slot_input_keys: Object.keys(req.slot_inputs ?? {}),
+      text_override_keys: Object.keys(req.text_overrides ?? {}),
     })
+    let meta: TemplateMeta
+    try {
+      meta = await this.get(req.template_slug)
+    } catch (err) {
+      logStage(slotId, "load_template", "error", {
+        elapsed_ms: elapsed(),
+        error_name: (err as Error).name,
+        error_message: (err as Error).message,
+      })
+      tagError(err, "load_template")
+    }
+    logStage(slotId, "load_template", "done", {
+      elapsed_ms: elapsed(),
+      duration_seconds: meta.duration_seconds,
+      slot_count: meta.slots.length,
+      text_override_count: meta.text_overrides.length,
+    })
+
+    logStage(slotId, "materialize", "start", { elapsed_ms: elapsed() })
+    let tmpTemplateDir: string
+    try {
+      tmpTemplateDir = await this.materializeTemplate(req.template_slug, {
+        slot_inputs: req.slot_inputs,
+        text_overrides: req.text_overrides,
+      })
+    } catch (err) {
+      logStage(slotId, "materialize", "error", {
+        elapsed_ms: elapsed(),
+        error_name: (err as Error).name,
+        error_message: (err as Error).message,
+      })
+      tagError(err, "materialize")
+    }
     const rootDir = path.dirname(tmpTemplateDir)
     const outPath = path.join(rootDir, "render.mp4")
+    logStage(slotId, "materialize", "done", {
+      elapsed_ms: elapsed(),
+      tmp_dir: tmpTemplateDir,
+      out_path: outPath,
+    })
 
     try {
       // 180s default. Cold-start renders need ~45-60s just for chrome-headless-shell
@@ -104,30 +178,73 @@ export default class StoriesRenderModuleService {
         process.env.RENDER_TIMEOUT_MS ?? "180000",
         10,
       )
-      await spawnRender({ tmpDir: tmpTemplateDir, outPath, timeoutMs })
+      logStage(slotId, "spawn_render", "start", {
+        elapsed_ms: elapsed(),
+        timeout_ms: timeoutMs,
+      })
+      try {
+        await spawnRender({ tmpDir: tmpTemplateDir, outPath, timeoutMs, slotId })
+      } catch (err) {
+        const e = err as { name?: string; message?: string; stderrTail?: string; exitCode?: number }
+        logStage(slotId, "spawn_render", "error", {
+          elapsed_ms: elapsed(),
+          error_name: e.name,
+          error_message: e.message,
+          exit_code: e.exitCode,
+          stderr_tail: e.stderrTail,
+        })
+        tagError(err, "spawn_render")
+      }
+      logStage(slotId, "spawn_render", "done", { elapsed_ms: elapsed() })
 
       // Mix a brand audio track under the silent render. Graceful no-op if
       // no tracks are in _brand/audio/; logs and continues on mix error so a
       // silent MP4 still ships rather than failing the whole render.
+      logStage(slotId, "audio_mix", "start", { elapsed_ms: elapsed() })
       try {
-        await applyAudioToRender({
+        const trackName = await applyAudioToRender({
           slotId,
           videoPath: outPath,
           durationSeconds: meta.duration_seconds,
           audioDir: path.join(this.templatesRoot, "_brand", "audio"),
         })
+        logStage(slotId, "audio_mix", trackName ? "done" : "skipped", {
+          elapsed_ms: elapsed(),
+          track: trackName,
+        })
       } catch (audioErr) {
-        console.error("[stories-render] audio mix failed, shipping silent MP4:", (audioErr as Error).message)
+        // Audio failure is non-fatal — ship the silent MP4 instead.
+        logStage(slotId, "audio_mix", "skipped", {
+          elapsed_ms: elapsed(),
+          reason: "mix_failed",
+          error_message: (audioErr as Error).message,
+        })
       }
 
-      const mp4Url = await this.uploadToR2(outPath, r2KeyFor(slotId, renderHash(req)))
+      logStage(slotId, "r2_upload", "start", { elapsed_ms: elapsed() })
+      let mp4Url: string
+      try {
+        mp4Url = await this.uploadToR2(outPath, r2KeyFor(slotId, renderHash(req)))
+      } catch (err) {
+        logStage(slotId, "r2_upload", "error", {
+          elapsed_ms: elapsed(),
+          error_name: (err as Error).name,
+          error_message: (err as Error).message,
+        })
+        tagError(err, "r2_upload")
+      }
+      logStage(slotId, "r2_upload", "done", {
+        elapsed_ms: elapsed(),
+        mp4_url: mp4Url,
+      })
+
       return {
         mp4_url: mp4Url,
         template_slug: req.template_slug,
         slot_inputs: req.slot_inputs,
         text_overrides: req.text_overrides,
         generated_at: new Date().toISOString(),
-        duration_ms: Date.now() - startedAt,
+        duration_ms: elapsed(),
         width: 1080,
         height: 1920,
         fps: resolveRenderFps(),
