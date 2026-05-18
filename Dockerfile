@@ -50,12 +50,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       xdg-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# Install upstream chrome-headless-shell into /opt/headless-shell. Resolve
-# whichever exact subdir @puppeteer/browsers produces (path includes the
-# version number which we don't want to hard-code) and symlink the binary
-# to /usr/local/bin so PRODUCER_HEADLESS_SHELL_PATH can be stable.
-RUN PUPPETEER_CACHE_DIR=/opt/headless-shell \
-      npx -y @puppeteer/browsers install chrome-headless-shell@stable && \
+# Install upstream chrome-headless-shell into /opt/headless-shell. The CLI
+# uses --path (not PUPPETEER_CACHE_DIR — that env var is for the Puppeteer
+# runtime framework, not the @puppeteer/browsers CLI). Resolve whichever
+# exact subdir the install produced (path includes the version number which
+# we don't want to hard-code) and symlink the binary to /usr/local/bin so
+# PRODUCER_HEADLESS_SHELL_PATH can be stable across version bumps.
+RUN npx -y @puppeteer/browsers install chrome-headless-shell@stable --path /opt/headless-shell && \
     SHELL_BIN=$(find /opt/headless-shell -type f -name 'chrome-headless-shell' -executable | head -1) && \
     test -x "$SHELL_BIN" && \
     ln -sf "$SHELL_BIN" /usr/local/bin/chrome-headless-shell
