@@ -4,17 +4,14 @@ WORKDIR /app
 
 # System dependencies:
 #   - ffmpeg: HyperFrames audio mix + final MP4 encode
-#   - chromium + its runtime libs: HyperFrames renders templates via headless
-#     Chrome. We use the system chromium package so we don't need to manage
-#     Puppeteer's chrome-headless-shell download/cache path (HyperFrames
-#     probes its own cache path that doesn't match Puppeteer's, so the
-#     simpler answer is "give it a system Chrome and tell it where").
-#   - The libxss / libnss / libgtk packages are dragged in transitively by
-#     chromium on Bookworm — listing them explicitly so future image bumps
-#     don't silently lose them.
+#   - Chrome runtime libs: chrome-headless-shell needs the full X / GTK /
+#     fontconfig / nss / atk stack to launch. We do NOT install Debian's
+#     `chromium` package — that build is stripped of HeadlessExperimental
+#     APIs that HyperFrames uses; pages crash with "Target closed" during
+#     Page.captureScreenshot. We install upstream chrome-headless-shell
+#     via @puppeteer/browsers instead (next RUN block).
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ffmpeg \
-      chromium \
       ca-certificates \
       fonts-liberation \
       libasound2 \
@@ -52,25 +49,32 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       xdg-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# Point HyperFrames at the system chromium so it doesn't probe its own
-# puppeteer cache path (which doesn't get populated by `apt-get install`).
-# Source: hyperframes/dist/cli.js reads `env("PRODUCER_HEADLESS_SHELL_PATH")`.
-ENV PRODUCER_HEADLESS_SHELL_PATH=/usr/bin/chromium
+# Install upstream chrome-headless-shell into /opt/headless-shell. Resolve
+# whichever exact subdir @puppeteer/browsers produces (path includes the
+# version number which we don't want to hard-code) and symlink the binary
+# to /usr/local/bin so PRODUCER_HEADLESS_SHELL_PATH can be stable.
+RUN PUPPETEER_CACHE_DIR=/opt/headless-shell \
+      npx -y @puppeteer/browsers install chrome-headless-shell@stable && \
+    SHELL_BIN=$(find /opt/headless-shell -type f -name 'chrome-headless-shell' -executable | head -1) && \
+    test -x "$SHELL_BIN" && \
+    ln -sf "$SHELL_BIN" /usr/local/bin/chrome-headless-shell
+
+# Tell HyperFrames where to find the binary. hyperframes/dist/cli.js reads
+# this env var first before probing its own cache path.
+ENV PRODUCER_HEADLESS_SHELL_PATH=/usr/local/bin/chrome-headless-shell
 
 # Install Node deps + immediately purge the yarn berry cache. The cache
 # holds .zip copies of every installed package (~1.4GB on this project)
 # which gets baked into the image layer and isn't needed at runtime.
-# Without this, every Coolify rebuild adds ~3GB to the host's image
-# store and we eventually hit "no space left on device" at unpack time.
 COPY package.json yarn.lock .yarnrc.yml ./
 COPY .yarn .yarn
 RUN yarn install --immutable && \
-    rm -rf .yarn/cache /root/.yarn /root/.cache/yarn 2>/dev/null || true
+    rm -rf .yarn/cache /root/.yarn/berry/cache /root/.cache/yarn 2>/dev/null || true
 
 # Copy source + build (backend + admin dashboard)
 COPY . .
 RUN yarn build && \
-    rm -rf .yarn/cache /root/.yarn /root/.cache/yarn 2>/dev/null || true
+    rm -rf .yarn/cache /root/.yarn/berry/cache /root/.cache/yarn 2>/dev/null || true
 
 # Ensure admin build is in the expected location
 RUN mkdir -p /app/public && \
