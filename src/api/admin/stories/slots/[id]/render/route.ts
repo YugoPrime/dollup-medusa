@@ -60,10 +60,6 @@ export async function POST(req: AuthenticatedMedusaRequest, res: MedusaResponse)
 
     inFlight.add(slotId)
 
-    const renderSvc =
-      req.scope.resolve<StoriesRenderModuleService>(STORIES_RENDER_MODULE)
-    renderSvc.uploadToR2 = uploadStoryRenderToR2
-
     await stories.updateSlotMetadata(slotId, {
       render_started_at: new Date().toISOString(),
       render_template_slug: body.template_slug,
@@ -75,6 +71,34 @@ export async function POST(req: AuthenticatedMedusaRequest, res: MedusaResponse)
       slot_inputs: body.slot_inputs ?? {},
       text_overrides: body.text_overrides ?? {},
     }
+
+    // When STORIES_RENDER_REMOTE_ONLY=true the Coolify container does not
+    // render — the local CLI on a developer laptop polls and renders. The
+    // render_started_at stamp above stays set so admin still shows the
+    // "rendering" pill; the local CLI clears it once it writes the mp4.
+    if (process.env.STORIES_RENDER_REMOTE_ONLY === "true") {
+      console.log(
+        JSON.stringify({
+          msg: "[stories-render:route]",
+          event: "queued_for_remote",
+          slotId,
+          template_slug: body.template_slug,
+          ts: new Date().toISOString(),
+        }),
+      )
+      res.status(202).json({
+        status: "queued",
+        slot_id: slotId,
+        template_slug: body.template_slug,
+        remote: true,
+      })
+      inFlight.delete(slotId)
+      return
+    }
+
+    const renderSvc =
+      req.scope.resolve<StoriesRenderModuleService>(STORIES_RENDER_MODULE)
+    renderSvc.uploadToR2 = uploadStoryRenderToR2
 
     res.status(202).json({
       status: "queued",

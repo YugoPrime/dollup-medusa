@@ -70,7 +70,20 @@ export async function POST(req: AuthenticatedMedusaRequest, res: MedusaResponse)
     skipped_posted: skippedPostedCount,
     skipped_already_rendered: skippedAlreadyRenderedCount,
     force,
+    remote: process.env.STORIES_RENDER_REMOTE_ONLY === "true",
   })
+
+  // STORIES_RENDER_REMOTE_ONLY=true means the local CLI is doing the actual
+  // rendering; we just release the lock and let admin polling pick up the
+  // resulting mp4 once the laptop's renderer catches up.
+  if (process.env.STORIES_RENDER_REMOTE_ONLY === "true") {
+    const logger = req.scope.resolve(ContainerRegistrationKeys.LOGGER)
+    logger.info(
+      `[batch-render] plan ${planId} queued for remote (${queuedCount} slot${queuedCount === 1 ? "" : "s"})`,
+    )
+    planLocks.delete(planId)
+    return
+  }
 
   // Background batch. Errors here are logged but don't crash the process;
   // per-slot failures already write to slot.metadata.render_error so the

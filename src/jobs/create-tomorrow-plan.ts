@@ -104,6 +104,35 @@ export default async function createTomorrowPlan(
   const filledSlots = await stories.listStorySlots({ plan_id: plan.id })
   const noProductCount = filledSlots.filter((s) => !s.product_id).length
 
+  // When STORIES_RENDER_REMOTE_ONLY=true, the Coolify backend container does
+  // NOT attempt to render — chrome-headless-shell + ffmpeg are too heavy for
+  // a webshop-sized container (1.4 fps captured vs. 30 fps needed). Plan +
+  // product picking still runs here; rendering is handed off to the local
+  // CLI (src/scripts/local-render-stories.ts) running on a developer
+  // laptop, which polls and renders any slot without metadata.render.
+  if (process.env.STORIES_RENDER_REMOTE_ONLY === "true") {
+    logger.info(
+      `[auto-plan] ${planDate}: plan ${plan.id} created with ${filledSlots.length} slot(s), rendering deferred to local CLI (STORIES_RENDER_REMOTE_ONLY=true)`,
+    )
+    await sendTelegram(
+      [
+        `📅 <b>Plan ready for ${escapeTelegramHtml(planDate)}</b>`,
+        "",
+        `📦 Slots: ${filledSlots.length}`,
+        noProductCount > 0
+          ? `🛒 Need manual swap (no eligible product): ${noProductCount}`
+          : null,
+        "",
+        `⏳ Rendering will run on the local CLI next time it polls.`,
+        "",
+        `<a href="${ADMIN_URL}/stories/${planDate}">Open in admin</a>`,
+      ]
+        .filter((l): l is string => l !== null)
+        .join("\n"),
+    )
+    return
+  }
+
   let renderResults
   try {
     renderResults = await batchRenderPlan(container, plan.id)
