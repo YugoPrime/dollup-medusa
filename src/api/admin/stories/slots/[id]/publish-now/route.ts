@@ -2,16 +2,26 @@ import type {
   AuthenticatedMedusaRequest,
   MedusaResponse,
 } from "@medusajs/framework/http"
+import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
 
 import { isMetaIgConfigured } from "../../../../../../lib/meta-ig"
 import { publishStorySlot } from "../../../../../../lib/publish-story-slot"
+import { STORIES_MODULE } from "../../../../../../modules/stories"
+import type StoriesModuleService from "../../../../../../modules/stories/service"
 
 const inFlight = new Set<string>()
 
 /**
- * Manual "Publish now" trigger for one slot. Same publish path as the cron;
- * surfaced as an admin button on the SlotCard / slot detail page.
- * Bypasses cooldown and attempt cap (operator decision).
+ * Fire-and-forget manual "Publish now" trigger for one slot. Returns 202
+ * immediately and runs the publish in the background — the IG container
+ * submit + poll + media_publish flow can take 30-90s and overshoots
+ * upstream proxy timeouts otherwise.
+ *
+ * Result lands in slot.metadata.publish (success: { media_id,
+ * creation_id, published_at }) or slot.metadata.publish_error (failure)
+ * via publishStorySlot. Frontend polls the slot to detect both.
+ *
+ * Bypasses cron cooldown + attempt cap — operator-triggered.
  */
 export async function POST(req: AuthenticatedMedusaRequest, res: MedusaResponse) {
   const slotId = req.params.id
@@ -28,38 +38,56 @@ export async function POST(req: AuthenticatedMedusaRequest, res: MedusaResponse)
     res.status(409).json({ message: "Publish already in progress for this slot" })
     return
   }
+
+  const stories = req.scope.resolve<StoriesModuleService>(STORIES_MODULE)
+  const [slot] = await stories.listStorySlots({ id: slotId })
+  if (!slot) {
+    res.status(404).json({ message: "Slot not found" })
+    return
+  }
+  if (slot.posted_at) {
+    res.status(409).json({ message: "Slot already posted" })
+    return
+  }
+
   inFlight.add(slotId)
 
-  try {
-    const result = await publishStorySlot({ scope: req.scope, slotId })
-    if (result.ok) {
-      res.status(200).json({
-        ok: true,
-        media_id: result.media_id,
-        creation_id: result.creation_id,
-        duration_ms: result.duration_ms,
-      })
-      return
+  // Mark "publishing now" so the frontend's poller can spin a button.
+  await stories.updateSlotMetadata(slotId, {
+    publish_started_at: new Date().toISOString(),
+    publish_error: null,
+  })
+
+  res.status(202).json({
+    status: "queued",
+    slot_id: slotId,
+  })
+
+  // Background publish. publishStorySlot already writes metadata.publish
+  // or metadata.publish_error on completion.
+  void (async () => {
+    const logger = req.scope.resolve(ContainerRegistrationKeys.LOGGER)
+    try {
+      const result = await publishStorySlot({ scope: req.scope, slotId })
+      if (result.ok) {
+        logger.info(
+          `[publish-now] slot ${slotId} → media ${result.media_id} in ${result.duration_ms}ms`,
+        )
+      } else {
+        logger.error(
+          `[publish-now] slot ${slotId} failed: ${result.error}`,
+        )
+      }
+    } catch (err) {
+      logger.error(
+        `[publish-now] slot ${slotId} unexpected error: ${(err as Error).message}`,
+      )
+    } finally {
+      // Always clear the in-flight marker so a retry is possible.
+      await stories
+        .updateSlotMetadata(slotId, { publish_started_at: null })
+        .catch(() => {})
+      inFlight.delete(slotId)
     }
-    // Operator-triggered failures: surface the underlying status so the UI
-    // can show the right thing (504 timeout vs 4xx config vs 5xx Meta).
-    const status =
-      result.status && result.status >= 400 && result.status < 600
-        ? result.status
-        : 502
-    res.status(status).json({
-      ok: false,
-      message: result.error,
-      fbtrace_id: result.fbtrace_id,
-      meta_code: result.meta_code,
-      attempt_count: result.attempt_count,
-    })
-  } catch (err) {
-    console.error("[publish-now] unexpected error", err)
-    res
-      .status(500)
-      .json({ message: (err as Error)?.message ?? "Publish failed" })
-  } finally {
-    inFlight.delete(slotId)
-  }
+  })()
 }

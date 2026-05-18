@@ -103,9 +103,21 @@ export async function batchRenderPlan(
       continue
     }
 
+    // Stamp "rendering now" so per-slot pollers in the admin UI can show a
+    // spinner on this slot while it processes. Cleared on success/failure.
+    await stories.updateSlotMetadata(slot.id, {
+      render_started_at: new Date().toISOString(),
+      render_template_slug: picked.template_slug,
+      render_error: null,
+    })
+
     try {
       const render = await renderSvc.render(slot.id, picked)
-      await stories.updateSlotMetadata(slot.id, { render })
+      await stories.updateSlotMetadata(slot.id, {
+        render,
+        render_started_at: null,
+        render_error: null,
+      })
       results.push({
         slot_id: slot.id,
         slot_index: slot.slot_index,
@@ -115,7 +127,16 @@ export async function batchRenderPlan(
         duration_ms: render.duration_ms,
       })
     } catch (err) {
-      const e = err as { message?: string; stderrTail?: string }
+      const e = err as { name?: string; message?: string; stderrTail?: string }
+      await stories.updateSlotMetadata(slot.id, {
+        render_error: {
+          message: e.message ?? "Render failed",
+          name: e.name ?? "Error",
+          stderr_tail: e.stderrTail ?? null,
+          failed_at: new Date().toISOString(),
+        },
+        render_started_at: null,
+      })
       results.push({
         slot_id: slot.id,
         slot_index: slot.slot_index,

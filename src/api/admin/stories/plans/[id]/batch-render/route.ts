@@ -2,20 +2,28 @@ import type {
   AuthenticatedMedusaRequest,
   MedusaResponse,
 } from "@medusajs/framework/http"
+import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
 
-import {
-  batchRenderPlan,
-  summarizeBatch,
-} from "../../../../../../modules/stories-render/batch"
+import { STORIES_MODULE } from "../../../../../../modules/stories"
+import type StoriesModuleService from "../../../../../../modules/stories/service"
+import { batchRenderPlan } from "../../../../../../modules/stories-render/batch"
 
 type BatchBody = { force?: boolean }
 
 const planLocks = new Set<string>()
 
 /**
- * HTTP wrapper around batchRenderPlan: enforces a plan-level lock so the
- * same plan can't be batch-rendered twice in parallel, then delegates the
- * loop to the shared lib so the daily auto-plan cron uses the same logic.
+ * Fire-and-forget batch render. Validates the plan, returns 202
+ * immediately with the queued slot count, then runs the full
+ * batchRenderPlan loop in the background. Per-slot progress lands on
+ * each slot via metadata.render_started_at / metadata.render /
+ * metadata.render_error — frontend polls those by re-fetching the day's
+ * slots every few seconds.
+ *
+ * Same reasoning as the auto-render route: 6 slots × 60-120s each = ~6-12
+ * minutes of work, which overshoots every proxy timeout (Cloudflare 100s,
+ * Coolify Traefik ~60-90s). Holding the HTTP connection that long would
+ * 502 even though the renders themselves finish.
  */
 export async function POST(req: AuthenticatedMedusaRequest, res: MedusaResponse) {
   const planId = req.params.id
@@ -26,21 +34,58 @@ export async function POST(req: AuthenticatedMedusaRequest, res: MedusaResponse)
     res.status(409).json({ message: "Batch render already in progress for this plan" })
     return
   }
-  planLocks.add(planId)
 
-  try {
-    const results = await batchRenderPlan(req.scope, planId, { force })
-    const summary = summarizeBatch(results)
-    res.status(200).json({ plan_id: planId, summary, results })
-  } catch (err) {
-    const e = err as Error
-    if (/not found/i.test(e.message ?? "")) {
-      res.status(404).json({ message: e.message })
-      return
-    }
-    console.error("[batch-render] unexpected error", err)
-    res.status(500).json({ message: e.message ?? "Batch render failed" })
-  } finally {
-    planLocks.delete(planId)
+  const stories = req.scope.resolve<StoriesModuleService>(STORIES_MODULE)
+  const [plan] = await stories.listStoryPlans({ id: planId })
+  if (!plan) {
+    res.status(404).json({ message: "Plan not found" })
+    return
   }
+
+  // Quick scan so the operator sees how many slots will actually be queued.
+  // Doesn't render anything yet — that happens in the background.
+  const slots = await stories.listStorySlots({ plan_id: planId })
+  let queuedCount = 0
+  let skippedPostedCount = 0
+  let skippedAlreadyRenderedCount = 0
+  for (const s of slots) {
+    if (s.posted_at) {
+      skippedPostedCount++
+      continue
+    }
+    const hasRender =
+      (s.metadata as Record<string, unknown> | null)?.render != null
+    if (hasRender && !force) {
+      skippedAlreadyRenderedCount++
+      continue
+    }
+    queuedCount++
+  }
+
+  planLocks.add(planId)
+  res.status(202).json({
+    status: "queued",
+    plan_id: planId,
+    queued: queuedCount,
+    skipped_posted: skippedPostedCount,
+    skipped_already_rendered: skippedAlreadyRenderedCount,
+    force,
+  })
+
+  // Background batch. Errors here are logged but don't crash the process;
+  // per-slot failures already write to slot.metadata.render_error so the
+  // admin UI surfaces them naturally.
+  void (async () => {
+    const logger = req.scope.resolve(ContainerRegistrationKeys.LOGGER)
+    try {
+      await batchRenderPlan(req.scope, planId, { force })
+      logger.info(`[batch-render] plan ${planId} completed`)
+    } catch (err) {
+      logger.error(
+        `[batch-render] plan ${planId} failed: ${(err as Error).message}`,
+      )
+    } finally {
+      planLocks.delete(planId)
+    }
+  })()
 }
