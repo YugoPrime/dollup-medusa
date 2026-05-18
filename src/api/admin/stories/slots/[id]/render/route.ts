@@ -35,29 +35,60 @@ export async function POST(req: AuthenticatedMedusaRequest, res: MedusaResponse)
     return
   }
 
-  inFlight.add(slotId)
+  const stories = req.scope.resolve<StoriesModuleService>(STORIES_MODULE)
   try {
-    const stories = req.scope.resolve<StoriesModuleService>(STORIES_MODULE)
     const [slot] = await stories.listStorySlots({ id: slotId })
     if (!slot) {
       res.status(404).json({ message: "Slot not found" })
       return
     }
+    if (slot.posted_at) {
+      res.status(409).json({ message: "Slot is already posted" })
+      return
+    }
+
+    inFlight.add(slotId)
 
     const renderSvc =
       req.scope.resolve<StoriesRenderModuleService>(STORIES_RENDER_MODULE)
     renderSvc.uploadToR2 = uploadStoryRenderToR2
 
-    const render = await renderSvc.render(slotId, {
+    await stories.updateSlotMetadata(slotId, {
+      render_started_at: new Date().toISOString(),
+      render_template_slug: body.template_slug,
+      render_error: null,
+    })
+
+    const renderRequest: RenderRequest = {
       template_slug: body.template_slug,
       slot_inputs: body.slot_inputs ?? {},
       text_overrides: body.text_overrides ?? {},
+    }
+
+    res.status(202).json({
+      status: "queued",
+      slot_id: slotId,
+      template_slug: body.template_slug,
     })
-    await stories.updateSlotMetadata(slotId, { render })
-    res.status(200).json({ render })
+
+    void (async () => {
+      try {
+        const render = await renderSvc.render(slotId, renderRequest)
+        await stories.updateSlotMetadata(slotId, {
+          render,
+          render_started_at: null,
+          render_error: null,
+        })
+      } catch (err) {
+        console.error("[stories-render] background render failed", err)
+        await persistRenderError(stories, slotId, err)
+      } finally {
+        inFlight.delete(slotId)
+      }
+    })()
   } catch (err) {
+    await persistRenderError(stories, slotId, err)
     sendRenderError(res, err)
-  } finally {
     inFlight.delete(slotId)
   }
 }
@@ -90,4 +121,25 @@ function sendRenderError(res: MedusaResponse, err: unknown): void {
   }
   console.error("[stories-render] unexpected error", err)
   res.status(500).json({ message: e.message ?? "Render failed" })
+}
+
+async function persistRenderError(
+  stories: StoriesModuleService,
+  slotId: string,
+  err: unknown,
+): Promise<void> {
+  const e = err as { name?: string; message?: string; stderrTail?: string }
+  try {
+    await stories.updateSlotMetadata(slotId, {
+      render_error: {
+        message: e.message ?? "Render failed",
+        name: e.name ?? "Error",
+        stderr_tail: e.stderrTail ?? null,
+        failed_at: new Date().toISOString(),
+      },
+      render_started_at: null,
+    })
+  } catch (metadataErr) {
+    console.error("[stories-render] failed to persist render error", metadataErr)
+  }
 }

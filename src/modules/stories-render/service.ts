@@ -3,7 +3,7 @@ import os from "node:os"
 import path from "node:path"
 
 import { applyAudioToRender } from "./audio-mixer"
-import { spawnRender } from "./hyperframes-runner"
+import { resolveRenderFps, spawnRender } from "./hyperframes-runner"
 import { renderHash, r2KeyFor } from "./idempotency"
 import { listTemplates, loadTemplate } from "./template-loader"
 import type { RenderRequest, RenderResult, TemplateMeta } from "./types"
@@ -130,7 +130,7 @@ export default class StoriesRenderModuleService {
         duration_ms: Date.now() - startedAt,
         width: 1080,
         height: 1920,
-        fps: 30,
+        fps: resolveRenderFps(),
       }
     } finally {
       await fs.rm(rootDir, { recursive: true, force: true })
@@ -191,4 +191,3 @@ function injectText(html: string, overrideId: string, value: string): string {
   )
   return html.replace(re, `$1${escapeHtml(value)}$3`)
 }
-
