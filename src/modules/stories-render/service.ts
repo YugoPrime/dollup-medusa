@@ -96,7 +96,15 @@ export default class StoriesRenderModuleService {
     const outPath = path.join(rootDir, "render.mp4")
 
     try {
-      await spawnRender({ tmpDir: tmpTemplateDir, outPath, timeoutMs: 60_000 })
+      // 180s default. Cold-start renders need ~45-60s just for chrome-headless-shell
+      // launch + page calibration + capturing 150-240 frames + ffmpeg encode. Add a
+      // safety margin so the first render after a Coolify rebuild doesn't get
+      // SIGKILL'd. Override with RENDER_TIMEOUT_MS env var when tuning.
+      const timeoutMs = Number.parseInt(
+        process.env.RENDER_TIMEOUT_MS ?? "180000",
+        10,
+      )
+      await spawnRender({ tmpDir: tmpTemplateDir, outPath, timeoutMs })
 
       // Mix a brand audio track under the silent render. Graceful no-op if
       // no tracks are in _brand/audio/; logs and continues on mix error so a
