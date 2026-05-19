@@ -94,6 +94,21 @@ function pickCutout(colors: SnapshotVariant[]): string | null {
 }
 
 /**
+ * True when any variant has a "-r" real / on-model shot. cutout-spotlight is
+ * intentionally suppressed when a real shot exists — lifestyle-overlay gives
+ * a stronger story for products with real photography. Cutout is the fallback
+ * for studio-only products.
+ */
+function hasRealShot(colors: SnapshotVariant[]): boolean {
+  for (const c of colors) {
+    for (const url of c.image_urls) {
+      if (classifyImageKind(url) === "real") return true
+    }
+  }
+  return false
+}
+
+/**
  * Returns the best image to plug into the lifestyle-overlay template. This is
  * the ONE template that's allowed to feature a real / on-model shot — that's
  * its whole purpose. Preference order:
@@ -257,12 +272,12 @@ export function pickTemplate(
     }
   }
 
-  // If a transparent-bg cutout PNG is available, use the editorial spotlight
-  // template instead of the plain in-stock-hero / lifestyle rotation. Cutouts
-  // are opt-in per product (uploaded via the inventory-audit rembg pipeline),
-  // so this branch only fires when explicitly enabled.
+  // cutout-spotlight is the fallback for products with NO real / lifestyle
+  // background shot. When a "-r" image exists, lifestyle-overlay's stronger
+  // story wins (see SINGLE_IMAGE_ROTATION). Cutout PNG is still gated —
+  // without one, no spotlight even when the product is studio-only.
   const cutoutUrl = pickCutout(colors)
-  if (cutoutUrl) {
+  if (cutoutUrl && !hasRealShot(colors)) {
     return {
       template_slug: "cutout-spotlight",
       slot_inputs: { product_cutout: cutoutUrl },

@@ -85,6 +85,17 @@ export function isIntimatesProduct(p: any): boolean {
 }
 
 export function toProductLike(p: any): ProductLike {
+  // The cutout PNG is stored on product.metadata (NOT product.images) so it
+  // stays out of the storefront gallery. We inject it into every variant's
+  // images list so the picker / snapshot can see it and fire the
+  // cutout-spotlight template. classifyImageKind recognises the `-cutout`
+  // filename suffix.
+  const metadata = (p.metadata ?? null) as Record<string, unknown> | null
+  const cutoutUrl =
+    typeof metadata?.cutout_image_url === "string" && metadata.cutout_image_url
+      ? metadata.cutout_image_url
+      : null
+
   return {
     id: p.id,
     title: p.title,
@@ -101,6 +112,12 @@ export function toProductLike(p: any): ProductLike {
       const originalDisplay = calc?.original_amount
       const compareAtAmount =
         originalDisplay != null ? Number(originalDisplay) * 100 : null
+
+      const baseImages = (p.images ?? []).map((img: any) => ({ url: img.url }))
+      const images = cutoutUrl
+        ? [...baseImages, { url: cutoutUrl }]
+        : baseImages
+
       return {
         id: v.id,
         sku: v.sku,
@@ -117,7 +134,7 @@ export function toProductLike(p: any): ProductLike {
             o.value,
           ]),
         ),
-        images: (p.images ?? []).map((img: any) => ({ url: img.url })),
+        images,
       }
     }),
   }

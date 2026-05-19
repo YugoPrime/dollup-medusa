@@ -419,5 +419,25 @@ describe("pickTemplate", () => {
       const slugs = [0, 1].map((i) => pickTemplate(s, i)!.template_slug)
       expect(slugs).toEqual(["in-stock-hero", "lifestyle-overlay"])
     })
+
+    it("cutout-spotlight is suppressed when a -r real shot exists (lifestyle wins)", () => {
+      // Product has both a cutout AND a real shot. The new rule (2026-05-19):
+      // real-shot products are stronger as lifestyle-overlay, so cutout is
+      // reserved for studio-only products with no real photography.
+      const s = snapshot({
+        variants_in_stock: [color("pink", ["front", "real", "cutout"])],
+        variant_in_stock_count: 1,
+      })
+      const slugs = [0, 1].map((i) => pickTemplate(s, i)!.template_slug)
+      expect(slugs).toEqual(["in-stock-hero", "lifestyle-overlay"])
+    })
+
+    it("cutout-spotlight still fires when product has cutout but NO real shot", () => {
+      const s = snapshot({
+        variants_in_stock: [color("pink", ["front", "cutout"])],
+        variant_in_stock_count: 1,
+      })
+      expect(pickTemplate(s, 0)!.template_slug).toBe("cutout-spotlight")
+    })
   })
 })
