@@ -10,7 +10,16 @@ export type PickedRender = {
 // new-arrival is intentionally NOT in the rotation pool — it should only fire
 // when the product is actually new (snapshot.is_new_arrival=true). Including
 // it here would put "NEW ARRIVAL" stamps on old products.
-const SINGLE_IMAGE_ROTATION = ["in-stock-hero", "lifestyle-overlay"] as const
+//
+// in-stock-hero-blush + -cream are visual variants of in-stock-hero with
+// different background palettes (blush gradient, cream + gold). They share
+// the same slot/text contract; rotation gives the daily feed visual variety.
+const SINGLE_IMAGE_ROTATION = [
+  "in-stock-hero",
+  "in-stock-hero-blush",
+  "lifestyle-overlay",
+  "in-stock-hero-cream",
+] as const
 
 function priceLabel(amount: number): string {
   return `Rs.${amount}`
@@ -146,7 +155,9 @@ function buildTextOverrides(
       if (sku) out.sku = sku
       return out
     }
-    case "in-stock-hero": {
+    case "in-stock-hero":
+    case "in-stock-hero-blush":
+    case "in-stock-hero-cream": {
       out.price = price
       out.size = collectSizes(snapshot, 28)
       if (sku) out.sku = sku

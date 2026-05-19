@@ -203,25 +203,49 @@ describe("pickTemplate", () => {
     )
   })
 
-  it("rotates [in-stock-hero, lifestyle-overlay] by slot_index for variety on old products", () => {
+  it("rotates [in-stock-hero, in-stock-hero-blush, lifestyle-overlay, in-stock-hero-cream] by slot_index", () => {
+    // 4-template rotation so the daily feed has more visual variety. The two
+    // blush/cream variants are colour treatments of in-stock-hero (same slot
+    // contract). Order is: ink → blush → lifestyle → cream → repeat.
     const s = snapshot({
       variants_in_stock: [color("pink", ["front"])],
       variant_in_stock_count: 1,
       is_new_arrival: false,
     })
-    const slugs = [0, 1, 2, 3].map((i) => pickTemplate(s, i)!.template_slug)
-    expect(slugs[0]).toBe("in-stock-hero")
-    expect(slugs[1]).toBe("lifestyle-overlay")
-    expect(slugs[2]).toBe("in-stock-hero")
-    expect(slugs[3]).toBe("lifestyle-overlay")
+    const slugs = [0, 1, 2, 3, 4, 5].map((i) => pickTemplate(s, i)!.template_slug)
+    expect(slugs).toEqual([
+      "in-stock-hero",
+      "in-stock-hero-blush",
+      "lifestyle-overlay",
+      "in-stock-hero-cream",
+      "in-stock-hero",
+      "in-stock-hero-blush",
+    ])
   })
 
-  it("uses 'lifestyle' slot id (not 'hero') for lifestyle-overlay", () => {
+  it("in-stock-hero variants use the 'hero' slot like the base template", () => {
     const s = snapshot({
       variants_in_stock: [color("pink", ["front"])],
       variant_in_stock_count: 1,
     })
-    const picked = pickTemplate(s, 1)!
+    // Slot 1 → blush, slot 3 → cream. Both must plug into "hero".
+    const blush = pickTemplate(s, 1)!
+    expect(blush.template_slug).toBe("in-stock-hero-blush")
+    expect(blush.slot_inputs.hero).toBe("https://r2/pink.jpg")
+
+    const cream = pickTemplate(s, 3)!
+    expect(cream.template_slug).toBe("in-stock-hero-cream")
+    expect(cream.slot_inputs.hero).toBe("https://r2/pink.jpg")
+  })
+
+  it("uses 'lifestyle' slot id (not 'hero') for lifestyle-overlay", () => {
+    // lifestyle-overlay is at rotation index 2 now (rotation expanded with
+    // blush + cream variants in between in-stock-hero and lifestyle).
+    const s = snapshot({
+      variants_in_stock: [color("pink", ["front"])],
+      variant_in_stock_count: 1,
+    })
+    const picked = pickTemplate(s, 2)!
     expect(picked.template_slug).toBe("lifestyle-overlay")
     expect(picked.slot_inputs.lifestyle).toBe("https://r2/pink.jpg")
     expect(picked.slot_inputs.hero).toBeUndefined()
@@ -234,7 +258,7 @@ describe("pickTemplate", () => {
       variants_in_stock: [color("pink", ["front", "real"])],
       variant_in_stock_count: 1,
     })
-    const picked = pickTemplate(s, 1)!
+    const picked = pickTemplate(s, 2)!
     expect(picked.template_slug).toBe("lifestyle-overlay")
     expect(picked.slot_inputs.lifestyle).toBe("https://r2/pink-r.jpg")
   })
@@ -244,7 +268,7 @@ describe("pickTemplate", () => {
       variants_in_stock: [color("pink", ["front"])],
       variant_in_stock_count: 1,
     })
-    const picked = pickTemplate(s, 1)!
+    const picked = pickTemplate(s, 2)!
     expect(picked.template_slug).toBe("lifestyle-overlay")
     expect(picked.slot_inputs.lifestyle).toBe("https://r2/pink.jpg")
   })
@@ -416,8 +440,13 @@ describe("pickTemplate", () => {
         variant_in_stock_count: 1,
         is_new_arrival: false,
       })
-      const slugs = [0, 1].map((i) => pickTemplate(s, i)!.template_slug)
-      expect(slugs).toEqual(["in-stock-hero", "lifestyle-overlay"])
+      const slugs = [0, 1, 2, 3].map((i) => pickTemplate(s, i)!.template_slug)
+      expect(slugs).toEqual([
+        "in-stock-hero",
+        "in-stock-hero-blush",
+        "lifestyle-overlay",
+        "in-stock-hero-cream",
+      ])
     })
 
     it("cutout-spotlight is suppressed when a -r real shot exists (lifestyle wins)", () => {
@@ -428,8 +457,13 @@ describe("pickTemplate", () => {
         variants_in_stock: [color("pink", ["front", "real", "cutout"])],
         variant_in_stock_count: 1,
       })
-      const slugs = [0, 1].map((i) => pickTemplate(s, i)!.template_slug)
-      expect(slugs).toEqual(["in-stock-hero", "lifestyle-overlay"])
+      const slugs = [0, 1, 2, 3].map((i) => pickTemplate(s, i)!.template_slug)
+      expect(slugs).toEqual([
+        "in-stock-hero",
+        "in-stock-hero-blush",
+        "lifestyle-overlay",
+        "in-stock-hero-cream",
+      ])
     })
 
     it("cutout-spotlight still fires when product has cutout but NO real shot", () => {

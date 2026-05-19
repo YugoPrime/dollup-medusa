@@ -35,6 +35,8 @@ describe("template-loader", () => {
       "cutout-spotlight",
       "how-to-order",
       "in-stock-hero",
+      "in-stock-hero-blush",
+      "in-stock-hero-cream",
       "lifestyle-overlay",
       "many-photos",
       "new-arrival",

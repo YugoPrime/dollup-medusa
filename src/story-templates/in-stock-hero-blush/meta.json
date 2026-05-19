@@ -1,0 +1,52 @@
+{
+  "slug": "in-stock-hero-blush",
+  "name": "In Stock Hero — Blush",
+  "category": "single-product",
+  "duration_seconds": 5,
+  "wave": 1,
+  "slots": [
+    {
+      "id": "hero",
+      "hint": "front",
+      "label": "Product photo",
+      "required": true
+    }
+  ],
+  "text_overrides": [
+    {
+      "id": "headline",
+      "default": "IN STOCK",
+      "max_chars": 16
+    },
+    {
+      "id": "subhead",
+      "default": "MUST HAVE",
+      "max_chars": 16
+    },
+    {
+      "id": "price",
+      "default": "Rs.0",
+      "max_chars": 12
+    },
+    {
+      "id": "sku",
+      "default": "IS0000",
+      "max_chars": 10
+    },
+    {
+      "id": "size",
+      "default": "Size: S, M, L",
+      "max_chars": 28
+    },
+    {
+      "id": "footer",
+      "default": "DM to ORDER",
+      "max_chars": 20
+    },
+    {
+      "id": "footer_url",
+      "default": "shop dollupboutique.com",
+      "max_chars": 32
+    }
+  ]
+}
