@@ -283,16 +283,18 @@ describe("pickTemplate", () => {
     expect(picked.slot_inputs.hero).toBeUndefined()
   })
 
-  it("lifestyle-overlay prefers a real/on-model shot when one exists", () => {
-    // Per handoff: lifestyle-overlay is the ONE template that's allowed to use
-    // a -r real shot. The picker should plug that into the lifestyle slot.
+  it("lifestyle-overlay NEVER uses a real/-r shot (boutique policy 2026-05-19)", () => {
+    // Even when a -r real shot is available, the picker must plug the clean
+    // front into the lifestyle slot. The template's distinctive look comes
+    // from its typography/gradient overlay, not the underlying photo kind.
     const s = snapshot({
       variants_in_stock: [color("pink", ["front", "real"])],
       variant_in_stock_count: 1,
     })
     const picked = pickTemplate(s, 2)!
     expect(picked.template_slug).toBe("lifestyle-overlay")
-    expect(picked.slot_inputs.lifestyle).toBe("https://r2/pink-r.jpg")
+    expect(picked.slot_inputs.lifestyle).toBe("https://r2/pink.jpg")
+    expect(picked.slot_inputs.lifestyle).not.toBe("https://r2/pink-r.jpg")
   })
 
   it("lifestyle-overlay falls back to the front shot when there is no real shot", () => {

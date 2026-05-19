@@ -118,24 +118,15 @@ function hasRealShot(colors: SnapshotVariant[]): boolean {
 }
 
 /**
- * Returns the best image to plug into the lifestyle-overlay template. This is
- * the ONE template that's allowed to feature a real / on-model shot — that's
- * its whole purpose. Preference order:
- *   1. first "-r" real shot (across all colors)
- *   2. first "other" shot (off-convention upload that's probably a lifestyle)
- *   3. front fallback so the lifestyle slot still fires when no real exists
+ * Returns the best image to plug into the lifestyle-overlay template.
+ *
+ * Per boutique policy (set 2026-05-19): real / on-model shots (`-r`, `-real`)
+ * are NEVER used in any story template. The lifestyle-overlay template kept
+ * its name for continuity but uses a clean front shot — the visual treatment
+ * (overlay typography, gradient) is what differentiates it from in-stock-hero,
+ * not the underlying image kind.
  */
 function pickLifestyle(colors: SnapshotVariant[]): string | null {
-  for (const c of colors) {
-    for (const url of c.image_urls) {
-      if (classifyImageKind(url) === "real") return url
-    }
-  }
-  for (const c of colors) {
-    for (const url of c.image_urls) {
-      if (classifyImageKind(url) === "other") return url
-    }
-  }
   return pickFront(colors[0])
 }
 

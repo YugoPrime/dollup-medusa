@@ -70,4 +70,44 @@ describe("classifyImageKind", () => {
     expect(classifyImageKind("https://r2/IS2328-CUTOUT.PNG")).toBe("cutout")
     expect(classifyImageKind("https://r2/IS2328-cutout.webp")).toBe("cutout")
   })
+
+  describe("long-form filename convention (current uploads)", () => {
+    it("classifies *-front as front", () => {
+      // Production CDN files: `is2316-s-blue-front.jpg`, etc.
+      expect(classifyImageKind("https://cdn/products/is2316/is2316-s-blue-front.jpg")).toBe("front")
+      expect(classifyImageKind("https://cdn/IS2328-front.jpg")).toBe("front")
+    })
+
+    it("classifies *-back as back", () => {
+      expect(classifyImageKind("https://cdn/products/is2316/is2316-s-blue-back.jpg")).toBe("back")
+      expect(classifyImageKind("https://cdn/IS2328-pink-back.jpg")).toBe("back")
+    })
+
+    it("classifies *-real as real (on-model)", () => {
+      expect(classifyImageKind("https://cdn/products/is2337/is2337-s-beige-real.jpg")).toBe("real")
+      expect(classifyImageKind("https://cdn/IS2328-real.jpg")).toBe("real")
+    })
+
+    it("classifies *-detail as detail", () => {
+      expect(classifyImageKind("https://cdn/products/is2316/is2316-s-blue-detail.jpg")).toBe("detail")
+      expect(classifyImageKind("https://cdn/IS2328-detail.jpg")).toBe("detail")
+    })
+
+    it("classifies *-sizechart and *-size-chart as size_chart", () => {
+      expect(classifyImageKind("https://cdn/IS2328-sizechart.jpg")).toBe("size_chart")
+      expect(classifyImageKind("https://cdn/IS2328-size-chart.jpg")).toBe("size_chart")
+      expect(classifyImageKind("https://cdn/IS2328-pink-size-chart.jpg")).toBe("size_chart")
+    })
+
+    it("is case-insensitive on the long form too", () => {
+      expect(classifyImageKind("https://cdn/IS2328-BACK.JPG")).toBe("back")
+      expect(classifyImageKind("https://cdn/IS2328-Real.jpg")).toBe("real")
+    })
+
+    it("real handling — the picker enforces 'never use real shots' even though they classify correctly", () => {
+      // The classifier reports the truth; the picker is responsible for
+      // refusing to use real shots in templates per the boutique policy.
+      expect(classifyImageKind("https://cdn/IS2328-real.jpg")).toBe("real")
+    })
+  })
 })
