@@ -61,11 +61,14 @@ module.exports = {
     {
       name: "stories-render-daemon",
       cwd: "C:\\Users\\rahvi\\projects\\DOLL UP BOUTIQUE\\Backend\\dollup-medusa",
-      // PM2 7.x on Windows mangles args when spawning powershell.exe with
-      // an args array (Node DEP0190 shell:true bug). The .bat shim avoids
-      // it entirely — cmd executes the bat, which then runs the .ps1.
-      script: ".\\run-render-daemon.bat",
+      // Windows can't spawn() a .bat directly (EINVAL) — needs cmd.exe /c.
+      // And PM2 7.x mangles args arrays passed to powershell.exe directly
+      // (Node DEP0190 shell:true bug). So: cmd.exe runs the .bat, which
+      // runs the .ps1. Args as a single string survives PM2's shell mode.
+      script: "C:\\Windows\\System32\\cmd.exe",
+      args: "/c run-render-daemon.bat",
       interpreter: "none",
+      windowsHide: true,
       // Cron mode: fire at 18:30 MU every day. PM2 launches the script,
       // it runs once, exits, and PM2 waits for the next cron tick.
       cron_restart: "30 18 * * *",
