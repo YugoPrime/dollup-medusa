@@ -160,10 +160,12 @@ describe("pickTemplate", () => {
     expect(picked.slot_inputs.back).not.toBe("https://r2/pink-r.jpg")
   })
 
-  it("falls back to single-image template when 2 colors exist but no color has a clean back", () => {
-    // 2 colors, each only has a front and a real shot. There's no usable back
-    // anywhere → product-2colors must be skipped, fall back to the single-image
-    // rotation rather than push a real shot through.
+  it("picks product-2colors-front when 2 colors exist but no color has a clean back", () => {
+    // 2 colors, each with a front + real shot but NO back. Real cannot be used
+    // as a back slot, so product-2colors is skipped. New behaviour (2026-05-19):
+    // promote to product-2colors-front instead of falling all the way down to
+    // single-image rotation — surfaces both colors so the customer sees the
+    // available range.
     const s = snapshot({
       variants_in_stock: [
         color("pink", ["front", "real"]),
@@ -172,10 +174,40 @@ describe("pickTemplate", () => {
       variant_in_stock_count: 2,
     })
     const picked = pickTemplate(s, 0)!
-    expect(["in-stock-hero", "lifestyle-overlay"]).toContain(picked.template_slug)
-    // hero/lifestyle must be a clean front, never a real shot
-    const value = picked.slot_inputs.hero ?? picked.slot_inputs.lifestyle
-    expect(value).toBe("https://r2/pink.jpg")
+    expect(picked.template_slug).toBe("product-2colors-front")
+    expect(picked.slot_inputs.front_a).toBe("https://r2/pink.jpg")
+    expect(picked.slot_inputs.front_b).toBe("https://r2/blue.jpg")
+    // back slot must NOT be populated — that's the whole point of the variant
+    expect(picked.slot_inputs.back).toBeUndefined()
+  })
+
+  it("product-2colors (with back) still wins over product-2colors-front when a back is available", () => {
+    const s = snapshot({
+      variants_in_stock: [
+        color("pink", ["front", "back"]),
+        color("blue", ["front"]),
+      ],
+      variant_in_stock_count: 2,
+    })
+    const picked = pickTemplate(s, 0)!
+    expect(picked.template_slug).toBe("product-2colors")
+    expect(picked.slot_inputs.back).toBe("https://r2/pink-b.jpg")
+  })
+
+  it("product-2colors-front is skipped when a color has no clean front (e.g. only real shots)", () => {
+    // Second color only has a real shot. pickFront returns null for it, so
+    // the 2-color cascade can't fire either with or without back. Falls
+    // through to single-image rotation using the first color's front.
+    const s = snapshot({
+      variants_in_stock: [
+        color("pink", ["front"]),
+        color("blue", ["real"]),
+      ],
+      variant_in_stock_count: 2,
+    })
+    const picked = pickTemplate(s, 0)!
+    expect(picked.template_slug).not.toBe("product-2colors-front")
+    expect(picked.template_slug).not.toBe("product-2colors")
   })
 
   it("picks product-1color when 1 color with front + back", () => {

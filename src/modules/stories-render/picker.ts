@@ -178,6 +178,7 @@ function buildTextOverrides(
     case "new-arrival":
     case "product-1color":
     case "product-2colors":
+    case "product-2colors-front":
     case "product-3colors":
     case "many-photos": {
       out.price = price
@@ -260,6 +261,16 @@ export function pickTemplate(
         template_slug: "product-2colors",
         slot_inputs: { front_a: a, front_b: b, back },
         text_overrides: buildTextOverrides("product-2colors", snapshot),
+      }
+    }
+    // 2 fronts with no back available anywhere → fall back to the
+    // front-only 2-color template instead of the single-image rotation.
+    // Beats showing just one color when the catalog has two.
+    if (a && b) {
+      return {
+        template_slug: "product-2colors-front",
+        slot_inputs: { front_a: a, front_b: b },
+        text_overrides: buildTextOverrides("product-2colors-front", snapshot),
       }
     }
   }
