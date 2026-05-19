@@ -1,5 +1,5 @@
 import { pickTemplate } from "../picker"
-import type { ProductSnapshot } from "../../stories/snapshot"
+import type { ProductSnapshot, SnapshotVariant } from "../../stories/snapshot"
 
 function snapshot(overrides: Partial<ProductSnapshot> = {}): ProductSnapshot {
   return {
@@ -15,18 +15,35 @@ function snapshot(overrides: Partial<ProductSnapshot> = {}): ProductSnapshot {
   }
 }
 
+/**
+ * imageSpec values map to filename suffixes via the boutique's convention:
+ *   "front"      → https://r2/{id}.jpg          (no suffix)
+ *   "back"       → https://r2/{id}-b.jpg
+ *   "real"       → https://r2/{id}-r.jpg
+ *   "detail"     → https://r2/{id}-1.jpg
+ *   "size_chart" → https://r2/{id}-s.jpg
+ *   "other"      → https://r2/{id}-2.jpg        (numbered = "other")
+ */
 function color(
   id: string,
-  imageCount: number,
+  imageSpec: Array<"front" | "back" | "real" | "detail" | "size_chart" | "other">,
   opts: { sku?: string; sizes?: string[]; color?: string } = {},
-) {
+): SnapshotVariant {
+  const suffix: Record<string, string> = {
+    front: "",
+    back: "-b",
+    real: "-r",
+    detail: "-1",
+    size_chart: "-s",
+    other: "-2",
+  }
   return {
     id,
     sku: opts.sku ?? `SKU-${id}`,
     color: opts.color ?? id,
     color_code: null,
     sizes: opts.sizes ?? ["S", "M"],
-    image_urls: Array.from({ length: imageCount }, (_, i) => `https://r2/${id}-${i + 1}.jpg`),
+    image_urls: imageSpec.map((k) => `https://r2/${id}${suffix[k]}.jpg`),
   }
 }
 
@@ -41,9 +58,7 @@ describe("pickTemplate", () => {
 
   it("returns null when variants have no images", () => {
     const s = snapshot({
-      variants_in_stock: [
-        { ...color("pink", 0) },
-      ],
+      variants_in_stock: [color("pink", [])],
       variant_in_stock_count: 1,
     })
     expect(pickTemplate(s, 0)).toBeNull()
@@ -53,13 +68,13 @@ describe("pickTemplate", () => {
     const s = snapshot({
       price_mur: 990,
       compare_at_price_mur: 1490,
-      variants_in_stock: [color("pink", 2)],
+      variants_in_stock: [color("pink", ["front", "back"])],
       variant_in_stock_count: 1,
     })
     const picked = pickTemplate(s, 0)
     expect(picked).not.toBeNull()
     expect(picked!.template_slug).toBe("on-sale")
-    expect(picked!.slot_inputs.hero).toBe("https://r2/pink-1.jpg")
+    expect(picked!.slot_inputs.hero).toBe("https://r2/pink.jpg")
     expect(picked!.text_overrides.old_price).toBe("Rs.1490")
     expect(picked!.text_overrides.new_price).toBe("Rs.990")
   })
@@ -68,52 +83,127 @@ describe("pickTemplate", () => {
     const s = snapshot({
       price_mur: 1490,
       compare_at_price_mur: 1490,
-      variants_in_stock: [color("pink", 2)],
+      variants_in_stock: [color("pink", ["front", "back"])],
       variant_in_stock_count: 1,
     })
     const picked = pickTemplate(s, 0)
     expect(picked!.template_slug).not.toBe("on-sale")
   })
 
-  it("picks product-3colors when 3+ colors with photos exist", () => {
+  it("picks product-3colors when 3+ colors with photos exist, back comes from a clean -b shot", () => {
     const s = snapshot({
-      variants_in_stock: [color("pink", 2), color("blue", 1), color("white", 1)],
+      variants_in_stock: [
+        color("pink", ["front", "back"]),
+        color("blue", ["front"]),
+        color("white", ["front"]),
+      ],
       variant_in_stock_count: 3,
     })
     const picked = pickTemplate(s, 0)!
     expect(picked.template_slug).toBe("product-3colors")
-    expect(picked.slot_inputs.front_a).toBe("https://r2/pink-1.jpg")
-    expect(picked.slot_inputs.front_b).toBe("https://r2/blue-1.jpg")
-    expect(picked.slot_inputs.front_c).toBe("https://r2/white-1.jpg")
-    expect(picked.slot_inputs.back).toBe("https://r2/pink-2.jpg")
+    expect(picked.slot_inputs.front_a).toBe("https://r2/pink.jpg")
+    expect(picked.slot_inputs.front_b).toBe("https://r2/blue.jpg")
+    expect(picked.slot_inputs.front_c).toBe("https://r2/white.jpg")
+    expect(picked.slot_inputs.back).toBe("https://r2/pink-b.jpg")
   })
 
-  it("picks product-2colors when exactly 2 colors", () => {
+  it("picks product-2colors when exactly 2 colors, back is the clean -b shot", () => {
     const s = snapshot({
-      variants_in_stock: [color("pink", 2), color("blue", 1)],
+      variants_in_stock: [
+        color("pink", ["front", "back"]),
+        color("blue", ["front"]),
+      ],
       variant_in_stock_count: 2,
     })
     const picked = pickTemplate(s, 0)!
     expect(picked.template_slug).toBe("product-2colors")
-    expect(picked.slot_inputs.front_a).toBe("https://r2/pink-1.jpg")
-    expect(picked.slot_inputs.front_b).toBe("https://r2/blue-1.jpg")
-    expect(picked.slot_inputs.back).toBe("https://r2/pink-2.jpg")
+    expect(picked.slot_inputs.front_a).toBe("https://r2/pink.jpg")
+    expect(picked.slot_inputs.front_b).toBe("https://r2/blue.jpg")
+    expect(picked.slot_inputs.back).toBe("https://r2/pink-b.jpg")
   })
 
-  it("picks product-1color when 1 color with 2+ photos", () => {
+  it("REGRESSION: product-2colors never uses an -r (real/on-model) shot as the back slot", () => {
+    // This is the exact bug: variant images are [front, real, back] and the
+    // old picker took image_urls[1] (real) as the back. The new picker MUST
+    // grab the -b file regardless of array position.
     const s = snapshot({
-      variants_in_stock: [color("pink", 3)],
+      variants_in_stock: [
+        color("pink", ["front", "real", "back"]),
+        color("blue", ["front"]),
+      ],
+      variant_in_stock_count: 2,
+    })
+    const picked = pickTemplate(s, 0)!
+    expect(picked.template_slug).toBe("product-2colors")
+    expect(picked.slot_inputs.back).toBe("https://r2/pink-b.jpg")
+    // critically, the back slot must NOT be the -r image
+    expect(picked.slot_inputs.back).not.toBe("https://r2/pink-r.jpg")
+  })
+
+  it("REGRESSION: product-3colors never uses an -r shot as the back slot when a clean back exists elsewhere", () => {
+    // First color has [front, real] (no back), second color has [front, back].
+    // Old picker would have used pink's real shot via the index-1 lookup; new
+    // picker must skip pink for back and pull blue's clean back instead.
+    const s = snapshot({
+      variants_in_stock: [
+        color("pink", ["front", "real"]),
+        color("blue", ["front", "back"]),
+        color("white", ["front"]),
+      ],
+      variant_in_stock_count: 3,
+    })
+    const picked = pickTemplate(s, 0)!
+    expect(picked.template_slug).toBe("product-3colors")
+    expect(picked.slot_inputs.back).toBe("https://r2/blue-b.jpg")
+    expect(picked.slot_inputs.back).not.toBe("https://r2/pink-r.jpg")
+  })
+
+  it("falls back to single-image template when 2 colors exist but no color has a clean back", () => {
+    // 2 colors, each only has a front and a real shot. There's no usable back
+    // anywhere → product-2colors must be skipped, fall back to the single-image
+    // rotation rather than push a real shot through.
+    const s = snapshot({
+      variants_in_stock: [
+        color("pink", ["front", "real"]),
+        color("blue", ["front", "real"]),
+      ],
+      variant_in_stock_count: 2,
+    })
+    const picked = pickTemplate(s, 0)!
+    expect(["in-stock-hero", "lifestyle-overlay"]).toContain(picked.template_slug)
+    // hero/lifestyle must be a clean front, never a real shot
+    const value = picked.slot_inputs.hero ?? picked.slot_inputs.lifestyle
+    expect(value).toBe("https://r2/pink.jpg")
+  })
+
+  it("picks product-1color when 1 color with front + back", () => {
+    const s = snapshot({
+      variants_in_stock: [color("pink", ["front", "back"])],
       variant_in_stock_count: 1,
     })
     const picked = pickTemplate(s, 0)!
     expect(picked.template_slug).toBe("product-1color")
-    expect(picked.slot_inputs.front).toBe("https://r2/pink-1.jpg")
-    expect(picked.slot_inputs.back).toBe("https://r2/pink-2.jpg")
+    expect(picked.slot_inputs.front).toBe("https://r2/pink.jpg")
+    expect(picked.slot_inputs.back).toBe("https://r2/pink-b.jpg")
+  })
+
+  it("REGRESSION: product-1color is NOT used when the only second image is a detail/real/size_chart shot", () => {
+    // Variant has [front, detail]. Old code did `image_urls.length >= 2` and
+    // happily used "-1" (detail) as the back. New picker must fall through.
+    const s = snapshot({
+      variants_in_stock: [color("pink", ["front", "detail"])],
+      variant_in_stock_count: 1,
+    })
+    const picked = pickTemplate(s, 0)!
+    expect(picked.template_slug).not.toBe("product-1color")
+    expect(["in-stock-hero", "lifestyle-overlay", "new-arrival"]).toContain(
+      picked.template_slug,
+    )
   })
 
   it("rotates [in-stock-hero, lifestyle-overlay] by slot_index for variety on old products", () => {
     const s = snapshot({
-      variants_in_stock: [color("pink", 1)],
+      variants_in_stock: [color("pink", ["front"])],
       variant_in_stock_count: 1,
       is_new_arrival: false,
     })
@@ -126,29 +216,76 @@ describe("pickTemplate", () => {
 
   it("uses 'lifestyle' slot id (not 'hero') for lifestyle-overlay", () => {
     const s = snapshot({
-      variants_in_stock: [color("pink", 1)],
+      variants_in_stock: [color("pink", ["front"])],
       variant_in_stock_count: 1,
     })
     const picked = pickTemplate(s, 1)!
     expect(picked.template_slug).toBe("lifestyle-overlay")
-    expect(picked.slot_inputs.lifestyle).toBe("https://r2/pink-1.jpg")
+    expect(picked.slot_inputs.lifestyle).toBe("https://r2/pink.jpg")
     expect(picked.slot_inputs.hero).toBeUndefined()
+  })
+
+  it("lifestyle-overlay prefers a real/on-model shot when one exists", () => {
+    // Per handoff: lifestyle-overlay is the ONE template that's allowed to use
+    // a -r real shot. The picker should plug that into the lifestyle slot.
+    const s = snapshot({
+      variants_in_stock: [color("pink", ["front", "real"])],
+      variant_in_stock_count: 1,
+    })
+    const picked = pickTemplate(s, 1)!
+    expect(picked.template_slug).toBe("lifestyle-overlay")
+    expect(picked.slot_inputs.lifestyle).toBe("https://r2/pink-r.jpg")
+  })
+
+  it("lifestyle-overlay falls back to the front shot when there is no real shot", () => {
+    const s = snapshot({
+      variants_in_stock: [color("pink", ["front"])],
+      variant_in_stock_count: 1,
+    })
+    const picked = pickTemplate(s, 1)!
+    expect(picked.template_slug).toBe("lifestyle-overlay")
+    expect(picked.slot_inputs.lifestyle).toBe("https://r2/pink.jpg")
+  })
+
+  it("REGRESSION: product with ONLY real/detail/size_chart images is skipped entirely (returns null)", () => {
+    // Newer-drop edge case. Don't post a real shot as a stock-style story just
+    // because it's the only image available.
+    const s = snapshot({
+      variants_in_stock: [color("pink", ["real", "real", "detail"])],
+      variant_in_stock_count: 1,
+    })
+    expect(pickTemplate(s, 0)).toBeNull()
+    expect(pickTemplate(s, 1)).toBeNull()
+  })
+
+  it("DEFENSIVE: when first image of variant has no recognized role, treat as front (Medusa thumbnail convention)", () => {
+    // Per handoff edge case 3: if classifier returns 'other' for image[0],
+    // treat it as front (Medusa product image #1 is the catalog thumbnail).
+    // "-2.jpg" classifies as 'other'.
+    const s = snapshot({
+      variants_in_stock: [color("pink", ["other", "back"])],
+      variant_in_stock_count: 1,
+    })
+    const picked = pickTemplate(s, 0)!
+    expect(picked.template_slug).toBe("product-1color")
+    expect(picked.slot_inputs.front).toBe("https://r2/pink-2.jpg")
+    expect(picked.slot_inputs.back).toBe("https://r2/pink-b.jpg")
   })
 
   it("picks new-arrival when product is new and only has 1 photo", () => {
     const s = snapshot({
-      variants_in_stock: [color("pink", 1)],
+      variants_in_stock: [color("pink", ["front"])],
       variant_in_stock_count: 1,
       is_new_arrival: true,
     })
     const picked = pickTemplate(s, 0)!
     expect(picked.template_slug).toBe("new-arrival")
-    expect(picked.slot_inputs.hero).toBe("https://r2/pink-1.jpg")
+    expect(picked.slot_inputs.hero).toBe("https://r2/pink.jpg")
   })
 
   it("never picks new-arrival for old products even at the rotation slot", () => {
     const s = snapshot({
-      variants_in_stock: [color("pink", 1)],
+      variants_in_stock: [color("pink", ["front"])],
       variant_in_stock_count: 1,
       is_new_arrival: false,
     })
@@ -159,7 +296,7 @@ describe("pickTemplate", () => {
 
   it("multi-image cascade still wins over new-arrival when product is new + has multiple photos", () => {
     const s = snapshot({
-      variants_in_stock: [color("pink", 3)],
+      variants_in_stock: [color("pink", ["front", "back", "real"])],
       variant_in_stock_count: 1,
       is_new_arrival: true,
     })
@@ -171,38 +308,26 @@ describe("pickTemplate", () => {
       price_mur: 990,
       compare_at_price_mur: 1490,
       is_new_arrival: true,
-      variants_in_stock: [color("pink", 1)],
+      variants_in_stock: [color("pink", ["front"])],
       variant_in_stock_count: 1,
     })
     expect(pickTemplate(s, 0)!.template_slug).toBe("on-sale")
   })
 
   it("merges all in-stock sizes into the size override and truncates", () => {
-    const s = snapshot({
-      variants_in_stock: [
-        color("pink", 1, { sizes: ["S", "M"] }),
-        color("blue", 1, { sizes: ["L", "XL"] }),
-        color("white", 1, { sizes: ["XXL"] }),
-      ],
-      variant_in_stock_count: 3,
-    })
-    const picked = pickTemplate(s, 0)!
-    // product-3colors doesn't include 'size' override, so for this test we
-    // assert with a 1-color snapshot that takes in-stock-hero
     const single = snapshot({
       variants_in_stock: [
-        color("pink", 1, { sizes: ["S", "M", "L", "XL", "XXL", "3XL"] }),
+        color("pink", ["front"], { sizes: ["S", "M", "L", "XL", "XXL", "3XL"] }),
       ],
       variant_in_stock_count: 1,
     })
     const pickedSingle = pickTemplate(single, 0)!
     expect(pickedSingle.template_slug).toBe("in-stock-hero")
     expect(pickedSingle.text_overrides.size.length).toBeLessThanOrEqual(28)
-    expect(picked.template_slug).toBe("product-3colors")
   })
 
   it("omits sku when first variant has no SKU", () => {
-    const v = color("pink", 1)
+    const v = color("pink", ["front"])
     const s = snapshot({
       variants_in_stock: [{ ...v, sku: null }],
       variant_in_stock_count: 1,

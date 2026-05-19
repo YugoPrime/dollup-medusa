@@ -1,3 +1,4 @@
+import { classifyImageKind } from "../stories/image-kind"
 import type { ProductSnapshot, SnapshotVariant } from "../stories/snapshot"
 
 export type PickedRender = {
@@ -28,20 +29,76 @@ function collectSizes(snapshot: ProductSnapshot, maxChars: number): string {
   return label.length <= maxChars ? label : label.slice(0, maxChars - 1) + "…"
 }
 
+/**
+ * Returns the clean catalog "front" shot for the variant.
+ * Order of preference:
+ *   1. first image classified as "front"
+ *   2. if image[0] is "other" (unrecognized suffix), use it — by Medusa
+ *      convention image #1 is the catalog thumbnail, almost always a front
+ *      shot uploaded without the canonical suffix
+ *   3. null — real/detail/size_chart shots are explicitly NEVER used as front
+ */
 function pickFront(variant: SnapshotVariant | undefined): string | null {
-  return variant?.image_urls[0] ?? null
+  if (!variant || variant.image_urls.length === 0) return null
+  for (const url of variant.image_urls) {
+    if (classifyImageKind(url) === "front") return url
+  }
+  // Defensive fallback: Medusa thumbnail is usually image[0]. If it doesn't
+  // match our convention but isn't a known role suffix, take it as the front.
+  if (classifyImageKind(variant.image_urls[0]) === "other") {
+    return variant.image_urls[0]
+  }
+  return null
 }
 
+/**
+ * Returns the clean "-b" back shot for the variant, or null. NEVER returns a
+ * real/detail/size_chart/other shot — that was the original bug.
+ */
+function pickBack(variant: SnapshotVariant | undefined): string | null {
+  if (!variant) return null
+  for (const url of variant.image_urls) {
+    if (classifyImageKind(url) === "back") return url
+  }
+  return null
+}
+
+/**
+ * Looks for a clean back shot across all other colors, used as a fallback when
+ * the lead color has no back of its own.
+ */
 function pickBackFromAnyOther(
   colors: SnapshotVariant[],
   exceptIndex: number,
 ): string | null {
   for (let i = 0; i < colors.length; i++) {
     if (i === exceptIndex) continue
-    const back = colors[i].image_urls[1] ?? colors[i].image_urls[0]
+    const back = pickBack(colors[i])
     if (back) return back
   }
   return null
+}
+
+/**
+ * Returns the best image to plug into the lifestyle-overlay template. This is
+ * the ONE template that's allowed to feature a real / on-model shot — that's
+ * its whole purpose. Preference order:
+ *   1. first "-r" real shot (across all colors)
+ *   2. first "other" shot (off-convention upload that's probably a lifestyle)
+ *   3. front fallback so the lifestyle slot still fires when no real exists
+ */
+function pickLifestyle(colors: SnapshotVariant[]): string | null {
+  for (const c of colors) {
+    for (const url of c.image_urls) {
+      if (classifyImageKind(url) === "real") return url
+    }
+  }
+  for (const c of colors) {
+    for (const url of c.image_urls) {
+      if (classifyImageKind(url) === "other") return url
+    }
+  }
+  return pickFront(colors[0])
 }
 
 function buildTextOverrides(
@@ -91,20 +148,23 @@ function buildTextOverrides(
  * picks the best template and computes the slot_inputs + text_overrides needed
  * to render it.
  *
+ * Image-role rules (critical — see image-kind.ts):
+ *   - Product templates (on-sale, product-Ncolors, new-arrival, in-stock-hero)
+ *     accept ONLY "front" / "back" shots in their slots. Real / detail /
+ *     size-chart shots are never plugged in.
+ *   - lifestyle-overlay is the only template that consumes a real shot.
+ *
  * Decision order:
  *   1. compare_at_price set + above current price → "on-sale"
- *   2. multi-image cascade by color count: 3+ colors → product-3colors,
- *      2 colors → product-2colors, 1 color with ≥ 2 photos → product-1color
- *   3. otherwise rotate single-image pool [in-stock-hero, new-arrival,
- *      lifestyle-overlay] by slotIndex so the daily feed has variety
+ *   2. multi-image cascade by color count: 3+ colors with backs available →
+ *      product-3colors, 2 colors → product-2colors, 1 color with front + back
+ *      → product-1color
+ *   3. otherwise rotate the single-image pool [in-stock-hero, lifestyle-overlay]
+ *      by slotIndex so the daily feed has variety
  *
- * Templates intentionally not auto-picked in v1 (they need inputs the snapshot
- * alone can't satisfy): how-to-order (no product), customer-review (quote +
- * reviewer name), cutout-spotlight (transparent-bg PNG), many-photos (needs
- * 8 distinct photos which boutique product shoots rarely have).
- *
- * Returns null when the snapshot has no in-stock variant with at least one
- * image — caller should leave the slot un-rendered rather than fail.
+ * Returns null when there's no usable front image — e.g. variants only have
+ * real/detail/size_chart shots. Callers (batch render) skip the slot in that
+ * case rather than push an off-template story.
  */
 export function pickTemplate(
   snapshot: ProductSnapshot | null,
@@ -113,29 +173,29 @@ export function pickTemplate(
   if (!snapshot) return null
   const colors = snapshot.variants_in_stock
   if (colors.length === 0) return null
-  const allImages = colors.flatMap((c) => c.image_urls)
-  if (allImages.length === 0) return null
+
+  // Gate everything on having at least one usable front-class image.
+  // pickFront enforces "no real/detail/size_chart used as front" — if it
+  // returns null we have nothing to put on a stock-style story.
+  const leadFront = pickFront(colors[0])
+  if (!leadFront) return null
 
   if (
     snapshot.compare_at_price_mur != null &&
     snapshot.compare_at_price_mur > snapshot.price_mur
   ) {
-    const hero = pickFront(colors[0])
-    if (hero) {
-      return {
-        template_slug: "on-sale",
-        slot_inputs: { hero },
-        text_overrides: buildTextOverrides("on-sale", snapshot),
-      }
+    return {
+      template_slug: "on-sale",
+      slot_inputs: { hero: leadFront },
+      text_overrides: buildTextOverrides("on-sale", snapshot),
     }
   }
 
   if (colors.length >= 3) {
-    const a = pickFront(colors[0])
+    const a = leadFront
     const b = pickFront(colors[1])
     const c = pickFront(colors[2])
-    const back =
-      colors[0].image_urls[1] ?? pickBackFromAnyOther(colors, 0) ?? a
+    const back = pickBack(colors[0]) ?? pickBackFromAnyOther(colors, 0)
     if (a && b && c && back) {
       return {
         template_slug: "product-3colors",
@@ -146,10 +206,9 @@ export function pickTemplate(
   }
 
   if (colors.length >= 2) {
-    const a = pickFront(colors[0])
+    const a = leadFront
     const b = pickFront(colors[1])
-    const back =
-      colors[0].image_urls[1] ?? pickBackFromAnyOther(colors, 0) ?? a
+    const back = pickBack(colors[0]) ?? pickBackFromAnyOther(colors, 0)
     if (a && b && back) {
       return {
         template_slug: "product-2colors",
@@ -159,13 +218,11 @@ export function pickTemplate(
     }
   }
 
-  if (colors[0].image_urls.length >= 2) {
+  const leadBack = pickBack(colors[0])
+  if (leadBack) {
     return {
       template_slug: "product-1color",
-      slot_inputs: {
-        front: colors[0].image_urls[0],
-        back: colors[0].image_urls[1],
-      },
+      slot_inputs: { front: leadFront, back: leadBack },
       text_overrides: buildTextOverrides("product-1color", snapshot),
     }
   }
@@ -175,18 +232,23 @@ export function pickTemplate(
   if (snapshot.is_new_arrival) {
     return {
       template_slug: "new-arrival",
-      slot_inputs: { hero: colors[0].image_urls[0] },
+      slot_inputs: { hero: leadFront },
       text_overrides: buildTextOverrides("new-arrival", snapshot),
     }
   }
 
   const slug = SINGLE_IMAGE_ROTATION[slotIndex % SINGLE_IMAGE_ROTATION.length]
-  const hero = colors[0].image_urls[0]
-  const slotInputs: Record<string, string> =
-    slug === "lifestyle-overlay" ? { lifestyle: hero } : { hero }
+  if (slug === "lifestyle-overlay") {
+    const lifestyle = pickLifestyle(colors) ?? leadFront
+    return {
+      template_slug: slug,
+      slot_inputs: { lifestyle },
+      text_overrides: buildTextOverrides(slug, snapshot),
+    }
+  }
   return {
     template_slug: slug,
-    slot_inputs: slotInputs,
+    slot_inputs: { hero: leadFront },
     text_overrides: buildTextOverrides(slug, snapshot),
   }
 }
