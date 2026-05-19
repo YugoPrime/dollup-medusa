@@ -395,30 +395,53 @@ describe("pickTemplate", () => {
   })
 
   describe("cutout-spotlight integration", () => {
-    it("picks cutout-spotlight when a variant has a -cutout PNG and product is single-color, single-image", () => {
-      // Single color, one front + one cutout: replaces in-stock-hero in the
-      // rotation so we get the editorial spotlight style instead of a plain
-      // catalog photo.
+    it("cutout-spotlight participates in the rotation when a -cutout PNG is available (single-color, single-image product)", () => {
+      // A cutout adds cutout-spotlight to the rotation pool. The picker still
+      // alternates with the hero / lifestyle variants by slot_index to keep
+      // the daily feed visually varied. The "always wins" behaviour from the
+      // initial rollout caused every story to look identical once 234
+      // products had cutouts uploaded.
       const s = snapshot({
         variants_in_stock: [color("pink", ["front", "cutout"])],
         variant_in_stock_count: 1,
       })
-      const picked = pickTemplate(s, 0)!
-      expect(picked.template_slug).toBe("cutout-spotlight")
-      expect(picked.slot_inputs.product_cutout).toBe("https://r2/pink-cutout.png")
+      const slugsOver10Slots = Array.from({ length: 10 }, (_, i) =>
+        pickTemplate(s, i)!.template_slug,
+      )
+      expect(slugsOver10Slots).toContain("cutout-spotlight")
+      expect(slugsOver10Slots).toContain("in-stock-hero")
+      expect(slugsOver10Slots).toContain("lifestyle-overlay")
     })
 
-    it("cutout-spotlight wins over both in-stock-hero AND lifestyle-overlay across slot indices", () => {
-      // The rotation pool used to alternate in-stock-hero / lifestyle by slot
-      // index. When a cutout exists, both slots should pick cutout-spotlight —
-      // it's the more polished editorial template.
+    it("cutout-spotlight is one entry in the 5-template single-image rotation when a cutout exists", () => {
+      // 2026-05-19 update: cutout-spotlight no longer wins unconditionally —
+      // after every single-color product got a cutout uploaded, that branch
+      // would have produced every story with the same template. Instead it
+      // takes its place in the rotation alongside the 4 hero variants, firing
+      // once per 5 slots.
       const s = snapshot({
         variants_in_stock: [color("pink", ["front", "cutout"])],
         variant_in_stock_count: 1,
       })
-      for (let i = 0; i < 4; i++) {
-        expect(pickTemplate(s, i)!.template_slug).toBe("cutout-spotlight")
-      }
+      const slugs = [0, 1, 2, 3, 4].map((i) => pickTemplate(s, i)!.template_slug)
+      expect(slugs).toEqual([
+        "in-stock-hero",
+        "in-stock-hero-blush",
+        "lifestyle-overlay",
+        "in-stock-hero-cream",
+        "cutout-spotlight",
+      ])
+    })
+
+    it("cutout-spotlight slot_inputs.product_cutout is the -cutout PNG URL when the rotation lands on it", () => {
+      const s = snapshot({
+        variants_in_stock: [color("pink", ["front", "cutout"])],
+        variant_in_stock_count: 1,
+      })
+      // slotIndex 4 lands on cutout-spotlight per the rotation above
+      const picked = pickTemplate(s, 4)!
+      expect(picked.template_slug).toBe("cutout-spotlight")
+      expect(picked.slot_inputs.product_cutout).toBe("https://r2/pink-cutout.png")
     })
 
     it("multi-color cascade still wins over cutout-spotlight (cutout is single-product editorial only)", () => {
@@ -498,12 +521,13 @@ describe("pickTemplate", () => {
       ])
     })
 
-    it("cutout-spotlight still fires when product has cutout but NO real shot", () => {
+    it("cutout-spotlight still appears in the rotation when product has cutout but NO real shot", () => {
       const s = snapshot({
         variants_in_stock: [color("pink", ["front", "cutout"])],
         variant_in_stock_count: 1,
       })
-      expect(pickTemplate(s, 0)!.template_slug).toBe("cutout-spotlight")
+      const slugs = [0, 1, 2, 3, 4].map((i) => pickTemplate(s, i)!.template_slug)
+      expect(slugs).toContain("cutout-spotlight")
     })
   })
 })

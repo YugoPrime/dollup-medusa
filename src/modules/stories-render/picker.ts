@@ -294,20 +294,25 @@ export function pickTemplate(
     }
   }
 
-  // cutout-spotlight is the fallback for products with NO real / lifestyle
-  // background shot. When a "-r" image exists, lifestyle-overlay's stronger
-  // story wins (see SINGLE_IMAGE_ROTATION). Cutout PNG is still gated —
-  // without one, no spotlight even when the product is studio-only.
+  // Build the rotation pool dynamically. cutout-spotlight joins the pool when
+  // a -cutout PNG is available AND no real shot exists (real shots are stronger
+  // as lifestyle-overlay). Without this, products with cutouts would ALWAYS
+  // pick cutout-spotlight and the daily feed would lose visual variety once
+  // most of the catalog has cutouts uploaded.
   const cutoutUrl = pickCutout(colors)
-  if (cutoutUrl && !hasRealShot(colors)) {
+  const cutoutEligible = cutoutUrl != null && !hasRealShot(colors)
+  const pool: readonly string[] = cutoutEligible
+    ? [...SINGLE_IMAGE_ROTATION, "cutout-spotlight"]
+    : SINGLE_IMAGE_ROTATION
+
+  const slug = pool[slotIndex % pool.length]
+  if (slug === "cutout-spotlight" && cutoutUrl) {
     return {
-      template_slug: "cutout-spotlight",
+      template_slug: slug,
       slot_inputs: { product_cutout: cutoutUrl },
-      text_overrides: buildTextOverrides("cutout-spotlight", snapshot),
+      text_overrides: buildTextOverrides(slug, snapshot),
     }
   }
-
-  const slug = SINGLE_IMAGE_ROTATION[slotIndex % SINGLE_IMAGE_ROTATION.length]
   if (slug === "lifestyle-overlay") {
     const lifestyle = pickLifestyle(colors) ?? leadFront
     return {
