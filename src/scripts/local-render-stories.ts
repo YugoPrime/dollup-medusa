@@ -18,6 +18,9 @@
  *   RENDER_LOOKAHEAD_DAYS   how many days forward to scan (default 7)
  *   RENDER_POLL_SECONDS     seconds between scans in daemon mode (default 300)
  *   RENDER_ONCE             "true" to render-and-exit, else loops forever
+ *   RENDER_ONLY_SLOT_ID     stslot_... to render exactly one slot and exit.
+ *                           Skips the plan scan entirely. Used for testing
+ *                           the local pipeline end-to-end.
  *
  * Required env:
  *   DATABASE_URL, REDIS_URL — point at the production DB (read .env.production)
@@ -25,9 +28,10 @@
  *   PRODUCER_HEADLESS_SHELL_PATH — optional. If unset HyperFrames downloads
  *                                  a chrome-headless-shell into ~/.cache.
  */
-import type { ExecArgs } from "@medusajs/framework/types"
+import type { ExecArgs, MedusaContainer } from "@medusajs/framework/types"
 import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
 
+import { uploadStoryRenderToR2 } from "../lib/r2-story-uploader"
 import { addDaysToMauritiusDate, mauritiusToday } from "../lib/mauritius-date"
 import { STORIES_MODULE } from "../modules/stories"
 import type StoriesModuleService from "../modules/stories/service"
@@ -35,11 +39,16 @@ import {
   batchRenderPlan,
   summarizeBatch,
 } from "../modules/stories-render/batch"
+import { STORIES_RENDER_MODULE } from "../modules/stories-render"
+import { pickTemplate } from "../modules/stories-render/picker"
+import type StoriesRenderModuleService from "../modules/stories-render/service"
+import type { ProductSnapshot } from "../modules/stories/snapshot"
 
 type Settings = {
   lookaheadDays: number
   pollSeconds: number
   once: boolean
+  onlySlotId: string | null
 }
 
 function readSettings(): Settings {
@@ -48,10 +57,12 @@ function readSettings(): Settings {
     10,
   )
   const poll = Number.parseInt(process.env.RENDER_POLL_SECONDS ?? "300", 10)
+  const onlySlotRaw = process.env.RENDER_ONLY_SLOT_ID?.trim()
   return {
     lookaheadDays: Number.isFinite(lookahead) && lookahead >= 1 ? lookahead : 7,
     pollSeconds: Number.isFinite(poll) && poll >= 30 ? poll : 300,
     once: process.env.RENDER_ONCE === "true" || process.env.RENDER_ONCE === "1",
+    onlySlotId: onlySlotRaw && onlySlotRaw.length > 0 ? onlySlotRaw : null,
   }
 }
 
@@ -67,8 +78,17 @@ export default async function localRenderStories({
   const settings = readSettings()
 
   logger.info(
-    `[local-render] starting | lookahead=${settings.lookaheadDays}d poll=${settings.pollSeconds}s once=${settings.once}`,
+    `[local-render] starting | lookahead=${settings.lookaheadDays}d poll=${settings.pollSeconds}s once=${settings.once}${settings.onlySlotId ? ` only_slot=${settings.onlySlotId}` : ""}`,
   )
+
+  // One-slot test mode: render exactly one slot, write back, exit. Bypasses
+  // the plan scan entirely. Use to validate the local pipeline end-to-end
+  // without rendering everything pending in the lookahead window.
+  if (settings.onlySlotId) {
+    await runOneSlot(container, stories, logger, settings.onlySlotId)
+    logger.info(`[local-render] exiting (one-slot mode)`)
+    return
+  }
 
   let stopRequested = false
   const stop = () => {
@@ -180,6 +200,71 @@ async function runOnce(
   logger.info(
     `[local-render] iteration done | ok=${totalOk} skipped=${totalSkipped} errors=${totalError}`,
   )
+}
+
+async function runOneSlot(
+  container: MedusaContainer,
+  stories: StoriesModuleService,
+  logger: { info: (s: string) => void; warn: (s: string) => void; error: (s: string) => void },
+  slotId: string,
+): Promise<void> {
+  const [slot] = await stories.listStorySlots({ id: slotId })
+  if (!slot) {
+    logger.error(`[local-render] slot ${slotId} not found`)
+    return
+  }
+  if (slot.posted_at) {
+    logger.warn(`[local-render] slot ${slotId} already posted at ${slot.posted_at} — skipping`)
+    return
+  }
+
+  const snapshot = (slot.product_snapshot ?? null) as ProductSnapshot | null
+  const picked = pickTemplate(snapshot, slot.slot_index)
+  if (!picked) {
+    logger.error(
+      `[local-render] slot ${slotId}: ${
+        snapshot ? "no in-stock photos to render" : "no product picked for this slot"
+      }`,
+    )
+    return
+  }
+
+  const renderSvc = container.resolve<StoriesRenderModuleService>(STORIES_RENDER_MODULE)
+  renderSvc.uploadToR2 = uploadStoryRenderToR2
+
+  await stories.updateSlotMetadata(slot.id, {
+    render_started_at: new Date().toISOString(),
+    render_template_slug: picked.template_slug,
+    render_error: null,
+  })
+
+  const start = Date.now()
+  try {
+    const render = await renderSvc.render(slot.id, picked)
+    await stories.updateSlotMetadata(slot.id, {
+      render,
+      render_started_at: null,
+      render_error: null,
+    })
+    logger.info(
+      `[local-render]   ok    slot=${slot.id} template=${render.template_slug} mp4=${render.mp4_url} ${render.duration_ms}ms`,
+    )
+  } catch (err) {
+    const e = err as { name?: string; message?: string; stderrTail?: string }
+    await stories.updateSlotMetadata(slot.id, {
+      render_error: {
+        message: e.message ?? "Render failed",
+        name: e.name ?? "Error",
+        stderr_tail: e.stderrTail ?? null,
+        failed_at: new Date().toISOString(),
+      },
+      render_started_at: null,
+    })
+    logger.error(
+      `[local-render]   FAIL  slot=${slot.id} ${Date.now() - start}ms msg="${e.message ?? "Render failed"}"`,
+    )
+    if (e.stderrTail) logger.error(`[local-render]   stderr: ${e.stderrTail}`)
+  }
 }
 
 function normalizeDate(value: unknown): string {
