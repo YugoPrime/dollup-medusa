@@ -38,6 +38,13 @@ export type RenderRequest = {
   template_slug: string
   slot_inputs: Record<string, string>
   text_overrides: Record<string, string>
+  // Audio rotation context. When both are provided, the audio mixer picks
+  // tracks from a per-plan permutation so the same day never reuses a track
+  // (as long as track-count >= slot-count). Optional for back-compat with
+  // ad-hoc renders (e.g. regen-template-previews) — those fall back to the
+  // per-slot hash and can repeat.
+  plan_id?: string
+  slot_index?: number
 }
 
 export type RenderResult = {

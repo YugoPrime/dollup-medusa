@@ -70,6 +70,8 @@ export async function POST(req: AuthenticatedMedusaRequest, res: MedusaResponse)
       template_slug: body.template_slug,
       slot_inputs: body.slot_inputs ?? {},
       text_overrides: body.text_overrides ?? {},
+      plan_id: slot.plan_id,
+      slot_index: slot.slot_index,
     }
 
     // When STORIES_RENDER_REMOTE_ONLY=true the Coolify container does not

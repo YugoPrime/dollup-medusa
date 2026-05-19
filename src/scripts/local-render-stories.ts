@@ -280,7 +280,11 @@ async function runOneSlot(
 
   const start = Date.now()
   try {
-    const render = await renderSvc.render(slot.id, picked)
+    const render = await renderSvc.render(slot.id, {
+      ...picked,
+      plan_id: slot.plan_id,
+      slot_index: slot.slot_index,
+    })
     await stories.updateSlotMetadata(slot.id, {
       render,
       render_started_at: null,

@@ -207,6 +207,8 @@ export default class StoriesRenderModuleService {
           videoPath: outPath,
           durationSeconds: meta.duration_seconds,
           audioDir: path.join(this.templatesRoot, "_brand", "audio"),
+          planId: req.plan_id,
+          slotIndex: req.slot_index,
         })
         logStage(slotId, "audio_mix", trackName ? "done" : "skipped", {
           elapsed_ms: elapsed(),
