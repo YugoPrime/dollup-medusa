@@ -24,6 +24,41 @@
 module.exports = {
   apps: [
     {
+      // SSH tunnel to Coolify host. Forwards local 5432 + 6379 to the
+      // docker-internal Postgres/Redis containers. The render daemon
+      // depends on this — without the tunnel, .env.local-render's
+      // 127.0.0.1 hosts point at nothing.
+      //
+      // SSH key auth must be set up so the tunnel reconnects unattended
+      // (no password prompt). The exact -L forwards mirror the manual
+      // command that was already running in a PowerShell terminal.
+      name: "coolify-db-tunnel",
+      cwd: "C:\\Users\\rahvi\\projects\\DOLL UP BOUTIQUE\\Backend\\dollup-medusa",
+      script: "C:\\Windows\\System32\\OpenSSH\\ssh.exe",
+      args: [
+        "-N",
+        "-o",
+        "ServerAliveInterval=30",
+        "-o",
+        "ServerAliveCountMax=3",
+        "-o",
+        "ExitOnForwardFailure=yes",
+        "-L",
+        "5432:10.0.1.10:5432",
+        "-L",
+        "6379:10.0.1.6:6379",
+        "root@100.65.8.93",
+      ],
+      autorestart: true,
+      restart_delay: 5000,
+      max_restarts: 100,
+      min_uptime: "30s",
+      out_file: "./logs/ssh-tunnel-out.log",
+      error_file: "./logs/ssh-tunnel-err.log",
+      merge_logs: true,
+      time: true,
+    },
+    {
       name: "stories-render-daemon",
       cwd: "C:\\Users\\rahvi\\projects\\DOLL UP BOUTIQUE\\Backend\\dollup-medusa",
       script: "powershell.exe",
