@@ -2,6 +2,7 @@ import type { MedusaContainer } from "@medusajs/framework/types"
 import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
 
 import { mauritiusTomorrow } from "../lib/mauritius-date"
+import { resolveFillerForDate } from "../lib/stories-filler"
 import { escapeTelegramHtml, sendTelegram } from "../lib/telegram"
 import { STORIES_MODULE } from "../modules/stories"
 import { createMedusaProductSource } from "../modules/stories/product-source"
@@ -96,6 +97,29 @@ export default async function createTomorrowPlan(
       `⚠️ Auto-plan regenerate failed for ${escapeTelegramHtml(planDate)}: ${escapeTelegramHtml(msg)}`,
     )
     return
+  }
+
+  // Weekly editorial filler (e.g. how-to-order on Mondays). Env-gated:
+  // STORIES_FILLER_WEEKDAY=1 → fires every Monday. Disabled by default.
+  const fillerConfig = resolveFillerForDate(planDate, process.env)
+  if (fillerConfig) {
+    try {
+      const scheduledAt = new Date(
+        `${planDate}T${fillerConfig.scheduledTime}:00+04:00`,
+      )
+      const result = await stories.addFillerSlot({
+        plan_id: plan.id,
+        template_slug: fillerConfig.templateSlug,
+        scheduled_at: scheduledAt,
+      })
+      logger.info(
+        `[auto-plan] appended filler slot ${result.slot_id} (template=${fillerConfig.templateSlug}, time=${fillerConfig.scheduledTime}) to plan ${plan.id}`,
+      )
+    } catch (err) {
+      // Filler failure must not block the main plan — log + continue
+      const msg = (err as Error)?.message ?? "addFillerSlot failed"
+      logger.error(`[auto-plan] filler slot failed for plan ${plan.id}: ${msg}`)
+    }
   }
 
   // Count slots that came back without a product (no eligible match) so the

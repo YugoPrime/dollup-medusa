@@ -89,8 +89,11 @@ export async function batchRenderPlan(
       continue
     }
 
+    const forcedSlug = readForcedTemplate(slot.metadata)
     const snapshot = (slot.product_snapshot ?? null) as ProductSnapshot | null
-    const picked = pickTemplate(snapshot, slot.slot_index)
+    const picked: ReturnType<typeof pickTemplate> = forcedSlug
+      ? { template_slug: forcedSlug, slot_inputs: {}, text_overrides: {} }
+      : pickTemplate(snapshot, slot.slot_index)
     if (!picked) {
       results.push({
         slot_id: slot.id,
@@ -160,6 +163,20 @@ export function summarizeBatch(results: BatchSlotResult[]): {
     skipped: results.filter((r) => r.status === "skipped").length,
     error: results.filter((r) => r.status === "error").length,
   }
+}
+
+/**
+ * Reads `metadata.forced_template_slug` and returns it if present. Set by
+ * `StoriesModuleService.addFillerSlot` for non-product editorial slots
+ * (e.g. weekly how-to-order). When present, the batch renderer renders the
+ * named template directly and never calls pickTemplate.
+ */
+export function readForcedTemplate(metadata: unknown): string | null {
+  if (!metadata || typeof metadata !== "object") return null
+  const m = metadata as Record<string, unknown>
+  const slug = m.forced_template_slug
+  if (typeof slug !== "string" || slug.length === 0) return null
+  return slug
 }
 
 function readExistingRender(metadata: unknown): RenderResult | null {

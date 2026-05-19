@@ -80,6 +80,20 @@ function pickBackFromAnyOther(
 }
 
 /**
+ * Returns the first transparent-bg cutout PNG found across any color, or null.
+ * Cutouts are uploaded out-of-band (rembg pipeline) and signal that the
+ * product is eligible for the editorial cutout-spotlight template.
+ */
+function pickCutout(colors: SnapshotVariant[]): string | null {
+  for (const c of colors) {
+    for (const url of c.image_urls) {
+      if (classifyImageKind(url) === "cutout") return url
+    }
+  }
+  return null
+}
+
+/**
  * Returns the best image to plug into the lifestyle-overlay template. This is
  * the ONE template that's allowed to feature a real / on-model shot — that's
  * its whole purpose. Preference order:
@@ -126,6 +140,12 @@ function buildTextOverrides(
     case "lifestyle-overlay": {
       out.price = price
       out.size = collectSizes(snapshot, 24)
+      if (sku) out.sku = sku
+      return out
+    }
+    case "cutout-spotlight": {
+      out.price = price
+      out.size = collectSizes(snapshot, 28)
       if (sku) out.sku = sku
       return out
     }
@@ -234,6 +254,19 @@ export function pickTemplate(
       template_slug: "new-arrival",
       slot_inputs: { hero: leadFront },
       text_overrides: buildTextOverrides("new-arrival", snapshot),
+    }
+  }
+
+  // If a transparent-bg cutout PNG is available, use the editorial spotlight
+  // template instead of the plain in-stock-hero / lifestyle rotation. Cutouts
+  // are opt-in per product (uploaded via the inventory-audit rembg pipeline),
+  // so this branch only fires when explicitly enabled.
+  const cutoutUrl = pickCutout(colors)
+  if (cutoutUrl) {
+    return {
+      template_slug: "cutout-spotlight",
+      slot_inputs: { product_cutout: cutoutUrl },
+      text_overrides: buildTextOverrides("cutout-spotlight", snapshot),
     }
   }
 

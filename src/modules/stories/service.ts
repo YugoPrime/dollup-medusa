@@ -396,6 +396,48 @@ class StoriesModuleService extends MedusaService({
     return alerts
   }
 
+  /**
+   * Appends a non-product "filler" slot to an existing plan and bumps
+   * `total_slots`. Used by the weekly how-to-order rotation (see
+   * `lib/stories-filler.ts`) so we can run an editorial / instructional
+   * story without burning an anti-repeat product pick.
+   *
+   * The slot is created with `product_id=null`, `product_snapshot=null`, and
+   * `metadata.forced_template_slug=<slug>`. The batch renderer detects the
+   * forced slug and renders that template directly, bypassing the picker.
+   */
+  async addFillerSlot(input: {
+    plan_id: string
+    template_slug: string
+    scheduled_at: Date
+    category_id?: string
+  }): Promise<{ slot_id: string; slot_index: number }> {
+    const [plan] = await this.listStoryPlans({ id: input.plan_id })
+    if (!plan) throw new Error(`Plan ${input.plan_id} not found`)
+
+    const allSlots = await this.listStorySlots({ plan_id: input.plan_id })
+    const nextIndex = allSlots.reduce((max, s) => Math.max(max, s.slot_index), -1) + 1
+
+    const slot = await this.createStorySlots({
+      plan_id: input.plan_id,
+      slot_index: nextIndex,
+      scheduled_at: input.scheduled_at,
+      category_id: input.category_id ?? "__filler__",
+      product_id: null,
+      product_snapshot: null,
+      metadata: { forced_template_slug: input.template_slug },
+      fallback_used: false,
+      pick_attempt: 1,
+    } as unknown as Parameters<this["createStorySlots"]>[0])
+
+    await this.updateStoryPlans({
+      id: input.plan_id,
+      total_slots: (plan.total_slots ?? 0) + 1,
+    } as unknown as Parameters<this["updateStoryPlans"]>[0])
+
+    return { slot_id: slot.id, slot_index: nextIndex }
+  }
+
   async createBatchPlans(
     input: CreateBatchPlansInput,
     deps: {

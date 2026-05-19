@@ -4,6 +4,7 @@ export type ImageKind =
   | "real"
   | "detail"
   | "size_chart"
+  | "cutout"
   | "other"
 
 const ROLE_SUFFIX: Record<string, Exclude<ImageKind, "front" | "other">> = {
@@ -11,6 +12,7 @@ const ROLE_SUFFIX: Record<string, Exclude<ImageKind, "front" | "other">> = {
   r: "real",
   "1": "detail",
   s: "size_chart",
+  cutout: "cutout",
 }
 
 const SUPPORTED_EXT = /\.(jpe?g|png|webp|avif)$/i

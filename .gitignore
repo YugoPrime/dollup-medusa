@@ -28,3 +28,12 @@ build
 
 # react-email preview server build cache (used by `yarn email:dev`)
 .react-email
+
+# Local template preview renders produced by scripts/render-sample-mp4.mjs
+render-sample-*.mp4
+
+# Local image fixtures the user drops in for one-off rendering
+/todeleteafter/
+
+# Local-render daemon working dir
+/logs/

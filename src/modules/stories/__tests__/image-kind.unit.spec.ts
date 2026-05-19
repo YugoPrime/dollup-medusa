@@ -63,4 +63,11 @@ describe("classifyImageKind", () => {
     // "navy-blue" → last token "blue" is not a role
     expect(classifyImageKind("https://r2/IS2328-navy-blue.jpg")).toBe("front")
   })
+
+  it("classifies trailing -cutout as cutout (transparent-bg PNG for spotlight template)", () => {
+    expect(classifyImageKind("https://r2/IS2328-cutout.png")).toBe("cutout")
+    expect(classifyImageKind("https://r2/IS2328-pink-cutout.png")).toBe("cutout")
+    expect(classifyImageKind("https://r2/IS2328-CUTOUT.PNG")).toBe("cutout")
+    expect(classifyImageKind("https://r2/IS2328-cutout.webp")).toBe("cutout")
+  })
 })

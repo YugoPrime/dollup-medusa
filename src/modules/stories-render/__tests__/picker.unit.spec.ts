@@ -22,20 +22,22 @@ function snapshot(overrides: Partial<ProductSnapshot> = {}): ProductSnapshot {
  *   "real"       → https://r2/{id}-r.jpg
  *   "detail"     → https://r2/{id}-1.jpg
  *   "size_chart" → https://r2/{id}-s.jpg
+ *   "cutout"     → https://r2/{id}-cutout.png   (transparent-bg)
  *   "other"      → https://r2/{id}-2.jpg        (numbered = "other")
  */
 function color(
   id: string,
-  imageSpec: Array<"front" | "back" | "real" | "detail" | "size_chart" | "other">,
+  imageSpec: Array<"front" | "back" | "real" | "detail" | "size_chart" | "cutout" | "other">,
   opts: { sku?: string; sizes?: string[]; color?: string } = {},
 ): SnapshotVariant {
-  const suffix: Record<string, string> = {
-    front: "",
-    back: "-b",
-    real: "-r",
-    detail: "-1",
-    size_chart: "-s",
-    other: "-2",
+  const suffix: Record<string, { tail: string; ext: string }> = {
+    front: { tail: "", ext: "jpg" },
+    back: { tail: "-b", ext: "jpg" },
+    real: { tail: "-r", ext: "jpg" },
+    detail: { tail: "-1", ext: "jpg" },
+    size_chart: { tail: "-s", ext: "jpg" },
+    cutout: { tail: "-cutout", ext: "png" },
+    other: { tail: "-2", ext: "jpg" },
   }
   return {
     id,
@@ -43,7 +45,7 @@ function color(
     color: opts.color ?? id,
     color_code: null,
     sizes: opts.sizes ?? ["S", "M"],
-    image_urls: imageSpec.map((k) => `https://r2/${id}${suffix[k]}.jpg`),
+    image_urls: imageSpec.map((k) => `https://r2/${id}${suffix[k].tail}.${suffix[k].ext}`),
   }
 }
 
@@ -334,5 +336,88 @@ describe("pickTemplate", () => {
     })
     const picked = pickTemplate(s, 0)!
     expect(picked.text_overrides.sku).toBeUndefined()
+  })
+
+  describe("cutout-spotlight integration", () => {
+    it("picks cutout-spotlight when a variant has a -cutout PNG and product is single-color, single-image", () => {
+      // Single color, one front + one cutout: replaces in-stock-hero in the
+      // rotation so we get the editorial spotlight style instead of a plain
+      // catalog photo.
+      const s = snapshot({
+        variants_in_stock: [color("pink", ["front", "cutout"])],
+        variant_in_stock_count: 1,
+      })
+      const picked = pickTemplate(s, 0)!
+      expect(picked.template_slug).toBe("cutout-spotlight")
+      expect(picked.slot_inputs.product_cutout).toBe("https://r2/pink-cutout.png")
+    })
+
+    it("cutout-spotlight wins over both in-stock-hero AND lifestyle-overlay across slot indices", () => {
+      // The rotation pool used to alternate in-stock-hero / lifestyle by slot
+      // index. When a cutout exists, both slots should pick cutout-spotlight —
+      // it's the more polished editorial template.
+      const s = snapshot({
+        variants_in_stock: [color("pink", ["front", "cutout"])],
+        variant_in_stock_count: 1,
+      })
+      for (let i = 0; i < 4; i++) {
+        expect(pickTemplate(s, i)!.template_slug).toBe("cutout-spotlight")
+      }
+    })
+
+    it("multi-color cascade still wins over cutout-spotlight (cutout is single-product editorial only)", () => {
+      // 2 colors with backs → product-2colors is the right call. The cutout
+      // template is for solo-product editorial moments, not multi-color carousels.
+      const s = snapshot({
+        variants_in_stock: [
+          color("pink", ["front", "back", "cutout"]),
+          color("blue", ["front", "back"]),
+        ],
+        variant_in_stock_count: 2,
+      })
+      expect(pickTemplate(s, 0)!.template_slug).toBe("product-2colors")
+    })
+
+    it("on-sale still wins over cutout-spotlight", () => {
+      const s = snapshot({
+        price_mur: 990,
+        compare_at_price_mur: 1490,
+        variants_in_stock: [color("pink", ["front", "cutout"])],
+        variant_in_stock_count: 1,
+      })
+      expect(pickTemplate(s, 0)!.template_slug).toBe("on-sale")
+    })
+
+    it("new-arrival still wins over cutout-spotlight for fresh products", () => {
+      // New arrival is the rarest signal; preserve it when set so the NEW
+      // stamp doesn't get hidden behind a cutout shot.
+      const s = snapshot({
+        variants_in_stock: [color("pink", ["front", "cutout"])],
+        variant_in_stock_count: 1,
+        is_new_arrival: true,
+      })
+      expect(pickTemplate(s, 0)!.template_slug).toBe("new-arrival")
+    })
+
+    it("cutout PNG never plugs into product-1color front/back slots", () => {
+      // -cutout isn't a "back" — front + cutout shouldn't trigger product-1color.
+      const s = snapshot({
+        variants_in_stock: [color("pink", ["front", "cutout"])],
+        variant_in_stock_count: 1,
+      })
+      const picked = pickTemplate(s, 0)!
+      expect(picked.template_slug).not.toBe("product-1color")
+      expect(picked.slot_inputs.back).toBeUndefined()
+    })
+
+    it("falls back to in-stock-hero rotation when product has front but NO cutout", () => {
+      const s = snapshot({
+        variants_in_stock: [color("pink", ["front"])],
+        variant_in_stock_count: 1,
+        is_new_arrival: false,
+      })
+      const slugs = [0, 1].map((i) => pickTemplate(s, i)!.template_slug)
+      expect(slugs).toEqual(["in-stock-hero", "lifestyle-overlay"])
+    })
   })
 })
