@@ -33,6 +33,7 @@ import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
 
 import { uploadStoryRenderToR2 } from "../lib/r2-story-uploader"
 import { addDaysToMauritiusDate, mauritiusToday } from "../lib/mauritius-date"
+import { escapeTelegramHtml, sendTelegram } from "../lib/telegram"
 import { STORIES_MODULE } from "../modules/stories"
 import type StoriesModuleService from "../modules/stories/service"
 import {
@@ -127,6 +128,7 @@ async function runOnce(
   logger: { info: (s: string) => void; warn: (s: string) => void; error: (s: string) => void },
   settings: Settings,
 ): Promise<void> {
+  const tickStart = Date.now()
   const today = mauritiusToday()
   const horizon = addDaysToMauritiusDate(today, settings.lookaheadDays)
 
@@ -157,6 +159,7 @@ async function runOnce(
   let totalOk = 0
   let totalSkipped = 0
   let totalError = 0
+  const failures: Array<{ slot_id: string; message: string }> = []
 
   for (const plan of upcoming) {
     const slots = await stories.listStorySlots({ plan_id: plan.id })
@@ -193,13 +196,50 @@ async function runOnce(
         logger.error(
           `[local-render]   FAIL  slot=${r.slot_id} idx=${r.slot_index} msg="${r.message}"`,
         )
+        failures.push({ slot_id: r.slot_id, message: r.message })
       }
     }
   }
 
+  const durationSec = Math.round((Date.now() - tickStart) / 1000)
   logger.info(
-    `[local-render] iteration done | ok=${totalOk} skipped=${totalSkipped} errors=${totalError}`,
+    `[local-render] iteration done | ok=${totalOk} skipped=${totalSkipped} errors=${totalError} duration=${durationSec}s`,
   )
+
+  // Telegram summary only when there was actual work — silent on idle scans
+  // so the bot doesn't spam every poll cycle.
+  if (totalOk + totalError > 0) {
+    const icon = totalError === 0 ? "✅" : totalOk === 0 ? "❌" : "⚠️"
+    const minutes = Math.floor(durationSec / 60)
+    const seconds = durationSec % 60
+    const durationLabel =
+      minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`
+    const lines: string[] = [
+      `${icon} <b>Stories render run</b>`,
+      "",
+      `Rendered: ${totalOk}`,
+      totalError > 0 ? `Failed: ${totalError}` : null,
+      totalSkipped > 0 ? `Skipped: ${totalSkipped}` : null,
+      `Duration: ${durationLabel}`,
+    ].filter((l): l is string => l !== null)
+    if (failures.length > 0) {
+      lines.push("")
+      lines.push("<b>Failures:</b>")
+      // Cap to 5 to keep Telegram message readable
+      for (const f of failures.slice(0, 5)) {
+        lines.push(
+          `• ${escapeTelegramHtml(f.slot_id)}: ${escapeTelegramHtml(f.message.slice(0, 120))}`,
+        )
+      }
+      if (failures.length > 5) {
+        lines.push(`…and ${failures.length - 5} more (check PM2 logs)`)
+      }
+    }
+    await sendTelegram(lines.join("\n")).catch(() => {
+      // Telegram is best-effort — never let a notification failure fail
+      // the render run itself.
+    })
+  }
 }
 
 async function runOneSlot(
