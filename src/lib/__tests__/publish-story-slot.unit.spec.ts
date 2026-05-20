@@ -1,5 +1,6 @@
 import {
   readAttemptCount,
+  readFbPublishError,
   readLastAttemptAt,
   readRender,
 } from "../publish-story-slot"
@@ -65,6 +66,45 @@ describe("publish-story-slot helpers", () => {
     it("returns null for invalid date strings", () => {
       expect(
         readLastAttemptAt({ publish_error: { attempted_at: "not a date" } }),
+      ).toBeNull()
+    })
+  })
+
+  describe("readFbPublishError", () => {
+    it("returns null when metadata is null/empty/missing the key", () => {
+      expect(readFbPublishError(null)).toBeNull()
+      expect(readFbPublishError(undefined)).toBeNull()
+      expect(readFbPublishError({})).toBeNull()
+      expect(readFbPublishError({ fb_publish_error: null })).toBeNull()
+    })
+
+    it("returns null when fb_publish_error is not an object", () => {
+      expect(readFbPublishError({ fb_publish_error: "oops" })).toBeNull()
+      expect(readFbPublishError({ fb_publish_error: 42 })).toBeNull()
+    })
+
+    it("returns the error block when shape is valid", () => {
+      const err = readFbPublishError({
+        fb_publish_error: {
+          message: "boom",
+          status: 400,
+          fbtrace_id: "abc",
+          meta_code: 100,
+          attempted_at: "2026-05-20T10:00:00.000Z",
+        },
+      })
+      expect(err).toEqual({
+        message: "boom",
+        status: 400,
+        fbtrace_id: "abc",
+        meta_code: 100,
+        attempted_at: "2026-05-20T10:00:00.000Z",
+      })
+    })
+
+    it("requires message to be a string — returns null otherwise", () => {
+      expect(
+        readFbPublishError({ fb_publish_error: { status: 400 } }),
       ).toBeNull()
     })
   })

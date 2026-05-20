@@ -7,8 +7,21 @@ import {
   pollContainerUntilReady,
   submitStoryContainer,
 } from "./meta-ig"
+import {
+  MetaFbError,
+  isFbCrosspostEnabled,
+  publishFbVideoStory,
+} from "./meta-fb"
 import { STORIES_MODULE } from "../modules/stories"
 import type StoriesModuleService from "../modules/stories/service"
+
+type FbPublishErrorRecord = {
+  message: string
+  status?: number
+  fbtrace_id?: string
+  meta_code?: number
+  attempted_at: string
+}
 
 export type PublishSuccess = {
   ok: true
@@ -87,14 +100,36 @@ export async function publishStorySlot(args: {
     const mediaId = await publishContainer({ creationId })
 
     await stories.markPosted(args.slotId)
+
+    let fbStoryId: string | undefined
+    let fbPublishError: FbPublishErrorRecord | null = null
+
+    if (isFbCrosspostEnabled()) {
+      try {
+        fbStoryId = await publishFbVideoStory({ videoUrl: render.mp4_url })
+      } catch (fbErr) {
+        const e = fbErr instanceof MetaFbError ? fbErr : null
+        fbPublishError = {
+          message: (fbErr as Error)?.message ?? "FB cross-post failed",
+          status: e?.status,
+          fbtrace_id: e?.fbtraceId,
+          meta_code: e?.metaErrorCode,
+          attempted_at: new Date().toISOString(),
+        }
+      }
+    }
+
     await stories.updateSlotMetadata(args.slotId, {
       publish: {
         media_id: mediaId,
         creation_id: creationId,
         published_at: new Date().toISOString(),
+        fb_story_id: fbStoryId,
       },
-      // Clear any previous failure annotation now that the slot succeeded.
+      // Clear any previous IG failure annotation now that the slot succeeded.
       publish_error: null,
+      // null clears any prior failure; record clears any prior success.
+      fb_publish_error: fbPublishError,
     })
 
     return {
@@ -160,4 +195,21 @@ export function readLastAttemptAt(metadata: unknown): Date | null {
   if (typeof at !== "string") return null
   const d = new Date(at)
   return Number.isFinite(d.getTime()) ? d : null
+}
+
+export function readFbPublishError(
+  metadata: unknown,
+): FbPublishErrorRecord | null {
+  if (!metadata || typeof metadata !== "object") return null
+  const e = (metadata as any).fb_publish_error
+  if (!e || typeof e !== "object") return null
+  if (typeof e.message !== "string") return null
+  return {
+    message: e.message,
+    status: typeof e.status === "number" ? e.status : undefined,
+    fbtrace_id: typeof e.fbtrace_id === "string" ? e.fbtrace_id : undefined,
+    meta_code: typeof e.meta_code === "number" ? e.meta_code : undefined,
+    attempted_at:
+      typeof e.attempted_at === "string" ? e.attempted_at : "",
+  }
 }
