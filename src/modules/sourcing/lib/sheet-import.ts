@@ -35,6 +35,18 @@ export function parseColorCell(_raw: string): Array<string | null> {
   throw new Error("not_implemented")
 }
 
-export function normalizeSizeLabel(_token: string): string {
-  throw new Error("not_implemented")
+const SIZE_ALIASES: Record<string, string> = {
+  XS: "XS", "X-S": "XS",
+  S: "S",
+  M: "M",
+  L: "L",
+  XL: "XL", "X-L": "XL", "1X": "XL", "1XL": "XL",
+  XXL: "XXL", "2XL": "XXL", "XX-L": "XXL",
+  XXXL: "XXXL", "3XL": "XXXL",
+  OS: "OS", "ONE SIZE": "OS", "FREE SIZE": "OS", FREESIZE: "OS",
+}
+
+export function normalizeSizeLabel(token: string): string {
+  const upper = token.trim().toUpperCase()
+  return SIZE_ALIASES[upper] ?? upper
 }
