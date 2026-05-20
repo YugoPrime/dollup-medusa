@@ -229,3 +229,64 @@ describe("parseSourcingSheet — fixture row expansion", () => {
     ])
   })
 })
+
+describe("parseSourcingSheet — edge cases", () => {
+  it("skips blank rows between items", () => {
+    const rows = [
+      ["Color", "Size", "Qty", "unit price"],
+      ["Brown", "3S,3M", "6", "5.00"],
+      ["", "", "", ""],
+      ["", "3S,3M", "6", "4.00"],
+    ]
+    const r = parseSourcingSheet(rows)
+    expect(r.rows.length).toBe(2)
+  })
+
+  it("records missing-size rows as unparseable", () => {
+    const rows = [
+      ["Color", "Size", "Qty", "unit price"],
+      ["Brown", "", "10", "5.00"],
+    ]
+    const r = parseSourcingSheet(rows)
+    expect(r.rows.length).toBe(0)
+    expect(r.unparseable).toEqual([
+      { row_index: 1, raw: ["Brown", "", "10", "5.00"], reason: "missing size cell" },
+    ])
+  })
+
+  it("records invalid-qty rows as unparseable", () => {
+    const rows = [
+      ["Color", "Size", "Qty", "unit price"],
+      ["Brown", "3S,3M", "abc", "5.00"],
+      ["Brown", "3S,3M", "0", "5.00"],
+    ]
+    const r = parseSourcingSheet(rows)
+    expect(r.rows.length).toBe(0)
+    expect(r.unparseable.map((u) => u.reason)).toEqual([
+      "invalid qty",
+      "invalid qty",
+    ])
+  })
+
+  it("accepts 'price' or 'cost' as the cost column header", () => {
+    const r1 = parseSourcingSheet([
+      ["Color", "Size", "Qty", "price"],
+      ["Brown", "3S", "3", "5.00"],
+    ])
+    expect(r1.rows.length).toBe(1)
+    const r2 = parseSourcingSheet([
+      ["Color", "Size", "Qty", "cost"],
+      ["Brown", "3S", "3", "5.00"],
+    ])
+    expect(r2.rows.length).toBe(1)
+  })
+
+  it("tolerates missing color column entirely", () => {
+    const rows = [
+      ["Size", "Qty", "unit price"],
+      ["3S,3M", "6", "5.00"],
+    ]
+    const r = parseSourcingSheet(rows)
+    expect(r.rows[0].variants.map((v) => v.color)).toEqual([null, null])
+  })
+})
