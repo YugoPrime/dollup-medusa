@@ -88,6 +88,21 @@ export function parseSizeCell(raw: string): ParsedSizeToken[] {
   return out
 }
 
-export function parseColorCell(_raw: string): Array<string | null> {
-  throw new Error("not_implemented")
+function titleCaseIfAllCaps(s: string): string {
+  if (s !== s.toUpperCase()) return s
+  return s
+    .toLowerCase()
+    .split(" ")
+    .map((w) => (w.length === 0 ? w : w[0].toUpperCase() + w.slice(1)))
+    .join(" ")
+}
+
+export function parseColorCell(raw: string): Array<string | null> {
+  if (!raw || raw.trim().length === 0) return [null]
+  const parts = raw
+    .split(",")
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0)
+    .map(titleCaseIfAllCaps)
+  return parts.length === 0 ? [null] : parts
 }

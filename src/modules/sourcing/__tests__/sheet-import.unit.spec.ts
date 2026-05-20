@@ -1,4 +1,4 @@
-import { normalizeSizeLabel, parseSizeCell } from "../lib/sheet-import"
+import { normalizeSizeLabel, parseSizeCell, parseColorCell } from "../lib/sheet-import"
 
 describe("normalizeSizeLabel", () => {
   const cases: Array<[string, string]> = [
@@ -101,5 +101,34 @@ describe("parseSizeCell", () => {
   it("returns empty array for empty input", () => {
     expect(parseSizeCell("")).toEqual([])
     expect(parseSizeCell("   ")).toEqual([])
+  })
+})
+
+describe("parseColorCell", () => {
+  it("returns [null] for blank cell", () => {
+    expect(parseColorCell("")).toEqual([null])
+    expect(parseColorCell("   ")).toEqual([null])
+  })
+
+  it("returns single trimmed color", () => {
+    expect(parseColorCell("Brown")).toEqual(["Brown"])
+    expect(parseColorCell("  BLACK  ")).toEqual(["Black"])
+  })
+
+  it("splits comma-separated multi-color (real sheet row 9 — preserves Brugandy typo)", () => {
+    expect(parseColorCell("Brugandy, White,")).toEqual(["Brugandy", "White"])
+  })
+
+  it("splits 3-color cell (real sheet row 15)", () => {
+    expect(parseColorCell("Black, White, Light Yellow")).toEqual([
+      "Black",
+      "White",
+      "Light Yellow",
+    ])
+  })
+
+  it("title-cases ALL CAPS but keeps mixed-case as-is", () => {
+    expect(parseColorCell("BLACK")).toEqual(["Black"])
+    expect(parseColorCell("Light Yellow")).toEqual(["Light Yellow"])
   })
 })
