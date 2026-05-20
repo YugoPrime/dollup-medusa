@@ -67,9 +67,11 @@ export function parseSizeCell(raw: string): ParsedSizeToken[] {
     const rest = m[2]
     const wholeUpper = trimmed.toUpperCase()
 
-    // If there's a digit prefix AND the whole token is all-caps, try the
-    // whole token as a size alias (e.g. "2XL" → "XXL").
-    // If the token has mixed case (e.g. "2Xl"), treat digit as qty.
+    // qty is always taken from the digit prefix. The size token is then
+    // chosen as either (a) the whole all-caps token when it's a known alias
+    // (e.g. "2XL" → "XXL", so "2XL" yields qty=2 + size=XXL), or
+    // (b) just the letter portion otherwise (e.g. "2Xl" → qty=2 + size=XL,
+    // "3S" → qty=3 + size=S).
     const qty = prefix ? parseInt(prefix, 10) : 1
     let sizeToken: string
     if (prefix && trimmed === wholeUpper && SIZE_ALIASES[wholeUpper]) {
