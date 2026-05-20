@@ -12,8 +12,12 @@ import {
   isFbCrosspostEnabled,
   publishFbVideoStory,
 } from "./meta-fb"
+import { escapeTelegramHtml, sendTelegram } from "./telegram"
 import { STORIES_MODULE } from "../modules/stories"
 import type StoriesModuleService from "../modules/stories/service"
+
+const ADMIN_URL =
+  process.env.ADMIN_URL ?? "https://api.dollupboutique.com/app"
 
 type FbPublishErrorRecord = {
   message: string
@@ -144,6 +148,15 @@ export async function publishStorySlot(args: {
       fb_publish_error: fbPublishError,
     })
 
+    // Fire-and-forget Telegram alert when FB cross-post failed but IG succeeded.
+    // After the metadata write so a Telegram outage can't lose the error record.
+    // The slot is "ok" from the publish-flow perspective — IG is the source of
+    // truth; FB is best-effort. We just want a human to see that crosspost
+    // missed so they can either ignore or manually share.
+    if (fbPublishError) {
+      void notifyFbCrosspostFailure(args.slotId, fbPublishError)
+    }
+
     return {
       ok: true,
       media_id: mediaId,
@@ -236,5 +249,39 @@ export function readFbPublishError(
     meta_code: typeof e.meta_code === "number" ? e.meta_code : undefined,
     attempted_at:
       typeof e.attempted_at === "string" ? e.attempted_at : "",
+  }
+}
+
+/**
+ * Sends a one-shot Telegram notification when a slot posted to IG successfully
+ * but the FB Page cross-post failed. Designed to be fire-and-forget — never
+ * throws, never affects the publish result.
+ *
+ * Dormant when TELEGRAM_BOT_TOKEN/CHAT_ID aren't set (sendTelegram handles).
+ */
+async function notifyFbCrosspostFailure(
+  slotId: string,
+  err: FbPublishErrorRecord,
+): Promise<void> {
+  try {
+    const slotUrl = `${ADMIN_URL.replace(/\/$/, "")}/stories?slot=${encodeURIComponent(slotId)}`
+    const statusLine = err.status ? ` (HTTP ${err.status})` : ""
+    const traceLine = err.fbtrace_id
+      ? `\n<i>fbtrace_id:</i> <code>${escapeTelegramHtml(err.fbtrace_id)}</code>`
+      : ""
+    const codeLine = err.meta_code
+      ? `\n<i>meta_code:</i> ${err.meta_code}`
+      : ""
+    const text =
+      `⚠️ <b>FB cross-post FAILED</b>${statusLine}\n` +
+      `IG published OK, FB Story did NOT.\n\n` +
+      `<i>Slot:</i> <code>${escapeTelegramHtml(slotId)}</code>\n` +
+      `<i>Error:</i> ${escapeTelegramHtml(err.message)}` +
+      `${traceLine}${codeLine}\n\n` +
+      `<a href="${slotUrl}">Open slot in admin →</a>`
+    await sendTelegram(text)
+  } catch {
+    // Telegram failure is non-fatal — the error record is already persisted
+    // on the slot, the operator can inspect it from the admin UI.
   }
 }
