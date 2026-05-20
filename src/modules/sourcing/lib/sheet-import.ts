@@ -27,14 +27,6 @@ export function parseSourcingSheet(_rows: string[][]): ParseResult {
   throw new Error("not_implemented")
 }
 
-export function parseSizeCell(_raw: string): ParsedSizeToken[] {
-  throw new Error("not_implemented")
-}
-
-export function parseColorCell(_raw: string): Array<string | null> {
-  throw new Error("not_implemented")
-}
-
 const SIZE_ALIASES: Record<string, string> = {
   XS: "XS", "X-S": "XS",
   S: "S",
@@ -49,4 +41,51 @@ const SIZE_ALIASES: Record<string, string> = {
 export function normalizeSizeLabel(token: string): string {
   const upper = token.trim().toUpperCase()
   return SIZE_ALIASES[upper] ?? upper
+}
+
+// Matches:
+//   - qty-prefix + size:  "3S", "12XL", " 2Xl ", "2XL"
+//   - size only (qty defaults to 1):  "S", "XL"
+// Rejects free-form phrases like "free size 3 each" by requiring the whole
+// token (after trim) to match exactly one of these two shapes.
+const SIZE_TOKEN_RE = /^(\d+)?\s*([A-Za-z][A-Za-z0-9-]*)$/
+
+export function parseSizeCell(raw: string): ParsedSizeToken[] {
+  if (!raw || raw.trim().length === 0) return []
+  const out: ParsedSizeToken[] = []
+  for (const piece of raw.split(",")) {
+    const trimmed = piece.trim()
+    if (trimmed.length === 0) continue
+    const m = SIZE_TOKEN_RE.exec(trimmed)
+    if (!m) {
+      // Whole-cell free-form (e.g. "free size 3 each") → caller falls back
+      // to row.Qty. Returning [] for the whole cell is what signals that.
+      return []
+    }
+
+    const prefix = m[1]
+    const rest = m[2]
+    const wholeUpper = trimmed.toUpperCase()
+
+    // If there's a digit prefix AND the whole token is all-caps, try the
+    // whole token as a size alias (e.g. "2XL" → "XXL").
+    // If the token has mixed case (e.g. "2Xl"), treat digit as qty.
+    const qty = prefix ? parseInt(prefix, 10) : 1
+    let sizeToken: string
+    if (prefix && trimmed === wholeUpper && SIZE_ALIASES[wholeUpper]) {
+      // All-caps with digit prefix, and it's a known alias
+      sizeToken = wholeUpper
+    } else {
+      // Mixed case, or all-caps but not an alias: treat prefix as qty
+      sizeToken = rest
+    }
+
+    const size = normalizeSizeLabel(sizeToken)
+    out.push({ size, qty })
+  }
+  return out
+}
+
+export function parseColorCell(_raw: string): Array<string | null> {
+  throw new Error("not_implemented")
 }
