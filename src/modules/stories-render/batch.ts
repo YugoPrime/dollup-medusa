@@ -65,6 +65,21 @@ export async function batchRenderPlan(
 
   const results: BatchSlotResult[] = []
 
+  // Per-day template count map fed back into pickTemplate so the picker can
+  // enforce its MAX_TEMPLATE_PER_DAY cap. Seeded from slots that were already
+  // rendered (kept on `force: false` reruns) so the cap stays accurate when
+  // we're filling in the gaps rather than rendering a fresh plan.
+  const pickedSoFar = new Map<string, number>()
+  for (const slot of slots) {
+    const existing = readExistingRender(slot.metadata)
+    if (existing && !force) {
+      pickedSoFar.set(
+        existing.template_slug,
+        (pickedSoFar.get(existing.template_slug) ?? 0) + 1,
+      )
+    }
+  }
+
   for (const slot of slots) {
     if (slot.posted_at) {
       results.push({
@@ -93,7 +108,7 @@ export async function batchRenderPlan(
     const snapshot = (slot.product_snapshot ?? null) as ProductSnapshot | null
     const picked: ReturnType<typeof pickTemplate> = forcedSlug
       ? { template_slug: forcedSlug, slot_inputs: {}, text_overrides: {} }
-      : pickTemplate(snapshot, slot.slot_index)
+      : pickTemplate(snapshot, slot.slot_index, pickedSoFar)
     if (!picked) {
       results.push({
         slot_id: slot.id,
@@ -105,6 +120,15 @@ export async function batchRenderPlan(
       })
       continue
     }
+
+    // Track the pick toward today's template-diversity cap. Counted regardless
+    // of whether the render itself succeeds — a failed render of template X
+    // still "spent" that slot; we don't want the next slot to also pick X
+    // just because the first failed.
+    pickedSoFar.set(
+      picked.template_slug,
+      (pickedSoFar.get(picked.template_slug) ?? 0) + 1,
+    )
 
     // Stamp "rendering now" so per-slot pollers in the admin UI can show a
     // spinner on this slot while it processes. Cleared on success/failure.

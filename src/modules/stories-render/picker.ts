@@ -21,13 +21,73 @@ const SINGLE_IMAGE_ROTATION = [
   "in-stock-hero-cream",
 ] as const
 
+// 1-color, front + back available: rotate between the split front|back layout
+// (product-1color) and the cream featured-card layout with back-as-circle inset
+// (product-1color-featured). Same slot/text contract — picker swaps purely by
+// slotIndex parity for daily-feed variety.
+const ONE_COLOR_FRONT_BACK_ROTATION = [
+  "product-1color",
+  "product-1color-featured",
+] as const
+
+/**
+ * Hard daily cap per template — no more than this many slots in a single day
+ * can use the same template. Prevents the feed feeling repetitive when many
+ * products share the same shape (e.g. 5 single-color products would all have
+ * been product-1color without this cap).
+ *
+ * Sale + new-arrival + product-3colors are exempt because they're tied to
+ * product facts (compare_at_price, is_new_arrival, has-3-colors) — capping
+ * them would mean misrepresenting the product, not just losing variety.
+ */
+const MAX_TEMPLATE_PER_DAY = 2
+
+function countOf(picked: Map<string, number> | undefined, slug: string): number {
+  return picked?.get(slug) ?? 0
+}
+
+function isSaturated(picked: Map<string, number> | undefined, slug: string): boolean {
+  return countOf(picked, slug) >= MAX_TEMPLATE_PER_DAY
+}
+
+/**
+ * Returns the slug in `candidates` with the lowest current daily count. Ties
+ * are broken by list order (earlier candidate wins). True round-robin: with
+ * two equally-empty candidates [A, B], picks land [A, B, A, B] rather than
+ * [A, A, B, B] — better visual rhythm in the daily feed. Guarantees a non-null
+ * pick as long as `candidates` is non-empty.
+ */
+function leastUsed(
+  candidates: readonly string[],
+  picked: Map<string, number> | undefined,
+): string {
+  let best = candidates[0]
+  let bestCount = countOf(picked, best)
+  for (let i = 1; i < candidates.length; i++) {
+    const n = countOf(picked, candidates[i])
+    if (n < bestCount) {
+      best = candidates[i]
+      bestCount = n
+    }
+  }
+  return best
+}
+
 function priceLabel(amount: number): string {
   return `Rs.${amount}`
 }
 
+/**
+ * Returns the PARENT product code only (e.g. "IS2066"), not the full variant
+ * SKU ("IS2066-M-R"). The boutique's SKU convention is `<parent>-<size>-<color>`
+ * separated by hyphens, so the parent is everything before the first `-`.
+ * Slicing to 10 chars is kept as a safety net for any non-conforming SKU.
+ */
 function firstSku(snapshot: ProductSnapshot): string | null {
   const sku = snapshot.variants_in_stock[0]?.sku
-  return sku ? sku.slice(0, 10) : null
+  if (!sku) return null
+  const parent = sku.split("-")[0] ?? sku
+  return parent.slice(0, 10)
 }
 
 function collectSizes(snapshot: ProductSnapshot, maxChars: number): string {
@@ -168,6 +228,7 @@ function buildTextOverrides(
     }
     case "new-arrival":
     case "product-1color":
+    case "product-1color-featured":
     case "product-2colors":
     case "product-2colors-front":
     case "product-3colors":
@@ -193,12 +254,19 @@ function buildTextOverrides(
  *   - lifestyle-overlay is the only template that consumes a real shot.
  *
  * Decision order:
- *   1. compare_at_price set + above current price → "on-sale"
- *   2. multi-image cascade by color count: 3+ colors with backs available →
- *      product-3colors, 2 colors → product-2colors, 1 color with front + back
- *      → product-1color
- *   3. otherwise rotate the single-image pool [in-stock-hero, lifestyle-overlay]
- *      by slotIndex so the daily feed has variety
+ *   1. compare_at_price set + above current price → "on-sale" (exempt from cap)
+ *   2. 3+ colors with backs → "product-3colors" (exempt from cap — only
+ *      template that can show 3 colors at once)
+ *   3. 2 colors → "product-2colors" / "product-2colors-front" (capped)
+ *   4. 1 color with front + back → rotate ONE_COLOR_FRONT_BACK_ROTATION
+ *      (capped; picks least-used template in the pool when cap map present)
+ *   5. otherwise rotate the single-image pool [in-stock-hero, lifestyle-overlay,
+ *      cutout-spotlight, …] picking the least-used for the day
+ *
+ * Per-day diversity (when `pickedSoFar` is provided): all capped templates
+ * are limited to MAX_TEMPLATE_PER_DAY. When at cap, the picker falls through
+ * to the next decision branch so the feed doesn't show the same template
+ * 3+ times in one day.
  *
  * Returns null when there's no usable front image — e.g. variants only have
  * real/detail/size_chart shots. Callers (batch render) skip the slot in that
@@ -207,6 +275,7 @@ function buildTextOverrides(
 export function pickTemplate(
   snapshot: ProductSnapshot | null,
   slotIndex: number,
+  pickedSoFar?: Map<string, number>,
 ): PickedRender | null {
   if (!snapshot) return null
   const colors = snapshot.variants_in_stock
@@ -218,6 +287,8 @@ export function pickTemplate(
   const leadFront = pickFront(colors[0])
   if (!leadFront) return null
 
+  // on-sale is exempt from the cap — sales are rare and high-value; capping
+  // them would mean hiding a price drop from the feed.
   if (
     snapshot.compare_at_price_mur != null &&
     snapshot.compare_at_price_mur > snapshot.price_mur
@@ -229,6 +300,8 @@ export function pickTemplate(
     }
   }
 
+  // product-3colors is exempt — only template that shows 3 colors at once,
+  // capping it would misrepresent multi-color products.
   if (colors.length >= 3) {
     const a = leadFront
     const b = pickFront(colors[1])
@@ -247,36 +320,45 @@ export function pickTemplate(
     const a = leadFront
     const b = pickFront(colors[1])
     const back = pickBack(colors[0]) ?? pickBackFromAnyOther(colors, 0)
-    if (a && b && back) {
+    if (a && b && back && !isSaturated(pickedSoFar, "product-2colors")) {
       return {
         template_slug: "product-2colors",
         slot_inputs: { front_a: a, front_b: b, back },
         text_overrides: buildTextOverrides("product-2colors", snapshot),
       }
     }
-    // 2 fronts with no back available anywhere → fall back to the
-    // front-only 2-color template instead of the single-image rotation.
-    // Beats showing just one color when the catalog has two.
-    if (a && b) {
+    if (a && b && !isSaturated(pickedSoFar, "product-2colors-front")) {
       return {
         template_slug: "product-2colors-front",
         slot_inputs: { front_a: a, front_b: b },
         text_overrides: buildTextOverrides("product-2colors-front", snapshot),
       }
     }
+    // Both 2-color templates saturated → fall through to 1-color / rotation.
   }
 
   const leadBack = pickBack(colors[0])
-  if (leadBack) {
+  if (
+    leadBack &&
+    ONE_COLOR_FRONT_BACK_ROTATION.some((s) => !isSaturated(pickedSoFar, s))
+  ) {
+    // Prefer least-used in the rotation when caller passes the count map;
+    // otherwise stay deterministic by slotIndex parity (test back-compat).
+    const slug = pickedSoFar
+      ? leastUsed(ONE_COLOR_FRONT_BACK_ROTATION, pickedSoFar)
+      : ONE_COLOR_FRONT_BACK_ROTATION[
+          slotIndex % ONE_COLOR_FRONT_BACK_ROTATION.length
+        ]
     return {
-      template_slug: "product-1color",
+      template_slug: slug,
       slot_inputs: { front: leadFront, back: leadBack },
-      text_overrides: buildTextOverrides("product-1color", snapshot),
+      text_overrides: buildTextOverrides(slug, snapshot),
     }
   }
 
   // Single photo, single color: prefer new-arrival when it actually IS new,
-  // else fall back to the rotation pool for variety.
+  // else fall back to the rotation pool for variety. new-arrival is exempt —
+  // it's gated on is_new_arrival which is a product fact.
   if (snapshot.is_new_arrival) {
     return {
       template_slug: "new-arrival",
@@ -296,7 +378,12 @@ export function pickTemplate(
     ? [...SINGLE_IMAGE_ROTATION, "cutout-spotlight"]
     : SINGLE_IMAGE_ROTATION
 
-  const slug = pool[slotIndex % pool.length]
+  // When the caller passes a per-day count map, prefer the least-used template
+  // in the pool. Without it, fall back to the deterministic slotIndex rotation
+  // so the function stays pure-by-default for tests that don't care about caps.
+  const slug = pickedSoFar
+    ? leastUsed(pool, pickedSoFar)
+    : pool[slotIndex % pool.length]
   if (slug === "cutout-spotlight" && cutoutUrl) {
     return {
       template_slug: slug,

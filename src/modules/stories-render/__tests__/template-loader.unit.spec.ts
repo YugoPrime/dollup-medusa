@@ -42,6 +42,7 @@ describe("template-loader", () => {
       "new-arrival",
       "on-sale",
       "product-1color",
+      "product-1color-featured",
       "product-2colors",
       "product-2colors-front",
       "product-3colors",

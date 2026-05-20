@@ -210,15 +210,28 @@ describe("pickTemplate", () => {
     expect(picked.template_slug).not.toBe("product-2colors")
   })
 
-  it("picks product-1color when 1 color with front + back", () => {
+  it("picks product-1color (or featured variant) when 1 color with front + back", () => {
     const s = snapshot({
       variants_in_stock: [color("pink", ["front", "back"])],
       variant_in_stock_count: 1,
     })
     const picked = pickTemplate(s, 0)!
-    expect(picked.template_slug).toBe("product-1color")
+    expect(["product-1color", "product-1color-featured"]).toContain(
+      picked.template_slug,
+    )
     expect(picked.slot_inputs.front).toBe("https://r2/pink.jpg")
     expect(picked.slot_inputs.back).toBe("https://r2/pink-b.jpg")
+  })
+
+  it("rotates [product-1color, product-1color-featured] by slot_index for 1-color front+back", () => {
+    const s = snapshot({
+      variants_in_stock: [color("pink", ["front", "back"])],
+      variant_in_stock_count: 1,
+    })
+    expect(pickTemplate(s, 0)!.template_slug).toBe("product-1color")
+    expect(pickTemplate(s, 1)!.template_slug).toBe("product-1color-featured")
+    expect(pickTemplate(s, 2)!.template_slug).toBe("product-1color")
+    expect(pickTemplate(s, 3)!.template_slug).toBe("product-1color-featured")
   })
 
   it("REGRESSION: product-1color is NOT used when the only second image is a detail/real/size_chart shot", () => {
@@ -230,6 +243,7 @@ describe("pickTemplate", () => {
     })
     const picked = pickTemplate(s, 0)!
     expect(picked.template_slug).not.toBe("product-1color")
+    expect(picked.template_slug).not.toBe("product-1color-featured")
     expect(["in-stock-hero", "lifestyle-overlay", "new-arrival"]).toContain(
       picked.template_slug,
     )
@@ -488,6 +502,7 @@ describe("pickTemplate", () => {
       })
       const picked = pickTemplate(s, 0)!
       expect(picked.template_slug).not.toBe("product-1color")
+      expect(picked.template_slug).not.toBe("product-1color-featured")
       expect(picked.slot_inputs.back).toBeUndefined()
     })
 
@@ -530,6 +545,136 @@ describe("pickTemplate", () => {
       })
       const slugs = [0, 1, 2, 3, 4].map((i) => pickTemplate(s, i)!.template_slug)
       expect(slugs).toContain("cutout-spotlight")
+    })
+  })
+
+  describe("SKU is the parent product code (not the variant SKU)", () => {
+    it("strips '-<size>-<color>' suffix so the story shows just the parent code", () => {
+      const s = snapshot({
+        variants_in_stock: [
+          color("red", ["front", "back"], { sku: "IS2066-M-R" }),
+        ],
+        variant_in_stock_count: 1,
+      })
+      const picked = pickTemplate(s, 0)
+      expect(picked!.text_overrides.sku).toBe("IS2066")
+    })
+
+    it("leaves a SKU with no hyphen unchanged (still capped at 10 chars)", () => {
+      const s = snapshot({
+        variants_in_stock: [color("red", ["front", "back"], { sku: "IS2066" })],
+        variant_in_stock_count: 1,
+      })
+      const picked = pickTemplate(s, 0)
+      expect(picked!.text_overrides.sku).toBe("IS2066")
+    })
+
+    it("caps non-conforming SKUs that have no hyphen at 10 chars (safety net)", () => {
+      const s = snapshot({
+        variants_in_stock: [
+          color("red", ["front", "back"], { sku: "ABCDEFGHIJKLMNO" }),
+        ],
+        variant_in_stock_count: 1,
+      })
+      const picked = pickTemplate(s, 0)
+      expect(picked!.text_overrides.sku).toBe("ABCDEFGHIJ")
+    })
+  })
+
+  describe("per-day template cap (MAX_TEMPLATE_PER_DAY = 2)", () => {
+    function oneColorWithBack(): ProductSnapshot {
+      return snapshot({
+        variants_in_stock: [color("red", ["front", "back"])],
+        variant_in_stock_count: 1,
+      })
+    }
+
+    it("3rd single-color-with-back product falls through to the single-image rotation", () => {
+      const s = oneColorWithBack()
+      const counts = new Map<string, number>()
+      const picks: string[] = []
+      for (let i = 0; i < 3; i++) {
+        const p = pickTemplate(s, i, counts)!
+        picks.push(p.template_slug)
+        counts.set(p.template_slug, (counts.get(p.template_slug) ?? 0) + 1)
+      }
+      // First two go to the 1-color rotation pool (product-1color +
+      // product-1color-featured). The third hits the cap on both and falls
+      // through to the single-image rotation.
+      expect(picks[0]).toMatch(/^product-1color(-featured)?$/)
+      expect(picks[1]).toMatch(/^product-1color(-featured)?$/)
+      expect(picks[0]).not.toBe(picks[1]) // diversity within the 2-pool
+      expect([
+        "in-stock-hero",
+        "in-stock-hero-blush",
+        "lifestyle-overlay",
+        "in-stock-hero-cream",
+      ]).toContain(picks[2])
+    })
+
+    it("no template is picked more than twice across an 8-slot day", () => {
+      const s = oneColorWithBack()
+      const counts = new Map<string, number>()
+      for (let i = 0; i < 8; i++) {
+        const p = pickTemplate(s, i, counts)!
+        counts.set(p.template_slug, (counts.get(p.template_slug) ?? 0) + 1)
+      }
+      for (const [slug, n] of counts) {
+        expect({ slug, n }).toEqual({ slug, n: expect.any(Number) })
+        expect(n).toBeLessThanOrEqual(2)
+      }
+    })
+
+    it("on-sale is EXEMPT from the cap (sales always shown)", () => {
+      const s = snapshot({
+        price_mur: 990,
+        compare_at_price_mur: 1490,
+        variants_in_stock: [color("red", ["front", "back"])],
+        variant_in_stock_count: 1,
+      })
+      const counts = new Map<string, number>([["on-sale", 5]])
+      const p = pickTemplate(s, 0, counts)!
+      expect(p.template_slug).toBe("on-sale")
+    })
+
+    it("product-3colors is EXEMPT from the cap (only template that shows 3 colors)", () => {
+      const s = snapshot({
+        variants_in_stock: [
+          color("red", ["front", "back"]),
+          color("pink", ["front"]),
+          color("blue", ["front"]),
+        ],
+        variant_in_stock_count: 3,
+      })
+      const counts = new Map<string, number>([["product-3colors", 5]])
+      const p = pickTemplate(s, 0, counts)!
+      expect(p.template_slug).toBe("product-3colors")
+    })
+
+    it("product-2colors falls through to product-2colors-front when capped", () => {
+      const s = snapshot({
+        variants_in_stock: [
+          color("red", ["front", "back"]),
+          color("pink", ["front"]),
+        ],
+        variant_in_stock_count: 2,
+      })
+      const counts = new Map<string, number>([["product-2colors", 2]])
+      const p = pickTemplate(s, 0, counts)!
+      expect(p.template_slug).toBe("product-2colors-front")
+    })
+
+    it("when no pickedSoFar is passed, picker behavior is unchanged (back-compat)", () => {
+      const s = oneColorWithBack()
+      const slugs = [0, 1, 2, 3].map((i) => pickTemplate(s, i)!.template_slug)
+      // Without a count map, the picker stays deterministic by slotIndex,
+      // alternating across the 2-pool — no cap enforced.
+      expect(slugs).toEqual([
+        "product-1color",
+        "product-1color-featured",
+        "product-1color",
+        "product-1color-featured",
+      ])
     })
   })
 })
