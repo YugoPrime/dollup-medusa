@@ -2,6 +2,7 @@ import {
   readAttemptCount,
   readFbPublishError,
   readLastAttemptAt,
+  readPriorFbStoryId,
   readRender,
 } from "../publish-story-slot"
 
@@ -106,6 +107,39 @@ describe("publish-story-slot helpers", () => {
       expect(
         readFbPublishError({ fb_publish_error: { status: 400 } }),
       ).toBeNull()
+    })
+  })
+
+  describe("readPriorFbStoryId", () => {
+    it("returns null when metadata is null/empty/missing publish", () => {
+      expect(readPriorFbStoryId(null)).toBeNull()
+      expect(readPriorFbStoryId(undefined)).toBeNull()
+      expect(readPriorFbStoryId({})).toBeNull()
+      expect(readPriorFbStoryId({ publish: null })).toBeNull()
+    })
+
+    it("returns null when publish.fb_story_id is missing or non-string", () => {
+      expect(readPriorFbStoryId({ publish: {} })).toBeNull()
+      expect(
+        readPriorFbStoryId({ publish: { fb_story_id: null } }),
+      ).toBeNull()
+      expect(
+        readPriorFbStoryId({ publish: { fb_story_id: 12345 } }),
+      ).toBeNull()
+      expect(
+        readPriorFbStoryId({ publish: { fb_story_id: "" } }),
+      ).toBeNull()
+    })
+
+    it("returns the prior FB story id when present", () => {
+      expect(
+        readPriorFbStoryId({
+          publish: {
+            media_id: "ig_123",
+            fb_story_id: "fb_456",
+          },
+        }),
+      ).toBe("fb_456")
     })
   })
 })

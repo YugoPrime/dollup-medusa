@@ -31,15 +31,18 @@ describe("template-loader", () => {
   it("lists all templates excluding private folders", async () => {
     const slugs = (await listTemplates(TEMPLATES_ROOT)).map((template) => template.slug)
     expect(slugs).toEqual([
+      "color-mood-rail",
       "customer-review",
       "cutout-spotlight",
       "how-to-order",
       "in-stock-hero",
       "in-stock-hero-blush",
       "in-stock-hero-cream",
+      "just-arrived-editorial",
       "lifestyle-overlay",
       "many-photos",
       "new-arrival",
+      "new-drop-arch",
       "on-sale",
       "product-1color",
       "product-1color-featured",

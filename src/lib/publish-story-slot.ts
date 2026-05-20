@@ -119,13 +119,25 @@ export async function publishStorySlot(args: {
       }
     }
 
+    // Build the publish block. fb_story_id is only set when we actually got
+    // one this run — otherwise omit the key so updateSlotMetadata's shallow
+    // merge doesn't wipe a prior crosspost ID. (Scenarios: FB crosspost is
+    // currently disabled but was enabled on a previous successful publish,
+    // OR this run's FB attempt failed — either way, keep the historic ID.)
+    const priorFbStoryId = readPriorFbStoryId(slot.metadata)
+    const publishBlock: Record<string, unknown> = {
+      media_id: mediaId,
+      creation_id: creationId,
+      published_at: new Date().toISOString(),
+    }
+    if (fbStoryId) {
+      publishBlock.fb_story_id = fbStoryId
+    } else if (priorFbStoryId) {
+      publishBlock.fb_story_id = priorFbStoryId
+    }
+
     await stories.updateSlotMetadata(args.slotId, {
-      publish: {
-        media_id: mediaId,
-        creation_id: creationId,
-        published_at: new Date().toISOString(),
-        fb_story_id: fbStoryId,
-      },
+      publish: publishBlock,
       // Clear any previous IG failure annotation now that the slot succeeded.
       publish_error: null,
       // null clears any prior failure; record clears any prior success.
@@ -164,6 +176,19 @@ export async function publishStorySlot(args: {
       attempt_count: attemptCount,
     }
   }
+}
+
+/**
+ * Returns slot.metadata.publish.fb_story_id when it's a non-empty string, else
+ * null. Used by publishStorySlot to preserve a prior crosspost ID across a
+ * re-publish when the current run didn't (or couldn't) cross-post to FB.
+ */
+export function readPriorFbStoryId(metadata: unknown): string | null {
+  if (!metadata || typeof metadata !== "object") return null
+  const p = (metadata as any).publish
+  if (!p || typeof p !== "object") return null
+  const id = p.fb_story_id
+  return typeof id === "string" && id.length > 0 ? id : null
 }
 
 export function readRender(

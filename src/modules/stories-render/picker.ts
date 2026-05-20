@@ -136,10 +136,17 @@ const EMPTY_SET: ReadonlySet<string> = new Set()
 /**
  * Returns the clean "-b" back shot for the variant, or null. NEVER returns a
  * real/detail/size_chart/other shot — that was the original bug.
+ * The `exclude` set protects against a back URL colliding with a URL already
+ * used as a front (defensive — only matters if a single URL ambiguously
+ * classifies; with strict naming it never triggers).
  */
-function pickBack(variant: SnapshotVariant | undefined): string | null {
+function pickBack(
+  variant: SnapshotVariant | undefined,
+  exclude: ReadonlySet<string> = EMPTY_SET,
+): string | null {
   if (!variant) return null
   for (const url of variant.image_urls) {
+    if (exclude.has(url)) continue
     if (classifyImageKind(url) === "back") return url
   }
   return null
@@ -152,10 +159,11 @@ function pickBack(variant: SnapshotVariant | undefined): string | null {
 function pickBackFromAnyOther(
   colors: SnapshotVariant[],
   exceptIndex: number,
+  exclude: ReadonlySet<string> = EMPTY_SET,
 ): string | null {
   for (let i = 0; i < colors.length; i++) {
     if (i === exceptIndex) continue
-    const back = pickBack(colors[i])
+    const back = pickBack(colors[i], exclude)
     if (back) return back
   }
   return null
@@ -318,8 +326,12 @@ export function pickTemplate(
   if (colors.length >= 3) {
     const a = leadFront
     const b = pickFront(colors[1], new Set([a]))
-    const c = pickFront(colors[2], new Set([a, b].filter((x): x is string => !!x)))
-    const back = pickBack(colors[0]) ?? pickBackFromAnyOther(colors, 0)
+    const fronts3 = new Set([a, b].filter((x): x is string => !!x))
+    const c = pickFront(colors[2], fronts3)
+    const usedFor3 = new Set([a, b, c].filter((x): x is string => !!x))
+    const back =
+      pickBack(colors[0], usedFor3) ??
+      pickBackFromAnyOther(colors, 0, usedFor3)
     if (a && b && c && back) {
       return {
         template_slug: "product-3colors",
@@ -335,7 +347,10 @@ export function pickTemplate(
     // the catalog has shared image lists across variants (e.g. IS1587 jumpsuit
     // has [red.jpg, red-b.jpg, blue.jpg, blue-b.jpg] on BOTH color rows).
     const b = pickFront(colors[1], new Set([a]))
-    const back = pickBack(colors[0]) ?? pickBackFromAnyOther(colors, 0)
+    const usedFor2 = new Set([a, b].filter((x): x is string => !!x))
+    const back =
+      pickBack(colors[0], usedFor2) ??
+      pickBackFromAnyOther(colors, 0, usedFor2)
     if (a && b && back && !isSaturated(pickedSoFar, "product-2colors")) {
       return {
         template_slug: "product-2colors",
@@ -354,7 +369,7 @@ export function pickTemplate(
     // → fall through to 1-color / rotation.
   }
 
-  const leadBack = pickBack(colors[0])
+  const leadBack = pickBack(colors[0], new Set([leadFront]))
   if (
     leadBack &&
     ONE_COLOR_FRONT_BACK_ROTATION.some((s) => !isSaturated(pickedSoFar, s))
