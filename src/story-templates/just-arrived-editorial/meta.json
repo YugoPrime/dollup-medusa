@@ -1,0 +1,57 @@
+{
+  "slug": "just-arrived-editorial",
+  "name": "Just Arrived · Editorial (Cutout Hero)",
+  "category": "single-product",
+  "duration_seconds": 6,
+  "wave": 1,
+  "slots": [
+    {
+      "id": "hero",
+      "hint": "cutout",
+      "label": "Hero photo — cutout PNG preferred, hanging dress style",
+      "required": true
+    }
+  ],
+  "text_overrides": [
+    {
+      "id": "kicker",
+      "default": "DOLL UP BOUTIQUE",
+      "max_chars": 22
+    },
+    {
+      "id": "headline",
+      "default": "Just Arrived",
+      "max_chars": 18
+    },
+    {
+      "id": "product_name",
+      "default": "Product Name",
+      "max_chars": 28
+    },
+    {
+      "id": "tagline",
+      "default": "Soft fit. Easy to style.",
+      "max_chars": 36
+    },
+    {
+      "id": "price",
+      "default": "Rs.0",
+      "max_chars": 12
+    },
+    {
+      "id": "size",
+      "default": "Available · S M L XL",
+      "max_chars": 28
+    },
+    {
+      "id": "cta",
+      "default": "Shop the look",
+      "max_chars": 20
+    },
+    {
+      "id": "footer_url",
+      "default": "dollupboutique.com",
+      "max_chars": 32
+    }
+  ]
+}

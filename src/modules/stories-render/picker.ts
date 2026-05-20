@@ -14,20 +14,38 @@ export type PickedRender = {
 // in-stock-hero-blush + -cream are visual variants of in-stock-hero with
 // different background palettes (blush gradient, cream + gold). They share
 // the same slot/text contract; rotation gives the daily feed visual variety.
+//
+// just-arrived-editorial (2026-05-21) is an editorial cutout-hero treatment
+// with a beige + leaf-accent palette. It uses the `hero` slot like in-stock-*
+// so it slots in cleanly. Different visual language (serif word-reveal headline,
+// Shop the look CTA) — gives the daily feed a fifth distinct look.
 const SINGLE_IMAGE_ROTATION = [
   "in-stock-hero",
   "in-stock-hero-blush",
   "lifestyle-overlay",
   "in-stock-hero-cream",
+  "just-arrived-editorial",
 ] as const
 
 // 1-color, front + back available: rotate between the split front|back layout
-// (product-1color) and the cream featured-card layout with back-as-circle inset
-// (product-1color-featured). Same slot/text contract — picker swaps purely by
-// slotIndex parity for daily-feed variety.
+// (product-1color), the cream featured-card layout with back-as-circle inset
+// (product-1color-featured), and the pampas-grass arch with back-bubble inset
+// (new-drop-arch, added 2026-05-21). All three share the same slot contract:
+// { front, back } — picker swaps purely by least-used / slotIndex for variety.
 const ONE_COLOR_FRONT_BACK_ROTATION = [
   "product-1color",
   "product-1color-featured",
+  "new-drop-arch",
+] as const
+
+// 3+ colors. product-3colors needs a clean back; color-mood-rail (added
+// 2026-05-21) is the side-rail layout that shows 3 color thumbs WITHOUT
+// needing a back shot. Picker uses color-mood-rail as a fallback when no back
+// is available, and rotates between the two when a back exists so the daily
+// feed isn't always the 2×2 flip.
+const THREE_COLOR_ROTATION = [
+  "product-3colors",
+  "color-mood-rail",
 ] as const
 
 /**
@@ -211,6 +229,19 @@ function pickLifestyle(colors: SnapshotVariant[]): string | null {
   return pickFront(colors[0])
 }
 
+function productNameLabel(snapshot: ProductSnapshot, maxChars: number): string {
+  const n = snapshot.name.trim()
+  if (n.length <= maxChars) return n
+  return n.slice(0, maxChars - 1).trimEnd() + "…"
+}
+
+function colorLabel(variant: SnapshotVariant | undefined, maxChars: number): string | null {
+  const raw = variant?.color?.trim()
+  if (!raw) return null
+  if (raw.length <= maxChars) return raw
+  return raw.slice(0, maxChars - 1).trimEnd() + "…"
+}
+
 function buildTextOverrides(
   slug: string,
   snapshot: ProductSnapshot,
@@ -244,6 +275,34 @@ function buildTextOverrides(
     case "cutout-spotlight": {
       out.price = price
       out.size = collectSizes(snapshot, 28)
+      if (sku) out.sku = sku
+      return out
+    }
+    case "just-arrived-editorial": {
+      out.price = price
+      out.size = collectSizes(snapshot, 28)
+      out.product_name = productNameLabel(snapshot, 28)
+      if (sku) out.sku = sku
+      return out
+    }
+    case "new-drop-arch": {
+      out.price = price
+      out.size = collectSizes(snapshot, 28)
+      out.headline = productNameLabel(snapshot, 28)
+      if (sku) out.sku = sku
+      return out
+    }
+    case "color-mood-rail": {
+      out.price = price
+      out.size = collectSizes(snapshot, 28)
+      out.product_name = productNameLabel(snapshot, 28)
+      const colors = snapshot.variants_in_stock
+      const a = colorLabel(colors[0], 18)
+      const b = colorLabel(colors[1], 18)
+      const c = colorLabel(colors[2], 18)
+      if (a) out.color_a_label = a
+      if (b) out.color_b_label = b
+      if (c) out.color_c_label = c
       if (sku) out.sku = sku
       return out
     }
@@ -321,18 +380,48 @@ export function pickTemplate(
     }
   }
 
-  // product-3colors is exempt — only template that shows 3 colors at once,
-  // capping it would misrepresent multi-color products.
+  // 3+ colors. Both templates in THREE_COLOR_ROTATION are exempt from the cap
+  // — capping multi-color stories would misrepresent products with 3+ colors.
+  // Rotation order:
+  //   - back available → round-robin product-3colors ↔ color-mood-rail
+  //     (color-mood-rail ignores the back; product-3colors needs it)
+  //   - no back available → force color-mood-rail (front-only layout)
   if (colors.length >= 3) {
     const a = leadFront
     const b = pickFront(colors[1], new Set([a]))
     const fronts3 = new Set([a, b].filter((x): x is string => !!x))
     const c = pickFront(colors[2], fronts3)
-    const usedFor3 = new Set([a, b, c].filter((x): x is string => !!x))
-    const back =
-      pickBack(colors[0], usedFor3) ??
-      pickBackFromAnyOther(colors, 0, usedFor3)
-    if (a && b && c && back) {
+    if (a && b && c) {
+      const usedFor3 = new Set([a, b, c])
+      const back =
+        pickBack(colors[0], usedFor3) ??
+        pickBackFromAnyOther(colors, 0, usedFor3)
+
+      // If no back exists, color-mood-rail is the only valid 3-color layout.
+      if (!back) {
+        return {
+          template_slug: "color-mood-rail",
+          slot_inputs: { hero: a, color_a: a, color_b: b, color_c: c },
+          text_overrides: buildTextOverrides("color-mood-rail", snapshot),
+        }
+      }
+
+      // Rotate when a back is available. With pickedSoFar use least-used so
+      // both templates land roughly evenly; otherwise alternate by slotIndex
+      // parity (test back-compat — old tests expected product-3colors).
+      const slug = pickedSoFar
+        ? leastUsed(THREE_COLOR_ROTATION, pickedSoFar)
+        : slotIndex % 2 === 0
+          ? "product-3colors"
+          : "color-mood-rail"
+
+      if (slug === "color-mood-rail") {
+        return {
+          template_slug: "color-mood-rail",
+          slot_inputs: { hero: a, color_a: a, color_b: b, color_c: c },
+          text_overrides: buildTextOverrides("color-mood-rail", snapshot),
+        }
+      }
       return {
         template_slug: "product-3colors",
         slot_inputs: { front_a: a, front_b: b, front_c: c, back },

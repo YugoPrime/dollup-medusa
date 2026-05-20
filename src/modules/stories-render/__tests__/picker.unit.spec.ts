@@ -223,15 +223,18 @@ describe("pickTemplate", () => {
     expect(picked.slot_inputs.back).toBe("https://r2/pink-b.jpg")
   })
 
-  it("rotates [product-1color, product-1color-featured] by slot_index for 1-color front+back", () => {
+  it("rotates [product-1color, product-1color-featured, new-drop-arch] by slot_index for 1-color front+back", () => {
+    // 3-template 1-color pool (2026-05-21: added new-drop-arch — pampas arch
+    // with back-bubble inset). Without a count map, picker rotates by
+    // slotIndex mod 3 for deterministic test behavior.
     const s = snapshot({
       variants_in_stock: [color("pink", ["front", "back"])],
       variant_in_stock_count: 1,
     })
     expect(pickTemplate(s, 0)!.template_slug).toBe("product-1color")
     expect(pickTemplate(s, 1)!.template_slug).toBe("product-1color-featured")
-    expect(pickTemplate(s, 2)!.template_slug).toBe("product-1color")
-    expect(pickTemplate(s, 3)!.template_slug).toBe("product-1color-featured")
+    expect(pickTemplate(s, 2)!.template_slug).toBe("new-drop-arch")
+    expect(pickTemplate(s, 3)!.template_slug).toBe("product-1color")
   })
 
   it("REGRESSION: product-1color is NOT used when the only second image is a detail/real/size_chart shot", () => {
@@ -249,21 +252,23 @@ describe("pickTemplate", () => {
     )
   })
 
-  it("rotates [in-stock-hero, in-stock-hero-blush, lifestyle-overlay, in-stock-hero-cream] by slot_index", () => {
-    // 4-template rotation so the daily feed has more visual variety. The two
-    // blush/cream variants are colour treatments of in-stock-hero (same slot
-    // contract). Order is: ink → blush → lifestyle → cream → repeat.
+  it("rotates [in-stock-hero, in-stock-hero-blush, lifestyle-overlay, in-stock-hero-cream, just-arrived-editorial] by slot_index", () => {
+    // 5-template rotation (2026-05-21: added just-arrived-editorial — editorial
+    // cutout-hero treatment, beige palette, Shop the look CTA). All 5 templates
+    // accept the same `hero` (or `lifestyle`) slot from a single front shot.
+    // Order is: ink → blush → lifestyle → cream → editorial → repeat.
     const s = snapshot({
       variants_in_stock: [color("pink", ["front"])],
       variant_in_stock_count: 1,
       is_new_arrival: false,
     })
-    const slugs = [0, 1, 2, 3, 4, 5].map((i) => pickTemplate(s, i)!.template_slug)
+    const slugs = [0, 1, 2, 3, 4, 5, 6].map((i) => pickTemplate(s, i)!.template_slug)
     expect(slugs).toEqual([
       "in-stock-hero",
       "in-stock-hero-blush",
       "lifestyle-overlay",
       "in-stock-hero-cream",
+      "just-arrived-editorial",
       "in-stock-hero",
       "in-stock-hero-blush",
     ])
@@ -429,22 +434,23 @@ describe("pickTemplate", () => {
       expect(slugsOver10Slots).toContain("lifestyle-overlay")
     })
 
-    it("cutout-spotlight is one entry in the 5-template single-image rotation when a cutout exists", () => {
-      // 2026-05-19 update: cutout-spotlight no longer wins unconditionally —
-      // after every single-color product got a cutout uploaded, that branch
-      // would have produced every story with the same template. Instead it
-      // takes its place in the rotation alongside the 4 hero variants, firing
-      // once per 5 slots.
+    it("cutout-spotlight is one entry in the 6-template single-image rotation when a cutout exists", () => {
+      // 2026-05-19: cutout-spotlight stopped winning unconditionally and joined
+      // the rotation alongside the hero variants.
+      // 2026-05-21: just-arrived-editorial added to the rotation, so the
+      // cutout-enabled pool is now 6 entries: 5 base + cutout-spotlight as
+      // the final entry. Order: ink → blush → lifestyle → cream → editorial → cutout.
       const s = snapshot({
         variants_in_stock: [color("pink", ["front", "cutout"])],
         variant_in_stock_count: 1,
       })
-      const slugs = [0, 1, 2, 3, 4].map((i) => pickTemplate(s, i)!.template_slug)
+      const slugs = [0, 1, 2, 3, 4, 5].map((i) => pickTemplate(s, i)!.template_slug)
       expect(slugs).toEqual([
         "in-stock-hero",
         "in-stock-hero-blush",
         "lifestyle-overlay",
         "in-stock-hero-cream",
+        "just-arrived-editorial",
         "cutout-spotlight",
       ])
     })
@@ -454,8 +460,8 @@ describe("pickTemplate", () => {
         variants_in_stock: [color("pink", ["front", "cutout"])],
         variant_in_stock_count: 1,
       })
-      // slotIndex 4 lands on cutout-spotlight per the rotation above
-      const picked = pickTemplate(s, 4)!
+      // slotIndex 5 lands on cutout-spotlight per the 6-template rotation above.
+      const picked = pickTemplate(s, 5)!
       expect(picked.template_slug).toBe("cutout-spotlight")
       expect(picked.slot_inputs.product_cutout).toBe("https://r2/pink-cutout.png")
     })
@@ -494,8 +500,10 @@ describe("pickTemplate", () => {
       expect(pickTemplate(s, 0)!.template_slug).toBe("new-arrival")
     })
 
-    it("cutout PNG never plugs into product-1color front/back slots", () => {
-      // -cutout isn't a "back" — front + cutout shouldn't trigger product-1color.
+    it("cutout PNG never plugs into a front+back product template", () => {
+      // -cutout isn't a "back" — front + cutout shouldn't trigger any of the
+      // 3 templates in ONE_COLOR_FRONT_BACK_ROTATION (product-1color,
+      // product-1color-featured, new-drop-arch).
       const s = snapshot({
         variants_in_stock: [color("pink", ["front", "cutout"])],
         variant_in_stock_count: 1,
@@ -503,6 +511,7 @@ describe("pickTemplate", () => {
       const picked = pickTemplate(s, 0)!
       expect(picked.template_slug).not.toBe("product-1color")
       expect(picked.template_slug).not.toBe("product-1color-featured")
+      expect(picked.template_slug).not.toBe("new-drop-arch")
       expect(picked.slot_inputs.back).toBeUndefined()
     })
 
@@ -539,11 +548,13 @@ describe("pickTemplate", () => {
     })
 
     it("cutout-spotlight still appears in the rotation when product has cutout but NO real shot", () => {
+      // 2026-05-21: rotation grew from 5 to 6 entries with just-arrived-editorial.
+      // Sample 6 slots to catch cutout-spotlight at the final rotation position.
       const s = snapshot({
         variants_in_stock: [color("pink", ["front", "cutout"])],
         variant_in_stock_count: 1,
       })
-      const slugs = [0, 1, 2, 3, 4].map((i) => pickTemplate(s, i)!.template_slug)
+      const slugs = [0, 1, 2, 3, 4, 5].map((i) => pickTemplate(s, i)!.template_slug)
       expect(slugs).toContain("cutout-spotlight")
     })
   })
@@ -659,13 +670,14 @@ describe("pickTemplate", () => {
       })
     }
 
-    it("first 4 single-color-with-back picks round-robin the 1-color pool (max 2 each)", () => {
-      // With the 2-template 1-color pool [product-1color, product-1color-featured],
-      // true round-robin gives [A, B, A, B] — both at exactly 2 by slot 4.
+    it("first 6 single-color-with-back picks round-robin the 1-color pool (max 2 each)", () => {
+      // With the 3-template 1-color pool [product-1color,
+      // product-1color-featured, new-drop-arch], true round-robin gives
+      // [A, B, C, A, B, C] — all three at exactly 2 by slot 6.
       const s = oneColorWithBack()
       const counts = new Map<string, number>()
       const picks: string[] = []
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < 6; i++) {
         const p = pickTemplate(s, i, counts)!
         picks.push(p.template_slug)
         counts.set(p.template_slug, (counts.get(p.template_slug) ?? 0) + 1)
@@ -673,23 +685,27 @@ describe("pickTemplate", () => {
       expect(picks).toEqual([
         "product-1color",
         "product-1color-featured",
+        "new-drop-arch",
         "product-1color",
         "product-1color-featured",
+        "new-drop-arch",
       ])
     })
 
-    it("5th single-color-with-back falls through to the single-image rotation when both 1-color templates are capped", () => {
+    it("7th single-color-with-back falls through to the single-image rotation when all 1-color templates are capped", () => {
       const s = oneColorWithBack()
       const counts = new Map<string, number>([
         ["product-1color", 2],
         ["product-1color-featured", 2],
+        ["new-drop-arch", 2],
       ])
-      const p = pickTemplate(s, 4, counts)!
+      const p = pickTemplate(s, 6, counts)!
       expect([
         "in-stock-hero",
         "in-stock-hero-blush",
         "lifestyle-overlay",
         "in-stock-hero-cream",
+        "just-arrived-editorial",
       ]).toContain(p.template_slug)
     })
 
@@ -718,7 +734,12 @@ describe("pickTemplate", () => {
       expect(p.template_slug).toBe("on-sale")
     })
 
-    it("product-3colors is EXEMPT from the cap (only template that shows 3 colors)", () => {
+    it("3-color templates are EXEMPT from the cap (always shows a 3-color template)", () => {
+      // 2026-05-21: THREE_COLOR_ROTATION now has two entries (product-3colors,
+      // color-mood-rail). Exemption applies to both — even when product-3colors
+      // is over its cap, the picker should fall to color-mood-rail (also 3-color)
+      // rather than drop to a single-image template, so the daily feed doesn't
+      // misrepresent multi-color products.
       const s = snapshot({
         variants_in_stock: [
           color("red", ["front", "back"]),
@@ -729,7 +750,26 @@ describe("pickTemplate", () => {
       })
       const counts = new Map<string, number>([["product-3colors", 5]])
       const p = pickTemplate(s, 0, counts)!
-      expect(p.template_slug).toBe("product-3colors")
+      // Picker should still land on a 3-color template — leastUsed picks
+      // color-mood-rail here (0 picks vs 5).
+      expect(["product-3colors", "color-mood-rail"]).toContain(p.template_slug)
+    })
+
+    it("both 3-color templates exempt — picks one even when BOTH are over the cap", () => {
+      const s = snapshot({
+        variants_in_stock: [
+          color("red", ["front", "back"]),
+          color("pink", ["front"]),
+          color("blue", ["front"]),
+        ],
+        variant_in_stock_count: 3,
+      })
+      const counts = new Map<string, number>([
+        ["product-3colors", 5],
+        ["color-mood-rail", 5],
+      ])
+      const p = pickTemplate(s, 0, counts)!
+      expect(["product-3colors", "color-mood-rail"]).toContain(p.template_slug)
     })
 
     it("product-2colors falls through to product-2colors-front when capped", () => {
@@ -749,13 +789,208 @@ describe("pickTemplate", () => {
       const s = oneColorWithBack()
       const slugs = [0, 1, 2, 3].map((i) => pickTemplate(s, i)!.template_slug)
       // Without a count map, the picker stays deterministic by slotIndex,
-      // alternating across the 2-pool — no cap enforced.
+      // rotating across the 3-pool — no cap enforced.
       expect(slugs).toEqual([
         "product-1color",
         "product-1color-featured",
+        "new-drop-arch",
         "product-1color",
-        "product-1color-featured",
       ])
+    })
+  })
+
+  describe("2026-05-21: new-drop-arch (1-color front+back)", () => {
+    it("uses front + back slots from the lead color", () => {
+      const s = snapshot({
+        variants_in_stock: [
+          color("pink", ["front", "back"], { sku: "IS2200-M-P" }),
+        ],
+        variant_in_stock_count: 1,
+      })
+      // Slot index 2 lands on new-drop-arch in the 3-template 1-color rotation.
+      const picked = pickTemplate(s, 2)!
+      expect(picked.template_slug).toBe("new-drop-arch")
+      expect(picked.slot_inputs.front).toBe("https://r2/pink.jpg")
+      expect(picked.slot_inputs.back).toBe("https://r2/pink-b.jpg")
+      // Should NOT have product-3colors slots (regression check)
+      expect(picked.slot_inputs.front_a).toBeUndefined()
+      expect(picked.slot_inputs.back).toBeDefined()
+    })
+
+    it("populates headline (product name), price, size text overrides", () => {
+      const s = snapshot({
+        name: "Cowl Neck Satin Midi",
+        variants_in_stock: [
+          color("pink", ["front", "back"], { sku: "IS2200-M-P", sizes: ["S", "M", "L"] }),
+        ],
+        variant_in_stock_count: 1,
+        price_mur: 1290,
+      })
+      const picked = pickTemplate(s, 2)!
+      expect(picked.template_slug).toBe("new-drop-arch")
+      expect(picked.text_overrides.headline).toBe("Cowl Neck Satin Midi")
+      expect(picked.text_overrides.price).toBe("Rs.1290")
+      expect(picked.text_overrides.size).toBe("Size: S, M, L")
+      expect(picked.text_overrides.sku).toBe("IS2200")
+    })
+
+    it("truncates a long product name in the headline override", () => {
+      const s = snapshot({
+        name: "Long Spaghetti-Strap Ruched Cowl Neck Satin Midi Dress",
+        variants_in_stock: [color("pink", ["front", "back"])],
+        variant_in_stock_count: 1,
+      })
+      const picked = pickTemplate(s, 2)!
+      expect(picked.template_slug).toBe("new-drop-arch")
+      expect(picked.text_overrides.headline.length).toBeLessThanOrEqual(28)
+      expect(picked.text_overrides.headline).toMatch(/…$/)
+    })
+  })
+
+  describe("2026-05-21: just-arrived-editorial (single-image rotation)", () => {
+    it("lands on just-arrived-editorial at slot index 4 in the rotation", () => {
+      const s = snapshot({
+        variants_in_stock: [color("pink", ["front"])],
+        variant_in_stock_count: 1,
+      })
+      const picked = pickTemplate(s, 4)!
+      expect(picked.template_slug).toBe("just-arrived-editorial")
+      expect(picked.slot_inputs.hero).toBe("https://r2/pink.jpg")
+    })
+
+    it("populates product_name, price, size text overrides", () => {
+      const s = snapshot({
+        name: "Linen Wrap Mini",
+        variants_in_stock: [
+          color("pink", ["front"], { sku: "IS2300-M-P", sizes: ["S", "M"] }),
+        ],
+        variant_in_stock_count: 1,
+        price_mur: 990,
+      })
+      const picked = pickTemplate(s, 4)!
+      expect(picked.template_slug).toBe("just-arrived-editorial")
+      expect(picked.text_overrides.product_name).toBe("Linen Wrap Mini")
+      expect(picked.text_overrides.price).toBe("Rs.990")
+      expect(picked.text_overrides.size).toBe("Size: S, M")
+    })
+
+    it("on-sale still wins over just-arrived-editorial", () => {
+      const s = snapshot({
+        price_mur: 990,
+        compare_at_price_mur: 1490,
+        variants_in_stock: [color("pink", ["front"])],
+        variant_in_stock_count: 1,
+      })
+      expect(pickTemplate(s, 4)!.template_slug).toBe("on-sale")
+    })
+
+    it("new-arrival still wins over just-arrived-editorial for fresh products", () => {
+      const s = snapshot({
+        variants_in_stock: [color("pink", ["front"])],
+        variant_in_stock_count: 1,
+        is_new_arrival: true,
+      })
+      expect(pickTemplate(s, 4)!.template_slug).toBe("new-arrival")
+    })
+  })
+
+  describe("2026-05-21: color-mood-rail (3-color, front-only)", () => {
+    it("picks color-mood-rail when 3 colors exist but NO back shot anywhere", () => {
+      // The pink/blue/white variants only have front shots — product-3colors
+      // requires a back, so the picker must fall to color-mood-rail.
+      const s = snapshot({
+        variants_in_stock: [
+          color("pink", ["front"]),
+          color("blue", ["front"]),
+          color("white", ["front"]),
+        ],
+        variant_in_stock_count: 3,
+      })
+      const picked = pickTemplate(s, 0)!
+      expect(picked.template_slug).toBe("color-mood-rail")
+      expect(picked.slot_inputs.hero).toBe("https://r2/pink.jpg")
+      expect(picked.slot_inputs.color_a).toBe("https://r2/pink.jpg")
+      expect(picked.slot_inputs.color_b).toBe("https://r2/blue.jpg")
+      expect(picked.slot_inputs.color_c).toBe("https://r2/white.jpg")
+    })
+
+    it("populates color_a/b/c labels from variant color names", () => {
+      const s = snapshot({
+        name: "Wrap Sleeve Dress",
+        variants_in_stock: [
+          color("v1", ["front"], { color: "Cream" }),
+          color("v2", ["front"], { color: "Sage" }),
+          color("v3", ["front"], { color: "Black" }),
+        ],
+        variant_in_stock_count: 3,
+      })
+      const picked = pickTemplate(s, 0)!
+      expect(picked.template_slug).toBe("color-mood-rail")
+      expect(picked.text_overrides.color_a_label).toBe("Cream")
+      expect(picked.text_overrides.color_b_label).toBe("Sage")
+      expect(picked.text_overrides.color_c_label).toBe("Black")
+      expect(picked.text_overrides.product_name).toBe("Wrap Sleeve Dress")
+    })
+
+    it("rotates with product-3colors when a back is available (slot 0 → product-3colors, slot 1 → color-mood-rail)", () => {
+      const s = snapshot({
+        variants_in_stock: [
+          color("pink", ["front", "back"]),
+          color("blue", ["front"]),
+          color("white", ["front"]),
+        ],
+        variant_in_stock_count: 3,
+      })
+      expect(pickTemplate(s, 0)!.template_slug).toBe("product-3colors")
+      expect(pickTemplate(s, 1)!.template_slug).toBe("color-mood-rail")
+      expect(pickTemplate(s, 2)!.template_slug).toBe("product-3colors")
+      expect(pickTemplate(s, 3)!.template_slug).toBe("color-mood-rail")
+    })
+
+    it("on-sale still wins over color-mood-rail (sale signal is stronger than multi-color layout)", () => {
+      const s = snapshot({
+        price_mur: 990,
+        compare_at_price_mur: 1490,
+        variants_in_stock: [
+          color("pink", ["front"]),
+          color("blue", ["front"]),
+          color("white", ["front"]),
+        ],
+        variant_in_stock_count: 3,
+      })
+      expect(pickTemplate(s, 0)!.template_slug).toBe("on-sale")
+    })
+
+    it("REGRESSION: color-mood-rail never receives a back slot in slot_inputs", () => {
+      // The color-mood-rail template HTML doesn't have a `data-hf-image="back"`
+      // attribute — feeding it a back would be a silent miss.
+      const s = snapshot({
+        variants_in_stock: [
+          color("pink", ["front", "back"]),
+          color("blue", ["front"]),
+          color("white", ["front"]),
+        ],
+        variant_in_stock_count: 3,
+      })
+      // slot 1 lands on color-mood-rail per the rotation
+      const picked = pickTemplate(s, 1)!
+      expect(picked.template_slug).toBe("color-mood-rail")
+      expect(picked.slot_inputs.back).toBeUndefined()
+    })
+
+    it("least-used rotation balances product-3colors vs color-mood-rail when a count map is passed", () => {
+      const s = snapshot({
+        variants_in_stock: [
+          color("pink", ["front", "back"]),
+          color("blue", ["front"]),
+          color("white", ["front"]),
+        ],
+        variant_in_stock_count: 3,
+      })
+      const counts = new Map<string, number>([["product-3colors", 3]])
+      // color-mood-rail has 0 picks vs product-3colors's 3 → least-used picks color-mood-rail
+      const p = pickTemplate(s, 0, counts)!
+      expect(p.template_slug).toBe("color-mood-rail")
     })
   })
 })

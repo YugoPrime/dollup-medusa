@@ -1,0 +1,90 @@
+{
+  "slug": "color-mood-rail",
+  "name": "Color Mood Rail · 3 Colors + Side Thumbs",
+  "category": "single-product-multi-image",
+  "duration_seconds": 7,
+  "wave": 1,
+  "slots": [
+    {
+      "id": "hero",
+      "hint": "front",
+      "label": "Hero color (large arch)",
+      "required": true
+    },
+    {
+      "id": "color_a",
+      "hint": "front",
+      "label": "Color thumb A (top right)",
+      "required": true
+    },
+    {
+      "id": "color_b",
+      "hint": "front",
+      "label": "Color thumb B (mid right)",
+      "required": true
+    },
+    {
+      "id": "color_c",
+      "hint": "front",
+      "label": "Color thumb C (bottom right)",
+      "required": true
+    }
+  ],
+  "text_overrides": [
+    {
+      "id": "headline_a",
+      "default": "Same style,",
+      "max_chars": 22
+    },
+    {
+      "id": "headline_b",
+      "default": "different mood",
+      "max_chars": 22
+    },
+    {
+      "id": "available_label",
+      "default": "Available in",
+      "max_chars": 18
+    },
+    {
+      "id": "color_a_label",
+      "default": "Cream",
+      "max_chars": 18
+    },
+    {
+      "id": "color_b_label",
+      "default": "Sage",
+      "max_chars": 18
+    },
+    {
+      "id": "color_c_label",
+      "default": "Black",
+      "max_chars": 18
+    },
+    {
+      "id": "product_name",
+      "default": "Product Name",
+      "max_chars": 28
+    },
+    {
+      "id": "price",
+      "default": "Rs.0",
+      "max_chars": 12
+    },
+    {
+      "id": "size",
+      "default": "Sizes S · M · L · XL",
+      "max_chars": 28
+    },
+    {
+      "id": "cta",
+      "default": "Choose your color",
+      "max_chars": 24
+    },
+    {
+      "id": "footer_url",
+      "default": "dollupboutique.com",
+      "max_chars": 32
+    }
+  ]
+}
