@@ -101,24 +101,37 @@ function collectSizes(snapshot: ProductSnapshot, maxChars: number): string {
 /**
  * Returns the clean catalog "front" shot for the variant.
  * Order of preference:
- *   1. first image classified as "front"
- *   2. if image[0] is "other" (unrecognized suffix), use it — by Medusa
- *      convention image #1 is the catalog thumbnail, almost always a front
- *      shot uploaded without the canonical suffix
+ *   1. first image classified as "front" that isn't in `exclude`
+ *   2. if image[0] is "other" (unrecognized suffix) and not excluded, use it
+ *      — by Medusa convention image #1 is the catalog thumbnail, almost always
+ *      a front shot uploaded without the canonical suffix
  *   3. null — real/detail/size_chart shots are explicitly NEVER used as front
+ *
+ * The `exclude` set is how multi-color templates (product-2colors/3colors) get
+ * DIFFERENT fronts for each color slot when the catalog uses shared image
+ * lists across variants (e.g. all colors share `[IS1587-red.jpg, IS1587-blue.jpg]`).
+ * Without exclusion the picker returned the SAME front for every color.
  */
-function pickFront(variant: SnapshotVariant | undefined): string | null {
+function pickFront(
+  variant: SnapshotVariant | undefined,
+  exclude: ReadonlySet<string> = EMPTY_SET,
+): string | null {
   if (!variant || variant.image_urls.length === 0) return null
   for (const url of variant.image_urls) {
+    if (exclude.has(url)) continue
     if (classifyImageKind(url) === "front") return url
   }
   // Defensive fallback: Medusa thumbnail is usually image[0]. If it doesn't
-  // match our convention but isn't a known role suffix, take it as the front.
-  if (classifyImageKind(variant.image_urls[0]) === "other") {
-    return variant.image_urls[0]
+  // match our convention but isn't a known role suffix, take it as the front
+  // — unless it's already been claimed by another color slot.
+  const first = variant.image_urls[0]
+  if (!exclude.has(first) && classifyImageKind(first) === "other") {
+    return first
   }
   return null
 }
+
+const EMPTY_SET: ReadonlySet<string> = new Set()
 
 /**
  * Returns the clean "-b" back shot for the variant, or null. NEVER returns a
@@ -304,8 +317,8 @@ export function pickTemplate(
   // capping it would misrepresent multi-color products.
   if (colors.length >= 3) {
     const a = leadFront
-    const b = pickFront(colors[1])
-    const c = pickFront(colors[2])
+    const b = pickFront(colors[1], new Set([a]))
+    const c = pickFront(colors[2], new Set([a, b].filter((x): x is string => !!x)))
     const back = pickBack(colors[0]) ?? pickBackFromAnyOther(colors, 0)
     if (a && b && c && back) {
       return {
@@ -318,7 +331,10 @@ export function pickTemplate(
 
   if (colors.length >= 2) {
     const a = leadFront
-    const b = pickFront(colors[1])
+    // Exclude `a` so the 2-colors template never gets two identical fronts when
+    // the catalog has shared image lists across variants (e.g. IS1587 jumpsuit
+    // has [red.jpg, red-b.jpg, blue.jpg, blue-b.jpg] on BOTH color rows).
+    const b = pickFront(colors[1], new Set([a]))
     const back = pickBack(colors[0]) ?? pickBackFromAnyOther(colors, 0)
     if (a && b && back && !isSaturated(pickedSoFar, "product-2colors")) {
       return {
@@ -334,7 +350,8 @@ export function pickTemplate(
         text_overrides: buildTextOverrides("product-2colors-front", snapshot),
       }
     }
-    // Both 2-color templates saturated → fall through to 1-color / rotation.
+    // Both 2-color templates saturated OR no distinct second front available
+    // → fall through to 1-color / rotation.
   }
 
   const leadBack = pickBack(colors[0])

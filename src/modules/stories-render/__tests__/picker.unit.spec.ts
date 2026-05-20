@@ -548,6 +548,76 @@ describe("pickTemplate", () => {
     })
   })
 
+  describe("REGRESSION: 2-color template never picks the same front for both colors", () => {
+    // Real-world bug (2026-05-21, IS1587 Pleated Sleeveless Jumpsuit):
+    // The catalog uses shared image_urls across all variants — both red and
+    // blue rows contain [red.jpg, red-b.jpg, blue.jpg, blue-b.jpg]. The picker
+    // was returning the same red front for BOTH slot_inputs.front_a and
+    // .front_b, so the rendered MP4 showed "2 colors available" with two
+    // identical red images.
+    it("front_b is a distinct URL from front_a when image lists are shared across variants", () => {
+      const sharedFronts = [
+        "https://r2/IS1587-red.jpg",
+        "https://r2/IS1587-red-b.jpg",
+        "https://r2/IS1587-blue.jpg",
+        "https://r2/IS1587-blue-b.jpg",
+      ]
+      const s = snapshot({
+        variants_in_stock: [
+          { id: "red", sku: "IS1587-M-R", color: "Red", color_code: null, sizes: ["S", "M"], image_urls: sharedFronts },
+          { id: "blue", sku: "IS1587-M-B", color: "Blue", color_code: null, sizes: ["M"], image_urls: sharedFronts },
+        ],
+        variant_in_stock_count: 2,
+      })
+      const picked = pickTemplate(s, 0)!
+      expect(picked.template_slug).toMatch(/^product-2colors/)
+      expect(picked.slot_inputs.front_a).not.toBe(picked.slot_inputs.front_b)
+      // Specifically the picker should land on the red front first, blue second
+      expect(picked.slot_inputs.front_a).toBe("https://r2/IS1587-red.jpg")
+      expect(picked.slot_inputs.front_b).toBe("https://r2/IS1587-blue.jpg")
+    })
+
+    it("3-color template picks 3 distinct fronts when image lists are shared", () => {
+      const sharedFronts = [
+        "https://r2/IS9999-red.jpg",
+        "https://r2/IS9999-red-b.jpg",
+        "https://r2/IS9999-blue.jpg",
+        "https://r2/IS9999-green.jpg",
+      ]
+      const s = snapshot({
+        variants_in_stock: [
+          { id: "red", sku: "IS9999-R", color: "Red", color_code: null, sizes: ["M"], image_urls: sharedFronts },
+          { id: "blue", sku: "IS9999-B", color: "Blue", color_code: null, sizes: ["M"], image_urls: sharedFronts },
+          { id: "green", sku: "IS9999-G", color: "Green", color_code: null, sizes: ["M"], image_urls: sharedFronts },
+        ],
+        variant_in_stock_count: 3,
+      })
+      const picked = pickTemplate(s, 0)!
+      expect(picked.template_slug).toBe("product-3colors")
+      const fronts = [picked.slot_inputs.front_a, picked.slot_inputs.front_b, picked.slot_inputs.front_c]
+      expect(new Set(fronts).size).toBe(3) // all distinct
+    })
+
+    it("falls through to 1-color when 2 colors share an image list with only ONE distinct front", () => {
+      // Only one front-classified image exists across the whole catalog. The
+      // 2-color branch should fail (can't get distinct fronts) and fall down
+      // to the 1-color rotation.
+      const onlyOneFront = [
+        "https://r2/IS0001-red.jpg",
+        "https://r2/IS0001-red-b.jpg",
+      ]
+      const s = snapshot({
+        variants_in_stock: [
+          { id: "red", sku: "IS0001-R", color: "Red", color_code: null, sizes: ["M"], image_urls: onlyOneFront },
+          { id: "blue", sku: "IS0001-B", color: "Blue", color_code: null, sizes: ["M"], image_urls: onlyOneFront },
+        ],
+        variant_in_stock_count: 2,
+      })
+      const picked = pickTemplate(s, 0)!
+      expect(["product-1color", "product-1color-featured"]).toContain(picked.template_slug)
+    })
+  })
+
   describe("SKU is the parent product code (not the variant SKU)", () => {
     it("strips '-<size>-<color>' suffix so the story shows just the parent code", () => {
       const s = snapshot({
