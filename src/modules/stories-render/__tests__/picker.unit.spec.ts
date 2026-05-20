@@ -589,27 +589,38 @@ describe("pickTemplate", () => {
       })
     }
 
-    it("3rd single-color-with-back product falls through to the single-image rotation", () => {
+    it("first 4 single-color-with-back picks round-robin the 1-color pool (max 2 each)", () => {
+      // With the 2-template 1-color pool [product-1color, product-1color-featured],
+      // true round-robin gives [A, B, A, B] — both at exactly 2 by slot 4.
       const s = oneColorWithBack()
       const counts = new Map<string, number>()
       const picks: string[] = []
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < 4; i++) {
         const p = pickTemplate(s, i, counts)!
         picks.push(p.template_slug)
         counts.set(p.template_slug, (counts.get(p.template_slug) ?? 0) + 1)
       }
-      // First two go to the 1-color rotation pool (product-1color +
-      // product-1color-featured). The third hits the cap on both and falls
-      // through to the single-image rotation.
-      expect(picks[0]).toMatch(/^product-1color(-featured)?$/)
-      expect(picks[1]).toMatch(/^product-1color(-featured)?$/)
-      expect(picks[0]).not.toBe(picks[1]) // diversity within the 2-pool
+      expect(picks).toEqual([
+        "product-1color",
+        "product-1color-featured",
+        "product-1color",
+        "product-1color-featured",
+      ])
+    })
+
+    it("5th single-color-with-back falls through to the single-image rotation when both 1-color templates are capped", () => {
+      const s = oneColorWithBack()
+      const counts = new Map<string, number>([
+        ["product-1color", 2],
+        ["product-1color-featured", 2],
+      ])
+      const p = pickTemplate(s, 4, counts)!
       expect([
         "in-stock-hero",
         "in-stock-hero-blush",
         "lifestyle-overlay",
         "in-stock-hero-cream",
-      ]).toContain(picks[2])
+      ]).toContain(p.template_slug)
     })
 
     it("no template is picked more than twice across an 8-slot day", () => {
