@@ -1,9 +1,9 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
-html, body { width: var(--story-w); height: var(--story-h); overflow: hidden; }
+html, body { width: 1080px; height: 1920px; overflow: hidden; }
 
 .canvas {
-  width: var(--story-w);
-  height: var(--story-h);
+  width: 1080px;
+  height: 1920px;
   background: linear-gradient(160deg, #fff5ec 0%, #fbe7d6 55%, #f6dac4 100%);
   position: relative;
   overflow: hidden;
@@ -23,8 +23,8 @@ html, body { width: var(--story-w); height: var(--story-h); overflow: hidden; }
 
 .header-logo { animation: rise 0.6s ease-out 0.1s both; }
 .kicker {
-  background: var(--dub-pink);
-  color: var(--dub-ink);
+  background: #f4c2c2;
+  color: #2b2b2b;
   padding: 16px 40px;
   border-radius: 999px;
   font-family: var(--dub-font-body);
@@ -68,8 +68,8 @@ html, body { width: var(--story-w); height: var(--story-h); overflow: hidden; }
   top: -16px;
   left: 50%;
   transform: translateX(-50%);
-  background: var(--dub-pink);
-  color: var(--dub-ink);
+  background: #f4c2c2;
+  color: #2b2b2b;
   font-family: var(--dub-font-body);
   font-weight: 700;
   font-size: 18px;
@@ -85,7 +85,7 @@ html, body { width: var(--story-w); height: var(--story-h); overflow: hidden; }
   bottom: 80px;
   font-family: var(--dub-font-display);
   font-size: 64px;
-  color: var(--dub-ink);
+  color: #2b2b2b;
   animation: rise 0.6s ease-out 1.2s both;
   transform: rotate(35deg);
 }
@@ -94,7 +94,7 @@ html, body { width: var(--story-w); height: var(--story-h); overflow: hidden; }
   font-family: var(--dub-font-display);
   font-weight: 700;
   font-size: 84px;
-  color: var(--dub-ink);
+  color: #2b2b2b;
   line-height: 1;
   text-align: center;
   animation: rise 0.6s ease-out 1.2s both;
@@ -102,7 +102,7 @@ html, body { width: var(--story-w); height: var(--story-h); overflow: hidden; }
 .divider {
   width: 50px;
   height: 2px;
-  background: var(--dub-gold);
+  background: #c9a96e;
   display: block;
   position: relative;
   animation: rise 0.6s ease-out 1.35s both;
@@ -113,7 +113,7 @@ html, body { width: var(--story-w); height: var(--story-h); overflow: hidden; }
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
-  color: var(--dub-pink);
+  color: #f4c2c2;
   font-size: 22px;
   background: #fff5ec;
   padding: 0 6px;
@@ -123,13 +123,13 @@ html, body { width: var(--story-w); height: var(--story-h); overflow: hidden; }
   font-family: var(--dub-font-display);
   font-weight: 700;
   font-size: 74px;
-  color: var(--dub-ink);
+  color: #2b2b2b;
   line-height: 1;
   animation: rise 0.6s ease-out 1.5s both;
 }
 .size-pill {
   background: rgba(43,43,43,0.86);
-  color: var(--dub-cream);
+  color: #f5e6d8;
   padding: 12px 28px;
   border-radius: 999px;
   font-family: var(--dub-font-body);
@@ -143,8 +143,8 @@ html, body { width: var(--story-w); height: var(--story-h); overflow: hidden; }
   display: flex;
   align-items: center;
   gap: 22px;
-  background: var(--dub-ink);
-  color: var(--dub-cream);
+  background: #2b2b2b;
+  color: #f5e6d8;
   padding: 26px 64px;
   border-radius: 999px;
   font-family: var(--dub-font-body);
@@ -157,7 +157,7 @@ html, body { width: var(--story-w); height: var(--story-h); overflow: hidden; }
 .bag {
   width: 36px;
   height: 36px;
-  border: 2px solid var(--dub-cream);
+  border: 2px solid #f5e6d8;
   border-radius: 6px 6px 10px 10px;
   position: relative;
 }
@@ -169,17 +169,17 @@ html, body { width: var(--story-w); height: var(--story-h); overflow: hidden; }
   transform: translateX(-50%);
   width: 22px;
   height: 18px;
-  border: 2px solid var(--dub-cream);
+  border: 2px solid #f5e6d8;
   border-bottom: none;
   border-radius: 12px 12px 0 0;
 }
-.spark { color: var(--dub-pink); font-size: 32px; animation: sparkSpin 3s linear infinite; display: inline-block; }
+.spark { color: #f4c2c2; font-size: 32px; animation: sparkSpin 3s linear infinite; display: inline-block; }
 
 .footer-url {
   font-family: var(--dub-font-body);
   font-weight: 600;
   font-size: 24px;
-  color: var(--dub-ink);
+  color: #2b2b2b;
   letter-spacing: 2px;
   opacity: 0.78;
   animation: rise 0.6s ease-out 2.1s both;

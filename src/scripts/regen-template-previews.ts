@@ -1,3 +1,4 @@
+import type { ExecArgs } from "@medusajs/framework/types"
 import { execFile } from "node:child_process"
 import fs from "node:fs/promises"
 import os from "node:os"
@@ -39,10 +40,20 @@ const SAMPLE_TEXT: Record<string, string> = {
   step3: "3. Delivery in 24h, COD",
 }
 
-async function main() {
+async function regenPreviews(filterSlugs: string[] = []): Promise<void> {
+  // The service doesn't need DI/DB/Redis — pass null + skipCli so it
+  // operates purely on the templatesRoot filesystem.
   const svc = new StoriesRenderModuleService(null, { templatesRoot: ROOT, skipCli: true })
   const templates = await svc.list()
-  for (const template of templates) {
+  const filter = new Set(filterSlugs)
+  const targets = filter.size > 0
+    ? templates.filter((t) => filter.has(t.slug))
+    : templates
+  if (filter.size > 0 && targets.length === 0) {
+    console.warn(`[regen] no templates matched filter: ${[...filter].join(", ")}`)
+    return
+  }
+  for (const template of targets) {
     const slotInputs = Object.fromEntries(
       template.slots.map((slot) => [slot.id, SAMPLE_IMAGE]),
     )
@@ -71,9 +82,33 @@ async function main() {
       await fs.rm(path.dirname(tmpDir), { recursive: true, force: true })
     }
   }
+  console.log(`[regen] done — ${targets.length} preview(s) written`)
 }
 
-main().catch((err) => {
-  console.error(err)
-  process.exit(1)
-})
+// Default export so `yarn medusa exec ./src/scripts/regen-template-previews.ts`
+// works (when a DB is available — medusa exec always boots the container).
+//
+// For local one-off runs without a DB, prefer the standalone path below:
+//   yarn ts-node ./src/scripts/regen-template-previews.ts [slug...]
+// Or via npx:
+//   npx ts-node src/scripts/regen-template-previews.ts new-drop-arch
+export default async function regenTemplatePreviews(_args: ExecArgs) {
+  // `medusa exec` swallows positional args after the script path. Read filter
+  // slugs from process.argv (works for both ts-node + medusa-exec paths).
+  const slugs = process.argv.slice(2).filter((a) => !a.startsWith("-") && !a.endsWith(".ts"))
+  await regenPreviews(slugs)
+}
+
+// Standalone runner: invoked when you run this file directly with ts-node
+// (no `medusa exec`, no DB boot). require.main === module is the canonical
+// "am I the entry point" check in CommonJS, which is what ts-node uses by
+// default for .ts files compiled from this tsconfig (module: Node16).
+const isEntryPoint =
+  typeof require !== "undefined" && require.main === module
+if (isEntryPoint) {
+  const slugs = process.argv.slice(2).filter((a) => !a.startsWith("-"))
+  regenPreviews(slugs).catch((err) => {
+    console.error(err)
+    process.exit(1)
+  })
+}
