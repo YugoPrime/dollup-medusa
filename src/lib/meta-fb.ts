@@ -151,9 +151,12 @@ export async function pollFbVideoUntilReady(
 ): Promise<void> {
   // FB's video_stories file_url ingestion is materially slower than IG's
   // equivalent (Meta downloads, transcodes, then makes it ready). Observed
-  // 2-3 min for our ~5MB 9:16 mp4s. Allow 5 min before giving up.
-  const timeoutMs = args.timeoutMs ?? 300_000
-  const pollIntervalMs = args.pollIntervalMs ?? 5000
+  // 5+ min on our @dollupboutique page even for ~4MB 9:16 mp4s with a
+  // textbook-correct R2 source (HTTP 200, Content-Type: video/mp4,
+  // moov-first faststart, sub-second TTFB). The bottleneck is Meta-side
+  // queueing, not our pipeline. Allow 15 min before giving up.
+  const timeoutMs = args.timeoutMs ?? 900_000
+  const pollIntervalMs = args.pollIntervalMs ?? 10_000
   // First poll within ~5s of start almost always returns "processing" — skip
   // it to save one request and avoid burning a slot on a guaranteed miss.
   const initialDelayMs = args.initialDelayMs ?? 8000
