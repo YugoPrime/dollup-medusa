@@ -24,6 +24,11 @@ type FbPublishErrorRecord = {
   status?: number
   fbtrace_id?: string
   meta_code?: number
+  meta_subcode?: number
+  /** Meta-provided human-readable failure reason — often the only useful
+   *  detail when `message` is the generic "An unknown error occurred". */
+  error_user_msg?: string
+  error_user_title?: string
   attempted_at: string
 }
 
@@ -118,6 +123,9 @@ export async function publishStorySlot(args: {
           status: e?.status,
           fbtrace_id: e?.fbtraceId,
           meta_code: e?.metaErrorCode,
+          meta_subcode: e?.metaErrorSubcode,
+          error_user_msg: e?.errorUserMsg,
+          error_user_title: e?.errorUserTitle,
           attempted_at: new Date().toISOString(),
         }
       }
@@ -269,15 +277,29 @@ async function notifyFbCrosspostFailure(
     const traceLine = err.fbtrace_id
       ? `\n<i>fbtrace_id:</i> <code>${escapeTelegramHtml(err.fbtrace_id)}</code>`
       : ""
-    const codeLine = err.meta_code
-      ? `\n<i>meta_code:</i> ${err.meta_code}`
-      : ""
+    const codeLine =
+      err.meta_code != null
+        ? `\n<i>meta_code:</i> ${err.meta_code}${err.meta_subcode != null ? `/${err.meta_subcode}` : ""}`
+        : ""
+    // FB's error_user_title + error_user_msg are far more useful than the
+    // top-level generic message ("An unknown error occurred"), so show
+    // them prominently when present.
+    const detailBlock =
+      err.error_user_msg || err.error_user_title
+        ? `\n\n<b>Meta says:</b>` +
+          (err.error_user_title
+            ? `\n<i>${escapeTelegramHtml(err.error_user_title)}</i>`
+            : "") +
+          (err.error_user_msg
+            ? `\n${escapeTelegramHtml(err.error_user_msg)}`
+            : "")
+        : ""
     const text =
       `⚠️ <b>FB cross-post FAILED</b>${statusLine}\n` +
       `IG published OK, FB Story did NOT.\n\n` +
       `<i>Slot:</i> <code>${escapeTelegramHtml(slotId)}</code>\n` +
       `<i>Error:</i> ${escapeTelegramHtml(err.message)}` +
-      `${traceLine}${codeLine}\n\n` +
+      `${traceLine}${codeLine}${detailBlock}\n\n` +
       `<a href="${slotUrl}">Open slot in admin →</a>`
     await sendTelegram(text)
   } catch {

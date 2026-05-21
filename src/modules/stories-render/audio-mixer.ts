@@ -95,6 +95,14 @@ export type MixAudioArgs = {
  * (no re-encode), audio is mixed at `volume` with 0.3s fade-in and a 0.5s
  * fade-out ending exactly at video duration. Output is capped to video
  * length via `-shortest`.
+ *
+ * `-movflags +faststart` relocates the MP4 moov atom to the START of the
+ * file. Required by streaming consumers that need to parse metadata before
+ * downloading the whole file — most notably Meta's video_stories ingest,
+ * which rejects non-faststart MP4s with the generic "There was a problem
+ * uploading your video file" (error code 6000). Works fine alongside
+ * `-c:v copy` — ffmpeg rewrites only the moov location during muxing,
+ * not the video stream.
  */
 export async function mixAudio(args: MixAudioArgs): Promise<void> {
   const { videoPath, audioPath, outPath, durationSeconds } = args
@@ -111,6 +119,7 @@ export async function mixAudio(args: MixAudioArgs): Promise<void> {
     "-c:v", "copy",
     "-c:a", "aac",
     "-b:a", "128k",
+    "-movflags", "+faststart",
     "-shortest",
     outPath,
   ]

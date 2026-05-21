@@ -24,16 +24,29 @@ export class MetaFbError extends Error {
   /** When set, surface this as user-facing detail in the cron alert. */
   metaErrorCode?: number
   metaErrorSubcode?: number
+  /** Meta-provided human-readable error description. Often more useful than
+   *  the generic top-level `message`. e.g. on a 6000 video rejection, this
+   *  may say "Aspect ratio not supported" or "Codec not supported". */
+  errorUserMsg?: string
+  errorUserTitle?: string
   constructor(
     message: string,
     status: number,
-    extras: { fbtraceId?: string; code?: number; subcode?: number } = {},
+    extras: {
+      fbtraceId?: string
+      code?: number
+      subcode?: number
+      errorUserMsg?: string
+      errorUserTitle?: string
+    } = {},
   ) {
     super(message)
     this.status = status
     this.fbtraceId = extras.fbtraceId
     this.metaErrorCode = extras.code
     this.metaErrorSubcode = extras.subcode
+    this.errorUserMsg = extras.errorUserMsg
+    this.errorUserTitle = extras.errorUserTitle
   }
 }
 
@@ -91,6 +104,8 @@ async function call<T>(
         fbtraceId: err?.fbtrace_id,
         code: err?.code,
         subcode: err?.error_subcode,
+        errorUserMsg: err?.error_user_msg,
+        errorUserTitle: err?.error_user_title,
       },
     )
   }
