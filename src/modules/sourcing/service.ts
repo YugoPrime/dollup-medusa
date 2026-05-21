@@ -29,6 +29,7 @@ export const PUSH_VALIDATION_REASONS = [
   "draft_not_received",
   "missing_selling_price",
   "missing_image",
+  "missing_category",
   "no_received_qty",
   "invalid_variant_override_price",
 ] as const
@@ -510,6 +511,7 @@ class SourcingModuleService extends MedusaService({
     cost_usd?: number
     notes?: string | null
     uploaded_image_r2_key?: string | null
+    category_id?: string | null
   }) {
     await this.retrieveDraft(input.draft_order_id)
     const svc = this as unknown as {
@@ -528,6 +530,7 @@ class SourcingModuleService extends MedusaService({
       cost_usd: input.cost_usd ?? 0,
       notes: input.notes ?? null,
       uploaded_image_r2_key: input.uploaded_image_r2_key ?? null,
+      category_id: input.category_id ?? null,
       position: nextPos,
     })
     return item as {
@@ -559,6 +562,7 @@ class SourcingModuleService extends MedusaService({
       uploaded_image_r2_key: string | null
       ref: string | null
       selling_price_mur: string | number | null
+      category_id: string | null
       published_product_id: string | null
       published_at: Date | null
     }
@@ -584,6 +588,7 @@ class SourcingModuleService extends MedusaService({
       source_url?: string | null
       source_type?: "alibaba" | "pdf" | "manual"
       uploaded_image_r2_key?: string | null
+      category_id?: string | null
     },
     opts: { reason?: string } = {},
   ) {
@@ -607,6 +612,7 @@ class SourcingModuleService extends MedusaService({
     if (input.source_type !== undefined) patch.source_type = input.source_type
     if (input.uploaded_image_r2_key !== undefined)
       patch.uploaded_image_r2_key = input.uploaded_image_r2_key
+    if (input.category_id !== undefined) patch.category_id = input.category_id
 
     const oldCost = Number(item.cost_usd)
     const newCost = input.cost_usd
@@ -858,6 +864,7 @@ class SourcingModuleService extends MedusaService({
       selling_price_mur: string | number | null
       scraped_image_url: string | null
       uploaded_image_r2_key: string | null
+      category_id: string | null
       published_product_id: string | null
       ref: string | null
     }>
@@ -874,6 +881,9 @@ class SourcingModuleService extends MedusaService({
       }
       if (!item.scraped_image_url && !item.uploaded_image_r2_key) {
         reasons.push("missing_image")
+      }
+      if (!item.category_id || String(item.category_id).trim().length === 0) {
+        reasons.push("missing_category")
       }
       const variants = (await svc.listDraftVariants({
         draft_item_id: item.id,
@@ -952,6 +962,7 @@ class SourcingModuleService extends MedusaService({
       selling_price_mur: string | number | null
       scraped_image_url: string | null
       uploaded_image_r2_key: string | null
+      category_id: string | null
       published_product_id: string | null
       ref: string | null
     }>
@@ -1057,6 +1068,9 @@ class SourcingModuleService extends MedusaService({
           options: productOptions,
           variants: productVariants,
           sales_channels: [{ id: salesChannelId }],
+          ...(item.category_id
+            ? { categories: [{ id: item.category_id }] }
+            : {}),
           ...(imageUrl
             ? { images: [{ url: imageUrl }], thumbnail: imageUrl }
             : {}),

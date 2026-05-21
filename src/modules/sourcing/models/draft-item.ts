@@ -20,6 +20,7 @@ const DraftItem = model.define("DraftItem", {
   // Stage B additions
   ref: model.text().nullable(),
   selling_price_mur: model.number().nullable(),
+  category_id: model.text().nullable(),
   published_product_id: model.text().nullable(),
   published_at: model.dateTime().nullable(),
   variants: model.hasMany(() => DraftVariant, { mappedBy: "draft_item" }),

@@ -46,6 +46,10 @@ export const POST = async (
         body.uploaded_image_r2_key === undefined
           ? undefined
           : (body.uploaded_image_r2_key as string | null),
+      category_id:
+        body.category_id === undefined
+          ? undefined
+          : (body.category_id as string | null),
     })
     res.json({ item })
   } catch (err) {
