@@ -192,8 +192,6 @@ export default async function createTomorrowPlan(
 
 export const config = {
   name: "create-tomorrow-plan",
-  // TEMP TEST 2026-05-21: bumped to 14:48 UTC = 18:48 MU for one-shot
-  // verification that the job + Telegram + plan creation all work
-  // end-to-end. Revert to "0 14 * * *" (18:00 MU) immediately after.
-  schedule: "48 14 * * *",
+  // 14:00 UTC = 18:00 Mauritius (UTC+4, no DST). Daily.
+  schedule: "0 14 * * *",
 }
