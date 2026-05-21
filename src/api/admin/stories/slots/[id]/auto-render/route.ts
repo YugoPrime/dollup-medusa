@@ -65,6 +65,21 @@ export async function POST(req: AuthenticatedMedusaRequest, res: MedusaResponse)
     render_template_slug: picked.template_slug,
   })
 
+  // When STORIES_RENDER_REMOTE_ONLY=true the Coolify container does not
+  // render — chrome-headless-shell + ffmpeg OOMs the webshop-sized box and
+  // restarts the container. The local CLI on a developer laptop polls and
+  // renders; it clears render_started_at once the mp4 lands.
+  if (process.env.STORIES_RENDER_REMOTE_ONLY === "true") {
+    res.status(202).json({
+      status: "queued",
+      slot_id: slotId,
+      template_slug: picked.template_slug,
+      remote: true,
+    })
+    inFlight.delete(slotId)
+    return
+  }
+
   // Respond immediately. The render continues in the background.
   res.status(202).json({
     status: "queued",
