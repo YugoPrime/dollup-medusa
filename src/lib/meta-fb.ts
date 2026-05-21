@@ -141,12 +141,25 @@ export async function getFbVideoStatus(
 }
 
 export async function pollFbVideoUntilReady(
-  args: { videoId: string; timeoutMs?: number; pollIntervalMs?: number },
+  args: {
+    videoId: string
+    timeoutMs?: number
+    pollIntervalMs?: number
+    initialDelayMs?: number
+  },
   cfg: MetaFbConfig = readMetaFbEnv() ?? throwUnconfigured(),
 ): Promise<void> {
-  const timeoutMs = args.timeoutMs ?? 90_000
-  const pollIntervalMs = args.pollIntervalMs ?? 3000
+  // FB's video_stories file_url ingestion is materially slower than IG's
+  // equivalent (Meta downloads, transcodes, then makes it ready). Observed
+  // 2-3 min for our ~5MB 9:16 mp4s. Allow 5 min before giving up.
+  const timeoutMs = args.timeoutMs ?? 300_000
+  const pollIntervalMs = args.pollIntervalMs ?? 5000
+  // First poll within ~5s of start almost always returns "processing" — skip
+  // it to save one request and avoid burning a slot on a guaranteed miss.
+  const initialDelayMs = args.initialDelayMs ?? 8000
   const deadline = Date.now() + timeoutMs
+
+  if (initialDelayMs > 0) await sleep(initialDelayMs)
 
   while (Date.now() < deadline) {
     const { video_status } = await getFbVideoStatus(args.videoId, cfg)
