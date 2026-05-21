@@ -101,4 +101,93 @@ describe("toProductLike", () => {
       "https://r2/x-cutout.png",
     ])
   })
+
+  it("partitions product images per variant by the color token in the filename", () => {
+    // Regression: before this fix, every variant received the full product
+    // image list — the slot detail page showed every red and black image
+    // under BOTH the RED and BLACK color rows, and the picker's 2-color
+    // template grabbed two red fronts instead of one red + one black.
+    const twoColors = {
+      id: "prod_is1070",
+      title: "Mesh Sensual Lingerie Set",
+      handle: "is1070",
+      created_at: "2026-05-01T00:00:00Z",
+      metadata: null,
+      images: [
+        { url: "https://r2/is1070/is1070-s-red-front.png" },
+        { url: "https://r2/is1070/is1070-s-red-back.png" },
+        { url: "https://r2/is1070/is1070-s-red-real.jpg" },
+        { url: "https://r2/is1070/is1070-s-black-front.png" },
+        { url: "https://r2/is1070/is1070-s-black-back.png" },
+      ],
+      variants: [
+        {
+          id: "v_red",
+          sku: "IS1070-S-Red",
+          title: "S / Red",
+          manage_inventory: true,
+          inventory_items: [
+            {
+              required_quantity: 1,
+              inventory: {
+                location_levels: [{ stocked_quantity: 2, reserved_quantity: 0 }],
+              },
+            },
+          ],
+          options: [
+            { value: "Red", option: { title: "Color" } },
+            { value: "S", option: { title: "Size" } },
+          ],
+          calculated_price: { calculated_amount: 950, currency_code: "mur" },
+        },
+        {
+          id: "v_black",
+          sku: "IS1070-S-Black",
+          title: "S / Black",
+          manage_inventory: true,
+          inventory_items: [
+            {
+              required_quantity: 1,
+              inventory: {
+                location_levels: [{ stocked_quantity: 1, reserved_quantity: 0 }],
+              },
+            },
+          ],
+          options: [
+            { value: "Black", option: { title: "Color" } },
+            { value: "S", option: { title: "Size" } },
+          ],
+          calculated_price: { calculated_amount: 950, currency_code: "mur" },
+        },
+      ],
+    }
+    const out = toProductLike(twoColors)
+    expect(out.variants[0].images.map((i) => i.url)).toEqual([
+      "https://r2/is1070/is1070-s-red-front.png",
+      "https://r2/is1070/is1070-s-red-back.png",
+      "https://r2/is1070/is1070-s-red-real.jpg",
+    ])
+    expect(out.variants[1].images.map((i) => i.url)).toEqual([
+      "https://r2/is1070/is1070-s-black-front.png",
+      "https://r2/is1070/is1070-s-black-back.png",
+    ])
+  })
+
+  it("falls back to the full image list when the variant's color isn't found in any filename", () => {
+    // Older products that pre-date the color-encoded filename convention
+    // shouldn't lose all images — the picker would skip the slot. Falling
+    // back to the unpartitioned list keeps them working.
+    const legacy = {
+      ...SAMPLE,
+      images: [
+        { url: "https://r2/legacy/no-color-in-name.jpg" },
+        { url: "https://r2/legacy/another.jpg" },
+      ],
+    }
+    const out = toProductLike(legacy)
+    expect(out.variants[0].images.map((i) => i.url)).toEqual([
+      "https://r2/legacy/no-color-in-name.jpg",
+      "https://r2/legacy/another.jpg",
+    ])
+  })
 })

@@ -10,6 +10,10 @@ import {
 import { STORIES_MODULE } from "../../../../../modules/stories"
 import type StoriesModuleService from "../../../../../modules/stories/service"
 import type { ProductLike } from "../../../../../modules/stories/snapshot"
+import {
+  isIntimatesProduct,
+  toProductLike,
+} from "../../../../../modules/stories/product-source"
 
 /**
  * Batch-create N daily plans with shared anti-repeat. Reuses the same
@@ -40,6 +44,7 @@ export const POST = async (req: AuthenticatedMedusaRequest, res: MedusaResponse)
         "id",
         "title",
         "handle",
+        "created_at",
         "metadata",
         "images.url",
         "categories.handle",
@@ -76,52 +81,3 @@ export const POST = async (req: AuthenticatedMedusaRequest, res: MedusaResponse)
   }
 }
 
-function computeInventoryQuantity(v: any): number {
-  if (v.manage_inventory === false) return Number.MAX_SAFE_INTEGER
-  let total = 0
-  for (const ii of v.inventory_items ?? []) {
-    for (const lvl of ii.inventory?.location_levels ?? []) {
-      total += Number(lvl.stocked_quantity ?? 0) - Number(lvl.reserved_quantity ?? 0)
-    }
-  }
-  return Math.max(0, total)
-}
-
-function isIntimatesProduct(p: any): boolean {
-  const cats: Array<{ handle?: string }> = p.categories ?? []
-  if (cats.some((c) => (c?.handle ?? "").toLowerCase() === "intimates")) return true
-  const meta = (p.metadata ?? null) as Record<string, unknown> | null
-  if (meta && meta.unlisted === true) return true
-  return false
-}
-
-function toProductLike(p: any): ProductLike {
-  return {
-    id: p.id,
-    title: p.title,
-    handle: p.handle,
-    variants: (p.variants ?? []).map((v: any) => {
-      const calc = v.calculated_price
-      const displayAmount = calc?.calculated_amount
-      const amount = displayAmount != null ? Number(displayAmount) * 100 : null
-      const prices =
-        amount != null && Number.isFinite(amount)
-          ? [{ amount, currency_code: String(calc?.currency_code ?? "mur") }]
-          : []
-      return {
-        id: v.id,
-        sku: v.sku,
-        title: v.title,
-        inventory_quantity: computeInventoryQuantity(v),
-        prices,
-        options: Object.fromEntries(
-          (v.options ?? []).map((o: any) => [
-            o.option?.title?.toLowerCase() ?? "opt",
-            o.value,
-          ]),
-        ),
-        images: (p.images ?? []).map((img: any) => ({ url: img.url })),
-      }
-    }),
-  }
-}

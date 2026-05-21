@@ -84,6 +84,48 @@ export function isIntimatesProduct(p: any): boolean {
   return false
 }
 
+/**
+ * Boutique upload convention encodes the color in the filename:
+ *   `<sku>-<size>-<color>-<role>.<ext>` e.g. `is1070-s-red-front.png`
+ *   `<sku>-<color>-<role>.<ext>`        e.g. `IS2290-white-cutout.png`
+ *   `<sku>-<color>.<ext>`               e.g. `is1070-red.jpg`
+ *
+ * Medusa v2 has no per-variant image relation by default — `product.images`
+ * is a flat list on the parent. Without filtering, every variant would get
+ * the full list, which breaks two things:
+ *
+ *   1. Per-color UI rows on the slot detail page show every image under
+ *      every color (the user sees the same red image under both the RED and
+ *      BLACK headings).
+ *   2. The picker's multi-color templates (product-2colors / product-3colors)
+ *      pick "front A" then exclude that URL and ask for "front B" — but both
+ *      come from the same shared list, so the second-color front is just the
+ *      next red front, not the black front.
+ *
+ * Returns true when the URL's filename contains the color token as a hyphen-
+ * delimited segment. Case-insensitive. Empty / unknown color returns false
+ * so the caller can fall back to the full list.
+ */
+function imageBelongsToColor(url: string, color: string): boolean {
+  if (!color) return false
+  const filename = url.split("?")[0].split("#")[0].split("/").pop() ?? ""
+  const noExt = filename.replace(/\.[a-z0-9]+$/i, "")
+  const segments = noExt.toLowerCase().split("-")
+  return segments.includes(color.toLowerCase())
+}
+
+function partitionImagesForVariant(
+  allImages: Array<{ url: string }>,
+  variantColor: string | null,
+): Array<{ url: string }> {
+  if (!variantColor) return allImages
+  const matched = allImages.filter((img) => imageBelongsToColor(img.url, variantColor))
+  // Fallback: if the convention didn't catch any image for this color (older
+  // products without color-encoded filenames), return the full list so the
+  // picker still has something to work with rather than skipping the slot.
+  return matched.length > 0 ? matched : allImages
+}
+
 export function toProductLike(p: any): ProductLike {
   // The cutout PNG is stored on product.metadata (NOT product.images) so it
   // stays out of the storefront gallery. We inject it into every variant's
@@ -95,6 +137,8 @@ export function toProductLike(p: any): ProductLike {
     typeof metadata?.cutout_image_url === "string" && metadata.cutout_image_url
       ? metadata.cutout_image_url
       : null
+
+  const allBaseImages = (p.images ?? []).map((img: any) => ({ url: img.url }))
 
   return {
     id: p.id,
@@ -113,7 +157,14 @@ export function toProductLike(p: any): ProductLike {
       const compareAtAmount =
         originalDisplay != null ? Number(originalDisplay) * 100 : null
 
-      const baseImages = (p.images ?? []).map((img: any) => ({ url: img.url }))
+      const options = Object.fromEntries(
+        (v.options ?? []).map((o: any) => [
+          o.option?.title?.toLowerCase() ?? "opt",
+          o.value,
+        ]),
+      )
+      const variantColor = typeof options.color === "string" ? options.color : null
+      const baseImages = partitionImagesForVariant(allBaseImages, variantColor)
       const images = cutoutUrl
         ? [...baseImages, { url: cutoutUrl }]
         : baseImages
@@ -128,12 +179,7 @@ export function toProductLike(p: any): ProductLike {
           compareAtAmount != null && Number.isFinite(compareAtAmount)
             ? compareAtAmount
             : null,
-        options: Object.fromEntries(
-          (v.options ?? []).map((o: any) => [
-            o.option?.title?.toLowerCase() ?? "opt",
-            o.value,
-          ]),
-        ),
+        options,
         images,
       }
     }),
