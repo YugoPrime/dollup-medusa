@@ -4,8 +4,15 @@
  * of a public MP4 — our Stories are R2-hosted):
  *   POST /{page_id}/video_stories?upload_phase=start&file_url=<mp4>
  *     → returns { video_id }
+ *   GET  /{video_id}?fields=status              (poll until ready)
+ *     → returns { status: { video_status: "ready"|"in_progress"|"error" } }
  *   POST /{page_id}/video_stories?upload_phase=finish&video_id=<id>
  *     → returns { post_id, success }
+ *
+ * The poll between start and finish is REQUIRED. Skipping it yields Meta
+ * error 6000/1363130 "Video was not uploaded" because Meta hasn't finished
+ * downloading the R2 file by the time `finish` arrives. IG's flow has the
+ * same shape (see meta-ig.ts).
  *
  * No retries here — the caller (publish-story-slot) is the retry layer
  * and treats FB failure as soft-failure (IG remains source of truth).
@@ -112,10 +119,63 @@ async function call<T>(
   return json as T
 }
 
+export type FbVideoStatus =
+  | "ready"
+  | "processing"
+  | "in_progress"
+  | "uploading"
+  | "error"
+  | "expired"
+
+export async function getFbVideoStatus(
+  videoId: string,
+  cfg: MetaFbConfig = readMetaFbEnv() ?? throwUnconfigured(),
+): Promise<{ video_status: FbVideoStatus }> {
+  const result = await call<{ status?: { video_status?: string } }>(
+    `${videoId}`,
+    cfg,
+    { method: "GET", params: { fields: "status" } },
+  )
+  const video_status = (result?.status?.video_status ?? "processing") as FbVideoStatus
+  return { video_status }
+}
+
+export async function pollFbVideoUntilReady(
+  args: { videoId: string; timeoutMs?: number; pollIntervalMs?: number },
+  cfg: MetaFbConfig = readMetaFbEnv() ?? throwUnconfigured(),
+): Promise<void> {
+  const timeoutMs = args.timeoutMs ?? 90_000
+  const pollIntervalMs = args.pollIntervalMs ?? 3000
+  const deadline = Date.now() + timeoutMs
+
+  while (Date.now() < deadline) {
+    const { video_status } = await getFbVideoStatus(args.videoId, cfg)
+    if (video_status === "ready") return
+    if (video_status === "error") {
+      throw new MetaFbError(
+        `FB video ${args.videoId} processing failed (status=error)`,
+        500,
+      )
+    }
+    if (video_status === "expired") {
+      throw new MetaFbError(
+        `FB video ${args.videoId} expired before finish`,
+        410,
+      )
+    }
+    await sleep(pollIntervalMs)
+  }
+  throw new MetaFbError(
+    `FB video ${args.videoId} did not become ready within ${timeoutMs}ms`,
+    504,
+  )
+}
+
 /**
- * Two-phase publish:
- *   start (file_url) → video_id
- *   finish (video_id) → post_id
+ * Three-phase publish:
+ *   start (file_url)        → video_id
+ *   poll (until ready)
+ *   finish (video_id)       → post_id
  * Returns the FB post_id on success, throws MetaFbError on any failure.
  */
 export async function publishFbVideoStory(
@@ -141,6 +201,8 @@ export async function publishFbVideoStory(
     )
   }
 
+  await pollFbVideoUntilReady({ videoId: startResult.video_id }, cfg)
+
   const finishResult = await call<{ post_id?: string; success?: boolean }>(
     `${cfg.pageId}/video_stories`,
     cfg,
@@ -161,6 +223,10 @@ export async function publishFbVideoStory(
   }
 
   return finishResult.post_id
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 function throwUnconfigured(): never {
