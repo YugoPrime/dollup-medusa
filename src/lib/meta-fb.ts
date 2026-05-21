@@ -1,20 +1,20 @@
 /**
  * Thin client for Meta's Facebook Page Stories content-publishing flow.
  * Covers video stories specifically using file_url mode (server-side fetch
- * of a public MP4 — our Stories are R2-hosted):
- *   POST /{page_id}/video_stories?upload_phase=start&file_url=<mp4>
- *     → returns { video_id }
- *   GET  /{video_id}?fields=status              (poll until ready)
- *     → returns { status: { video_status: "ready"|"in_progress"|"error" } }
+ * of a public MP4 - our Stories are R2-hosted):
+ *   POST /{page_id}/video_stories?upload_phase=start
+ *     -> returns { video_id, upload_url }
+ *   POST {upload_url} with Authorization + file_url headers
+ *     -> tells Meta's video uploader where to fetch the MP4 from
  *   POST /{page_id}/video_stories?upload_phase=finish&video_id=<id>
- *     → returns { post_id, success }
+ *     -> returns { post_id, success }
  *
- * The poll between start and finish is REQUIRED. Skipping it yields Meta
- * error 6000/1363130 "Video was not uploaded" because Meta hasn't finished
- * downloading the R2 file by the time `finish` arrives. IG's flow has the
- * same shape (see meta-ig.ts).
+ * The middle upload_url request is REQUIRED. Passing file_url to the start
+ * request only creates a video shell; Meta never receives the upload and the
+ * video can sit in "processing" until finish fails with "Video Upload Is
+ * Missing".
  *
- * No retries here — the caller (publish-story-slot) is the retry layer
+ * No retries here - the caller (publish-story-slot) is the retry layer
  * and treats FB failure as soft-failure (IG remains source of truth).
  */
 
@@ -31,9 +31,10 @@ export class MetaFbError extends Error {
   /** When set, surface this as user-facing detail in the cron alert. */
   metaErrorCode?: number
   metaErrorSubcode?: number
-  /** Meta-provided human-readable error description. Often more useful than
-   *  the generic top-level `message`. e.g. on a 6000 video rejection, this
-   *  may say "Aspect ratio not supported" or "Codec not supported". */
+  /**
+   * Meta-provided human-readable error description. Often more useful than
+   * the generic top-level `message`, for example on video rejection.
+   */
   errorUserMsg?: string
   errorUserTitle?: string
   constructor(
@@ -96,27 +97,38 @@ async function call<T>(
   }
   const { params: _ignored, ...fetchInit } = init
   const res = await fetch(url, fetchInit)
-  let json: any = null
-  try {
-    json = await res.json()
-  } catch {
-    /* non-JSON body */
-  }
+  const json = await readJson(res)
   if (!res.ok) {
-    const err = json?.error
-    throw new MetaFbError(
-      err?.message ?? `Meta FB API ${res.status}`,
-      res.status,
-      {
-        fbtraceId: err?.fbtrace_id,
-        code: err?.code,
-        subcode: err?.error_subcode,
-        errorUserMsg: err?.error_user_msg,
-        errorUserTitle: err?.error_user_title,
-      },
-    )
+    throwFromMetaResponse(json, res.status, `Meta FB API ${res.status}`)
   }
   return json as T
+}
+
+async function readJson(res: Response): Promise<any> {
+  try {
+    return await res.json()
+  } catch {
+    return null
+  }
+}
+
+function throwFromMetaResponse(
+  json: any,
+  status: number,
+  fallbackMessage: string,
+): never {
+  const err = json?.error
+  throw new MetaFbError(
+    err?.message ?? json?.message ?? fallbackMessage,
+    status,
+    {
+      fbtraceId: err?.fbtrace_id,
+      code: err?.code,
+      subcode: err?.error_subcode,
+      errorUserMsg: err?.error_user_msg,
+      errorUserTitle: err?.error_user_title,
+    },
+  )
 }
 
 export type FbVideoStatus =
@@ -149,16 +161,11 @@ export async function pollFbVideoUntilReady(
   },
   cfg: MetaFbConfig = readMetaFbEnv() ?? throwUnconfigured(),
 ): Promise<void> {
-  // FB's video_stories file_url ingestion is materially slower than IG's
-  // equivalent (Meta downloads, transcodes, then makes it ready). Observed
-  // 5+ min on our @dollupboutique page even for ~4MB 9:16 mp4s with a
-  // textbook-correct R2 source (HTTP 200, Content-Type: video/mp4,
-  // moov-first faststart, sub-second TTFB). The bottleneck is Meta-side
-  // queueing, not our pipeline. Allow 15 min before giving up.
+  // Diagnostic helper only. The normal Page Stories publish flow uses
+  // start -> upload_url -> finish; it does not wait for this status to become
+  // ready before issuing finish.
   const timeoutMs = args.timeoutMs ?? 900_000
   const pollIntervalMs = args.pollIntervalMs ?? 10_000
-  // First poll within ~5s of start almost always returns "processing" — skip
-  // it to save one request and avoid burning a slot on a guaranteed miss.
   const initialDelayMs = args.initialDelayMs ?? 8000
   const deadline = Date.now() + timeoutMs
 
@@ -188,24 +195,23 @@ export async function pollFbVideoUntilReady(
 }
 
 /**
- * Three-phase publish:
- *   start (file_url)        → video_id
- *   poll (until ready)
- *   finish (video_id)       → post_id
+ * Three-request publish:
+ *   start                   -> video_id + upload_url
+ *   upload_url (file_url)   -> uploader accepts the public MP4 URL
+ *   finish (video_id)       -> post_id
  * Returns the FB post_id on success, throws MetaFbError on any failure.
  */
 export async function publishFbVideoStory(
   args: { videoUrl: string },
   cfg: MetaFbConfig = readMetaFbEnv() ?? throwUnconfigured(),
 ): Promise<string> {
-  const startResult = await call<{ video_id: string }>(
+  const startResult = await call<{ video_id?: string; upload_url?: string }>(
     `${cfg.pageId}/video_stories`,
     cfg,
     {
       method: "POST",
       params: {
         upload_phase: "start",
-        file_url: args.videoUrl,
       },
     },
   )
@@ -216,8 +222,21 @@ export async function publishFbVideoStory(
       502,
     )
   }
+  if (!startResult.upload_url) {
+    throw new MetaFbError(
+      "FB video_stories start returned no upload_url",
+      502,
+    )
+  }
 
-  await pollFbVideoUntilReady({ videoId: startResult.video_id }, cfg)
+  await uploadFbVideoStorySource(
+    {
+      uploadUrl: startResult.upload_url,
+      videoUrl: args.videoUrl,
+      videoId: startResult.video_id,
+    },
+    cfg,
+  )
 
   const finishResult = await call<{ post_id?: string; success?: boolean }>(
     `${cfg.pageId}/video_stories`,
@@ -239,6 +258,44 @@ export async function publishFbVideoStory(
   }
 
   return finishResult.post_id
+}
+
+async function uploadFbVideoStorySource(
+  args: { uploadUrl: string; videoUrl: string; videoId: string },
+  cfg: MetaFbConfig,
+): Promise<void> {
+  const res = await fetch(args.uploadUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `OAuth ${cfg.pageAccessToken}`,
+      file_url: args.videoUrl,
+    },
+  })
+  const json = await readJson(res)
+
+  if (!res.ok) {
+    throwFromMetaResponse(
+      json,
+      res.status,
+      `FB video_stories upload failed for video ${args.videoId}`,
+    )
+  }
+
+  if (json?.success === false || json?.status?.video_status === "error") {
+    const err = json?.error
+    throw new MetaFbError(
+      err?.message ??
+        `FB video_stories upload was not accepted for video ${args.videoId}`,
+      502,
+      {
+        fbtraceId: err?.fbtrace_id,
+        code: err?.code,
+        subcode: err?.error_subcode,
+        errorUserMsg: err?.error_user_msg,
+        errorUserTitle: err?.error_user_title,
+      },
+    )
+  }
 }
 
 function sleep(ms: number): Promise<void> {
