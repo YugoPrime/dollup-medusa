@@ -35,14 +35,19 @@
       "max_chars": 10
     },
     {
+      "id": "size_a",
+      "default": "S · M · L",
+      "max_chars": 22
+    },
+    {
+      "id": "size_b",
+      "default": "S · M · L",
+      "max_chars": 22
+    },
+    {
       "id": "footer",
       "default": "DM to ORDER",
       "max_chars": 20
-    },
-    {
-      "id": "footer_url",
-      "default": "shop dollupboutique.com",
-      "max_chars": 32
     }
   ]
 }

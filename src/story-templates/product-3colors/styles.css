@@ -1,25 +1,265 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body { width: var(--story-w); height: var(--story-h); overflow: hidden; }
-.canvas { width: var(--story-w); height: var(--story-h); background: var(--dub-soft); }
-.scene { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; padding: 90px 60px 70px; gap: 22px; }
-.kicker { font-family: var(--dub-font-display); font-weight: 700; font-size: 62px; color: var(--dub-ink); letter-spacing: 6px; text-align: center; animation: rise 0.6s ease-out both; }
-.grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 14px; flex: 1; min-height: 0; width: 100%; }
-.card { border-radius: 20px; overflow: hidden; box-shadow: 0 16px 32px rgba(0,0,0,0.10); background: var(--dub-blush); }
-.card img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.card-1 { animation: slideL 0.7s ease-out 0.25s both; }
-.card-2 { animation: slideR 0.7s ease-out 0.45s both; }
-.card-3 { animation: slideL 0.7s ease-out 0.65s both; }
-.flip-card { perspective: 1600px; background: transparent; overflow: visible; box-shadow: none; animation: slideR 0.7s ease-out 0.85s both; }
-.flip-inner { position: relative; width: 100%; height: 100%; transform-style: preserve-3d; animation: flipOnce 5s cubic-bezier(.55, .15, .25, 1) 1.7s 1 forwards; }
-.flip-front, .flip-back { position: absolute; inset: 0; backface-visibility: hidden; border-radius: 20px; overflow: hidden; box-shadow: 0 16px 32px rgba(0,0,0,0.10); }
-.flip-front img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.flip-back { transform: rotateY(180deg); background: var(--dub-ink); display: flex; align-items: center; justify-content: center; padding: 24px; text-align: center; }
-.flip-text { font-family: var(--dub-font-display); font-weight: 700; font-size: 56px; color: var(--dub-cream); letter-spacing: 4px; line-height: 1.05; }
-.meta { display: flex; align-items: baseline; gap: 16px; animation: rise 0.6s ease-out 1.3s both; }
-.price { font-family: var(--dub-font-display); font-weight: 700; font-size: 96px; color: var(--dub-ink); line-height: 1; }
-.sku { font-family: var(--dub-font-body); font-weight: 600; font-size: 22px; color: var(--dub-ink); background: rgba(43,43,43,0.08); padding: 5px 14px; border-radius: 999px; letter-spacing: 2px; }
-.footer { font-family: var(--dub-font-body); font-weight: 700; font-size: 38px; color: var(--dub-ink); letter-spacing: 4px; animation: rise 0.6s ease-out 1.55s both; }
-@keyframes rise { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes slideL { from { opacity: 0; transform: translateX(-40px); } to { opacity: 1; transform: translateX(0); } }
-@keyframes slideR { from { opacity: 0; transform: translateX(40px); } to { opacity: 1; transform: translateX(0); } }
+
+.canvas {
+  width: var(--story-w);
+  height: var(--story-h);
+  background: var(--dub-soft);
+}
+
+.scene {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 60px 50px 60px;
+  gap: 18px;
+}
+
+/* --- Headline: bold uppercase serif with a gold underline accent ---
+ * Solid ink fill (NOT outlined like product-2colors — gives this template
+ * its own identity in the rotation). Gold pill underline animates wider
+ * after the headline lands. */
+.kicker {
+  font-family: var(--dub-font-display);
+  font-weight: 800;
+  font-size: 62px;
+  color: var(--dub-ink);
+  letter-spacing: 6px;
+  text-align: center;
+  text-transform: uppercase;
+  position: relative;
+  padding-bottom: 18px;
+  animation: rise 0.5s ease-out 0.1s both,
+             headlineDrift 5s ease-in-out 1.6s infinite;
+}
+
+.kicker::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 0;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--dub-gold);
+  transform: translateX(-50%);
+  animation: goldGrow 0.7s ease-out 0.5s forwards,
+             goldShimmer 3.4s ease-in-out 2.4s infinite;
+}
+
+/* 2x2 grid of cards — 3 fronts + 1 flipping back card */
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 14px;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+.card {
+  position: relative;
+  border-radius: 20px;
+  overflow: hidden;
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.10);
+  background: var(--dub-blush);
+}
+
+.card img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Per-card size pill — bigger, semi-transparent dark chip in the bottom-left
+ * of each color card so customers can see EXACTLY what sizes that color
+ * stocks. Hidden when empty (One size variants still show "One size"). */
+.card-size {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  font-family: var(--dub-font-body);
+  font-weight: 700;
+  font-size: 28px;
+  color: var(--dub-soft);
+  background: rgba(43, 43, 43, 0.82);
+  padding: 9px 20px;
+  border-radius: 999px;
+  letter-spacing: 2px;
+  white-space: nowrap;
+  backdrop-filter: blur(4px);
+  box-shadow: 0 6px 14px rgba(43, 43, 43, 0.28);
+  z-index: 3;
+}
+
+.card-size:empty { display: none; }
+
+/* Cards visible at frame 0 — only a small X-axis settle, no opacity fade.
+ * Stagger keeps the arrival rhythm. */
+.card-1 { animation: settleL 0.55s ease-out 0.15s both; }
+.card-2 { animation: settleR 0.55s ease-out 0.25s both; }
+.card-3 { animation: settleL 0.55s ease-out 0.35s both; }
+
+/* Flip card: 3D card that auto-flips at 1.7s to show "IN STOCK NOW", then
+ * flips back. Visible at frame 0 (no opacity fade) — only the slight
+ * X-axis settle for arrival. */
+.flip-card {
+  perspective: 1600px;
+  background: transparent;
+  overflow: visible;
+  box-shadow: none;
+  animation: settleR 0.55s ease-out 0.45s both;
+}
+
+.flip-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  animation: flipOnce 5s cubic-bezier(.55, .15, .25, 1) 1.7s 1 forwards;
+}
+
+.flip-front, .flip-back {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  border-radius: 20px;
+  overflow: hidden;
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.10);
+}
+
+.flip-front img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.flip-back {
+  transform: rotateY(180deg);
+  background: var(--dub-ink);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+}
+
+.flip-text {
+  font-family: var(--dub-font-display);
+  font-weight: 700;
+  font-size: 56px;
+  color: var(--dub-cream);
+  letter-spacing: 4px;
+  line-height: 1.05;
+}
+
+/* --- Info block --- */
+.info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.meta {
+  display: flex;
+  align-items: baseline;
+  gap: 18px;
+  animation: rise 0.5s ease-out 0.8s both;
+}
+
+.price {
+  font-family: var(--dub-font-display);
+  font-weight: 700;
+  font-size: 92px;
+  color: var(--dub-ink);
+  line-height: 1;
+}
+
+.sku {
+  font-family: var(--dub-font-body);
+  font-weight: 600;
+  font-size: 22px;
+  color: var(--dub-ink);
+  background: rgba(43, 43, 43, 0.08);
+  padding: 5px 14px;
+  border-radius: 999px;
+  letter-spacing: 2px;
+}
+
+.footer {
+  font-family: var(--dub-font-body);
+  font-weight: 700;
+  font-size: 30px;
+  color: var(--dub-ink);
+  letter-spacing: 4px;
+  margin-top: 2px;
+  animation: rise 0.5s ease-out 1.2s both;
+}
+
+/* Shop now chip with URL inline */
+.shop-chip {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 16px;
+  font-family: var(--dub-font-display);
+  font-style: italic;
+  font-weight: 600;
+  font-size: 36px;
+  color: var(--dub-ink);
+  position: relative;
+  padding: 4px 12px 12px;
+  animation: rise 0.5s ease-out 1.4s both;
+}
+
+.shop-chip::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 4px;
+  height: 1.5px;
+  background: var(--dub-ink);
+  opacity: 0.55;
+}
+
+.shop-chip-label { line-height: 1; }
+
+.shop-chip-arrow {
+  font-family: var(--dub-font-body);
+  font-size: 40px;
+  line-height: 1;
+  display: inline-block;
+  animation: arrowSlide 1.8s ease-in-out 2.4s infinite;
+}
+
+.shop-chip-url {
+  font-family: var(--dub-font-body);
+  font-style: normal;
+  font-weight: 500;
+  font-size: 26px;
+  letter-spacing: 2px;
+  color: var(--dub-ink);
+  opacity: 0.78;
+  line-height: 1;
+}
+
+.shop-badge { display: none; }
+
+/* --- Keyframes --- */
+@keyframes settleL { from { transform: translateX(-12px); } to { transform: translateX(0); } }
+@keyframes settleR { from { transform: translateX(12px); } to { transform: translateX(0); } }
+@keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes flipOnce { 0% { transform: rotateY(0); } 22% { transform: rotateY(180deg); } 78% { transform: rotateY(180deg); } 100% { transform: rotateY(0); } }
+@keyframes goldGrow { from { width: 0; } to { width: 96px; } }
+@keyframes goldShimmer { 0%, 100% { background: var(--dub-gold); } 50% { background: #e2c894; } }
+@keyframes headlineDrift { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+@keyframes pillGlow { 0%, 100% { box-shadow: 0 8px 18px rgba(43, 43, 43, 0.22); } 50% { box-shadow: 0 8px 22px rgba(244, 194, 194, 0.55), 0 8px 18px rgba(43, 43, 43, 0.22); } }
+@keyframes arrowSlide { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(14px); } }

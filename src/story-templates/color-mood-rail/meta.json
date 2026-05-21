@@ -72,9 +72,19 @@
       "max_chars": 12
     },
     {
-      "id": "size",
-      "default": "Sizes S · M · L · XL",
-      "max_chars": 28
+      "id": "size_a",
+      "default": "S · M · L",
+      "max_chars": 22
+    },
+    {
+      "id": "size_b",
+      "default": "S · M · L",
+      "max_chars": 22
+    },
+    {
+      "id": "size_c",
+      "default": "S · M · L",
+      "max_chars": 22
     },
     {
       "id": "cta",

@@ -1,18 +1,238 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body { width: var(--story-w); height: var(--story-h); overflow: hidden; }
-.canvas { width: var(--story-w); height: var(--story-h); background: linear-gradient(140deg, var(--dub-blush) 0%, var(--dub-pink) 50%, var(--dub-cream) 100%); position: relative; }
-.bg-shape { position: absolute; width: 900px; height: 900px; border-radius: 50%; background: var(--dub-soft); top: 38%; left: 50%; transform: translate(-50%, -50%); box-shadow: 0 60px 120px rgba(0,0,0,0.10); animation: spin 12s linear infinite; }
-.scene { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; padding: 120px 60px 80px; gap: 14px; }
-.kicker { font-family: var(--dub-font-body); font-weight: 700; font-size: 28px; color: var(--dub-coral); background: rgba(199,93,75,0.12); padding: 10px 28px; border-radius: 999px; letter-spacing: 6px; animation: rise 0.6s ease-out both; }
-.headline { font-family: var(--dub-font-display); font-weight: 700; font-size: 150px; color: var(--dub-ink); letter-spacing: 8px; line-height: 0.95; text-align: center; animation: rise 0.7s ease-out 0.2s both; }
-.cutout-wrap { flex: 1; width: 100%; display: flex; align-items: center; justify-content: center; position: relative; min-height: 0; }
-.cutout { max-width: 85%; max-height: 100%; object-fit: contain; filter: drop-shadow(0 28px 50px rgba(0,0,0,0.18)); animation: rise 0.9s ease-out 0.4s both, float 4.5s ease-in-out 1.2s infinite; }
-.price-pill { position: absolute; right: 60px; top: 540px; background: var(--dub-ink); color: var(--dub-cream); padding: 18px 26px; border-radius: 18px; display: flex; flex-direction: column; align-items: flex-end; animation: rise 0.6s ease-out 1.0s both; }
-.price { font-family: var(--dub-font-display); font-weight: 700; font-size: 56px; line-height: 1; }
-.sku { font-family: var(--dub-font-body); font-weight: 600; font-size: 18px; opacity: 0.7; letter-spacing: 2px; margin-top: 4px; }
-.size-pill { background: rgba(43,43,43,0.78); color: var(--dub-cream); padding: 10px 24px; border-radius: 999px; font-family: var(--dub-font-body); font-weight: 700; font-size: 26px; letter-spacing: 3px; align-self: center; animation: rise 0.6s ease-out 1.3s both; }
-.footer { font-family: var(--dub-font-body); font-weight: 700; font-size: 34px; color: var(--dub-ink); letter-spacing: 4px; animation: rise 0.6s ease-out 1.6s both; margin-top: 6px; }
-.shop-badge { animation: rise 0.6s ease-out 1.9s both; }
-@keyframes rise { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+/* Cleaner cream/blush palette — fits the cohesive family with product-1color
+ * and the multi-color templates. The cutout floats over a soft circular
+ * backdrop with gentle decorative dots. */
+.canvas {
+  width: var(--story-w);
+  height: var(--story-h);
+  background:
+    radial-gradient(circle at 22% 18%, rgba(244, 194, 194, 0.28) 0%, rgba(244, 194, 194, 0) 50%),
+    linear-gradient(180deg, var(--dub-soft) 0%, var(--dub-cream) 100%);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Soft circle behind the cutout — slow ambient pulse, no rotation */
+.bg-circle {
+  position: absolute;
+  width: 820px;
+  height: 820px;
+  border-radius: 50%;
+  background: radial-gradient(circle at center, var(--dub-soft) 0%, rgba(245, 230, 216, 0.55) 70%, transparent 100%);
+  top: 42%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  filter: blur(2px);
+  animation: pulseBg 5s ease-in-out 1s infinite;
+}
+
+/* Two small decorative dots — gold sparkle accents */
+.bg-dot {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--dub-gold);
+  opacity: 0.55;
+}
+.bg-dot-1 { top: 16%; right: 14%; animation: dotPulse 3.2s ease-in-out 1.4s infinite; }
+.bg-dot-2 { bottom: 28%; left: 12%; animation: dotPulse 3.2s ease-in-out 2.0s infinite; }
+
+.scene {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 70px 50px 60px;
+  gap: 12px;
+}
+
+.kicker {
+  font-family: var(--dub-font-body);
+  font-weight: 700;
+  font-size: 26px;
+  color: var(--dub-ink);
+  background: rgba(43, 43, 43, 0.08);
+  padding: 9px 26px;
+  border-radius: 999px;
+  letter-spacing: 6px;
+  text-transform: uppercase;
+  animation: rise 0.5s ease-out 0.1s both,
+             kickerPulse 3s ease-in-out 1.8s infinite;
+}
+
+/* Outlined uppercase serif headline — matches product-2colors family */
+.headline {
+  font-family: var(--dub-font-display);
+  font-weight: 800;
+  font-size: 112px;
+  color: transparent;
+  -webkit-text-stroke: 3px var(--dub-ink);
+  text-stroke: 3px var(--dub-ink);
+  letter-spacing: 8px;
+  text-transform: uppercase;
+  text-align: center;
+  line-height: 1;
+  margin-top: 4px;
+  animation: rise 0.5s ease-out 0.25s both,
+             headlineDrift 5s ease-in-out 1.8s infinite;
+}
+
+/* Cutout: visible at frame 0 (no opacity fade). Floats ambient up/down. */
+.cutout-wrap {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  min-height: 0;
+}
+
+.cutout {
+  max-width: 82%;
+  max-height: 100%;
+  object-fit: contain;
+  filter: drop-shadow(0 28px 50px rgba(43, 43, 43, 0.22));
+  animation: cutoutSettle 0.6s ease-out 0s both,
+             float 4.5s ease-in-out 1.2s infinite;
+}
+
+/* Info block */
+.info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.meta {
+  display: flex;
+  align-items: baseline;
+  gap: 18px;
+  animation: rise 0.5s ease-out 0.6s both;
+}
+
+.price {
+  font-family: var(--dub-font-display);
+  font-weight: 700;
+  font-size: 88px;
+  color: var(--dub-ink);
+  line-height: 1;
+}
+
+.sku {
+  font-family: var(--dub-font-body);
+  font-weight: 600;
+  font-size: 22px;
+  color: var(--dub-ink);
+  background: rgba(43, 43, 43, 0.08);
+  padding: 6px 14px;
+  border-radius: 999px;
+  letter-spacing: 2px;
+}
+
+/* Position C: thin rule + size text + thin rule */
+.size-divider {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  width: 100%;
+  max-width: 720px;
+  animation: rise 0.5s ease-out 0.8s both;
+}
+
+.size-rule {
+  flex: 1;
+  height: 1px;
+  background: rgba(43, 43, 43, 0.22);
+}
+
+.size {
+  font-family: var(--dub-font-body);
+  font-weight: 600;
+  font-size: 28px;
+  color: var(--dub-ink);
+  letter-spacing: 2px;
+  white-space: nowrap;
+}
+
+.size:empty,
+.size:empty + .size-rule { display: none; }
+
+.footer {
+  font-family: var(--dub-font-body);
+  font-weight: 700;
+  font-size: 32px;
+  color: var(--dub-ink);
+  letter-spacing: 4px;
+  margin-top: 2px;
+  animation: rise 0.5s ease-out 1.0s both;
+}
+
+/* Shop now chip with URL inline */
+.shop-chip {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 16px;
+  font-family: var(--dub-font-display);
+  font-style: italic;
+  font-weight: 600;
+  font-size: 36px;
+  color: var(--dub-ink);
+  position: relative;
+  padding: 4px 12px 12px;
+  animation: rise 0.5s ease-out 1.2s both;
+}
+
+.shop-chip::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 4px;
+  height: 1.5px;
+  background: var(--dub-ink);
+  opacity: 0.55;
+}
+
+.shop-chip-label { line-height: 1; }
+
+.shop-chip-arrow {
+  font-family: var(--dub-font-body);
+  font-size: 40px;
+  line-height: 1;
+  display: inline-block;
+  animation: arrowSlide 1.8s ease-in-out 2.4s infinite;
+}
+
+.shop-chip-url {
+  font-family: var(--dub-font-body);
+  font-style: normal;
+  font-weight: 500;
+  font-size: 26px;
+  letter-spacing: 2px;
+  color: var(--dub-ink);
+  opacity: 0.78;
+  line-height: 1;
+}
+
+.shop-badge { display: none; }
+
+/* --- Keyframes ---
+ * cutoutSettle: NO opacity change so the cutout is visible at frame 0.
+ * Tiny Y settle for arrival. */
+@keyframes cutoutSettle { from { transform: translateY(12px); } to { transform: translateY(0); } }
+@keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-14px); } }
-@keyframes spin { from { transform: translate(-50%, -50%) rotate(0deg); } to { transform: translate(-50%, -50%) rotate(360deg); } }
+@keyframes pulseBg { 0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.95; } 50% { transform: translate(-50%, -50%) scale(1.05); opacity: 0.78; } }
+@keyframes dotPulse { 0%, 100% { transform: scale(1); opacity: 0.55; } 50% { transform: scale(1.6); opacity: 0.9; } }
+@keyframes kickerPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.04); } }
+@keyframes headlineDrift { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+@keyframes arrowSlide { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(14px); } }

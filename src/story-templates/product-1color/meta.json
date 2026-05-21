@@ -1,6 +1,6 @@
 {
   "slug": "product-1color",
-  "name": "Product · 1 Color (Front + Back)",
+  "name": "Product · 1 Color (Big Front + Back Inset)",
   "category": "single-product-multi-image",
   "duration_seconds": 6,
   "wave": 1,
@@ -20,11 +20,6 @@
   ],
   "text_overrides": [
     {
-      "id": "headline",
-      "default": "FRONT & BACK",
-      "max_chars": 16
-    },
-    {
       "id": "price",
       "default": "Rs.0",
       "max_chars": 12
@@ -35,14 +30,14 @@
       "max_chars": 10
     },
     {
+      "id": "size",
+      "default": "Size: S · M · L",
+      "max_chars": 28
+    },
+    {
       "id": "footer",
       "default": "DM to ORDER",
       "max_chars": 20
-    },
-    {
-      "id": "footer_url",
-      "default": "shop dollupboutique.com",
-      "max_chars": 32
     }
   ]
 }

@@ -8,15 +8,27 @@
   </head>
   <body>
     <div id="root" class="canvas" data-composition-id="main" data-start="0" data-duration="5" data-width="1080" data-height="1920">
-      <img id="lifestyle-image" class="bg clip" data-start="0" data-duration="5" data-track-index="0" data-hf-image="lifestyle" alt="" />
-      <span id="status" class="pill pill-status clip" data-start="0" data-duration="5" data-track-index="1" data-hf-text="status">IN STOCK</span>
-      <span id="size" class="pill pill-size clip" data-start="0" data-duration="5" data-track-index="2" data-hf-text="size">Size: S, M, L</span>
-      <div id="price-block" class="price-block clip" data-start="0" data-duration="5" data-track-index="3">
-        <div class="price" data-hf-text="price">Rs.0</div>
-        <div class="sku" data-hf-text="sku">IS0000</div>
+      <img class="bg" data-hf-image="lifestyle" alt="" />
+      <div class="bottom-fade" aria-hidden="true"></div>
+
+      <span class="pill pill-status" data-hf-text="status">IN STOCK</span>
+
+      <div class="bottom-corners">
+        <div class="price-block">
+          <div class="price" data-hf-text="price">Rs.0</div>
+          <div class="sku" data-hf-text="sku">IS0000</div>
+        </div>
+        <span class="pill pill-size" data-hf-text="size">Size: S · M · L</span>
       </div>
-      <span id="footer" class="pill pill-footer clip" data-start="0" data-duration="5" data-track-index="4" data-hf-text="footer">DM to ORDER</span>
+
+      <div class="footer-block">
+        <div class="footer" data-hf-text="footer">DM to ORDER</div>
+        <a class="shop-chip" aria-label="Shop now at dollupboutique.com">
+          <span class="shop-chip-label">Shop now</span>
+          <span class="shop-chip-arrow" aria-hidden="true">&#8594;</span>
+          <span class="shop-chip-url">dollupboutique.com</span>
+        </a>
+      </div>
     </div>
   </body>
 </html>
-

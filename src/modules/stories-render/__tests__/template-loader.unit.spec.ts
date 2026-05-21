@@ -34,6 +34,7 @@ describe("template-loader", () => {
       "color-mood-rail",
       "customer-review",
       "cutout-spotlight",
+      "cutout-spotlight-v2",
       "how-to-order",
       "in-stock-hero",
       "in-stock-hero-blush",

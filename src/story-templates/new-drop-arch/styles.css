@@ -35,7 +35,10 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; }
   animation: stampDrop 0.9s cubic-bezier(.45,1.6,.45,1) both, kickerPulse 2.6s ease-in-out 1.2s infinite;
 }
 
-.arch-wrap { position: relative; width: 100%; flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; margin-top: 8px; animation: rise 0.8s ease-out 0.45s both; }
+/* Arch wrapper: no opacity fade so the product photo is visible at frame 0.
+ * Subtle softRise only on translateY for a gentle settle without hiding the
+ * photo. */
+.arch-wrap { position: relative; width: 100%; flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; margin-top: 8px; animation: softRise 0.5s ease-out 0s both; }
 
 .arch {
   width: 760px;
@@ -49,23 +52,31 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; }
 }
 .front { width: 100%; height: 100%; object-fit: cover; display: block; animation: zoomSlow 7s ease-out both; }
 
-.back-bubble {
+/* Wrapper is the positioned anchor; bubble does the circular clip; tag floats
+ * above the wrapper (NOT inside the bubble) so it isn't clipped into a pink
+ * slice. Fixed 2026-05-21. */
+.back-bubble-wrap {
   position: absolute;
   right: 30px;
   bottom: 40px;
   width: 280px;
   height: 280px;
+  animation: bubbleIn 0.8s cubic-bezier(.45,1.6,.45,1) 0.9s both,
+             bubbleFloat 4.5s ease-in-out 2.4s infinite;
+}
+.back-bubble {
+  width: 100%;
+  height: 100%;
   border-radius: 50%;
   background: #f3ece2;
   border: 3px solid #fdf6ec;
   box-shadow: 0 14px 28px rgba(0,0,0,0.12);
   overflow: hidden;
-  animation: bubbleIn 0.8s cubic-bezier(.45,1.6,.45,1) 0.9s both;
 }
 .back { width: 100%; height: 100%; object-fit: cover; }
 .back-tag {
   position: absolute;
-  top: -16px;
+  top: -18px;
   left: 50%;
   transform: translateX(-50%);
   background: #f4c2c2;
@@ -78,6 +89,7 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; }
   border-radius: 999px;
   z-index: 2;
   white-space: nowrap;
+  box-shadow: 0 4px 10px rgba(43, 43, 43, 0.18);
 }
 .back-arrow {
   position: absolute;
@@ -86,7 +98,7 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; }
   font-family: var(--dub-font-display);
   font-size: 64px;
   color: #2b2b2b;
-  animation: rise 0.6s ease-out 1.2s both;
+  animation: rise 0.5s ease-out 1.4s both;
   transform: rotate(35deg);
 }
 
@@ -97,7 +109,8 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; }
   color: #2b2b2b;
   line-height: 1;
   text-align: center;
-  animation: rise 0.6s ease-out 1.2s both;
+  animation: rise 0.5s ease-out 1.0s both,
+             headlineDrift 5s ease-in-out 2.2s infinite;
 }
 .divider {
   width: 50px;
@@ -105,7 +118,8 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; }
   background: #c9a96e;
   display: block;
   position: relative;
-  animation: rise 0.6s ease-out 1.35s both;
+  animation: rise 0.5s ease-out 1.2s both,
+             shimmer 3.6s ease-in-out 2.6s infinite;
 }
 .divider::after {
   content: "♥";
@@ -117,6 +131,7 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; }
   font-size: 22px;
   background: #fff5ec;
   padding: 0 6px;
+  animation: heartbeat 2.2s ease-in-out 2.4s infinite;
 }
 
 .price {
@@ -125,7 +140,7 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; }
   font-size: 74px;
   color: #2b2b2b;
   line-height: 1;
-  animation: rise 0.6s ease-out 1.5s both;
+  animation: rise 0.5s ease-out 1.3s both;
 }
 .size-pill {
   background: rgba(43,43,43,0.86);
@@ -136,7 +151,8 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; }
   font-weight: 700;
   font-size: 26px;
   letter-spacing: 3px;
-  animation: rise 0.6s ease-out 1.7s both;
+  animation: rise 0.5s ease-out 1.5s both,
+             pillGlow 3.4s ease-in-out 2.8s infinite;
 }
 
 .cta {
@@ -151,7 +167,7 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; }
   font-weight: 700;
   letter-spacing: 6px;
   box-shadow: 0 16px 32px rgba(0,0,0,0.22);
-  animation: rise 0.6s ease-out 1.9s both, ctaPulse 2.4s ease-in-out 2.6s infinite;
+  animation: rise 0.5s ease-out 1.7s both, ctaPulse 2.4s ease-in-out 2.4s infinite;
 }
 .cta-text { font-size: 32px; }
 .bag {
@@ -182,14 +198,27 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; }
   color: #2b2b2b;
   letter-spacing: 2px;
   opacity: 0.78;
-  animation: rise 0.6s ease-out 2.1s both;
+  animation: rise 0.5s ease-out 1.9s both;
 }
 
-@keyframes rise { from { opacity: 0; transform: translateY(22px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+/* softRise: NO opacity change — for elements that hold the product photo
+ * (audience-retention rule, photo visible at frame 0). Small Y travel only. */
+@keyframes softRise { from { transform: translateY(10px); } to { transform: translateY(0); } }
 @keyframes stampDrop { 0% { opacity: 0; transform: translateY(-50px) scale(1.4); } 60% { opacity: 1; transform: translateY(8px) scale(0.96); } 100% { opacity: 1; transform: translateY(0) scale(1); } }
 @keyframes kickerPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
 @keyframes zoomSlow { from { transform: scale(1.08); } to { transform: scale(1); } }
 @keyframes bubbleIn { 0% { opacity: 0; transform: scale(0.4) rotate(-12deg); } 60% { opacity: 1; transform: scale(1.08) rotate(2deg); } 100% { opacity: 1; transform: scale(1) rotate(0); } }
+/* Gentle ambient bob for the back bubble — runs after bubbleIn settles */
+@keyframes bubbleFloat { 0%, 100% { transform: translateY(0) rotate(0); } 50% { transform: translateY(-8px) rotate(-1.5deg); } }
+/* Slow drift on the headline + heart divider for editorial liveliness */
+@keyframes headlineDrift { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+/* Soft heartbeat pulse for the heart in the divider */
+@keyframes heartbeat { 0%, 100% { transform: translate(-50%, -50%) scale(1); } 30% { transform: translate(-50%, -50%) scale(1.2); } 60% { transform: translate(-50%, -50%) scale(1); } 80% { transform: translate(-50%, -50%) scale(1.12); } }
+/* Ambient shimmer on the gold divider line */
+@keyframes shimmer { 0%, 100% { background: #c9a96e; } 50% { background: #e2c894; } }
+/* Subtle glow pulse on the size pill so it stays alive */
+@keyframes pillGlow { 0%, 100% { box-shadow: 0 0 0 0 rgba(244, 194, 194, 0); } 50% { box-shadow: 0 0 0 8px rgba(244, 194, 194, 0.18); } }
 @keyframes ctaPulse { 0%, 100% { transform: scale(1); box-shadow: 0 16px 32px rgba(0,0,0,0.22); } 50% { transform: scale(1.035); box-shadow: 0 20px 40px rgba(0,0,0,0.28); } }
 @keyframes sparkSpin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
 @keyframes drift { 0%, 100% { transform: translate(0,0); } 50% { transform: translate(20px, -10px); } }

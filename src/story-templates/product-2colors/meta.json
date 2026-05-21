@@ -1,6 +1,6 @@
 {
   "slug": "product-2colors",
-  "name": "Product · 2 Colors",
+  "name": "Product · 2 Colors (Front · Front · Back Overlap)",
   "category": "single-product-multi-image",
   "duration_seconds": 6,
   "wave": 1,
@@ -20,14 +20,14 @@
     {
       "id": "back",
       "hint": "back",
-      "label": "Back view",
+      "label": "Back view (small, overlapping)",
       "required": true
     }
   ],
   "text_overrides": [
     {
       "id": "headline",
-      "default": "2 COLORS AVAILABLE",
+      "default": "2 colors available",
       "max_chars": 24
     },
     {
@@ -41,14 +41,19 @@
       "max_chars": 10
     },
     {
+      "id": "size_a",
+      "default": "S · M · L",
+      "max_chars": 22
+    },
+    {
+      "id": "size_b",
+      "default": "S · M · L",
+      "max_chars": 22
+    },
+    {
       "id": "footer",
       "default": "DM to ORDER",
       "max_chars": 20
-    },
-    {
-      "id": "footer_url",
-      "default": "shop dollupboutique.com",
-      "max_chars": 32
     }
   ]
 }

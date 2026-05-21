@@ -82,9 +82,18 @@ const SAMPLE_TEXT = {
   footer: "DM to ORDER",
   price: "Rs.1100",
   sku: "IS2364",
-  size: "Size: S, M, L",
+  size: "Size: S · M · L",
+  // Per-color size pills on multi-color templates. Use DIFFERENT sets per
+  // slot so the per-card pills demo what real data looks like (sizes vary
+  // between colors) rather than all rendering the same string.
+  size_a: "S · M",
+  size_b: "S · M · L",
+  size_c: "M · L · XL",
   old_price: "Rs.1500",
   new_price: "Rs.1100",
+  // Auto-computed in picker from compare_at vs price; sample value used when
+  // a template asks for discount_pct and no override is provided.
+  discount_pct: "-27%",
 }
 
 function escapeHtml(v) {

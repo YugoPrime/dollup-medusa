@@ -24,13 +24,18 @@
       "max_chars": 12
     },
     {
+      "id": "discount_pct",
+      "default": "",
+      "max_chars": 8
+    },
+    {
       "id": "sku",
       "default": "IS0000",
       "max_chars": 10
     },
     {
       "id": "size",
-      "default": "Size: S, M, L",
+      "default": "Size: S · M · L",
       "max_chars": 28
     },
     {

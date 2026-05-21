@@ -1,109 +1,311 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
-html, body {
-  width: var(--story-w);
-  height: var(--story-h);
-  overflow: hidden;
-}
+html, body { width: var(--story-w); height: var(--story-h); overflow: hidden; }
+
 .canvas {
   width: var(--story-w);
   height: var(--story-h);
   background:
-    radial-gradient(circle at 18% 12%, rgba(244,194,194,0.35) 0%, rgba(244,194,194,0) 55%),
+    radial-gradient(circle at 18% 12%, rgba(244, 194, 194, 0.35) 0%, rgba(244, 194, 194, 0) 55%),
     linear-gradient(180deg, var(--dub-soft) 0%, var(--dub-cream) 100%);
 }
+
 .scene {
   position: absolute;
   inset: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 100px 60px 80px;
-  gap: 28px;
+  padding: 60px 50px 60px;
+  gap: 16px;
 }
-.headline {
+
+/* --- Headline: cursive script + tracked caps subtitle ---
+ * The script line carries the brand voice; the small caps anchor it as
+ * a label. */
+.headline-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.headline-script {
   font-family: var(--dub-font-display);
-  font-weight: 700;
-  font-size: 72px;
+  font-style: italic;
+  font-weight: 500;
+  font-size: 96px;
   color: var(--dub-ink);
-  letter-spacing: 6px;
+  line-height: 0.9;
+  letter-spacing: -1px;
+  text-transform: none;
+  animation: rise 0.5s ease-out 0.1s both,
+             scriptDrift 5s ease-in-out 1.6s infinite;
+}
+
+.headline-sub {
+  font-family: var(--dub-font-body);
+  font-weight: 600;
+  font-size: 22px;
+  color: var(--dub-ink);
+  letter-spacing: 12px;
+  text-transform: uppercase;
+  opacity: 0.65;
+  margin-top: 6px;
+  animation: rise 0.5s ease-out 0.25s both;
+}
+
+/* --- Hero: full-bleed photo area where the diagonal wipe lives ---
+ * layer-a is the base (always visible at frame 0).
+ * layer-b is on top, clipped to nothing initially, then a clip-path
+ * polygon expands diagonally from top-left to fully cover the layer. */
+.hero {
   position: relative;
-  animation: rise 0.6s ease-out both;
-}
-.headline::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  bottom: -14px;
-  width: 96px;
-  height: 4px;
-  border-radius: 2px;
-  background: var(--dub-gold);
-  transform: translateX(-50%);
-}
-.grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 18px;
   flex: 1;
   width: 100%;
-  min-height: 0;
-}
-.panel {
-  position: relative;
-  border-radius: 22px;
+  border-radius: 24px;
   overflow: hidden;
   background: var(--dub-blush);
-  box-shadow: 0 20px 40px rgba(43, 43, 43, 0.12);
+  box-shadow: 0 24px 48px rgba(43, 43, 43, 0.16);
 }
-.panel img {
+
+.layer {
+  position: absolute;
+  inset: 0;
+}
+
+.layer img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
 }
-.panel-a { animation: slideL 0.75s ease-out 0.3s both; }
-.panel-b { animation: slideR 0.75s ease-out 0.5s both; }
+
+/* Color A: visible from frame 0, subtle slow zoom while it's on screen */
+.layer-a {
+  animation: slowZoomA 2.4s ease-out 0s both;
+}
+
+/* Color B: starts hidden (clipped to a 0-area triangle in top-left), then
+ * wipes diagonally to cover everything at 2s. Held until end. */
+.layer-b {
+  clip-path: polygon(0% 0%, 0% 0%, 0% 0%, 0% 0%);
+  animation: diagonalWipe 0.7s cubic-bezier(0.65, 0.05, 0.36, 1) 2s forwards,
+             slowZoomB 4s ease-out 2.7s both;
+}
+
+/* Diagonal accent line that rides the wipe front for a clean reveal feel.
+ * Same clip-path animation timing, slightly delayed so it appears AT the
+ * edge while it's moving. */
+.wipe-edge {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      135deg,
+      transparent 0%,
+      transparent 49.5%,
+      rgba(255, 255, 255, 0.85) 50%,
+      transparent 50.5%,
+      transparent 100%
+    );
+  opacity: 0;
+  animation: edgeFlash 0.7s ease-out 2s forwards;
+}
+
+/* Phase tags — small color-name labels in the top-left, one per phase */
+.phase-tag {
+  position: absolute;
+  top: 24px;
+  left: 24px;
+  font-family: var(--dub-font-body);
+  font-weight: 700;
+  font-size: 20px;
+  letter-spacing: 4px;
+  padding: 8px 18px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.88);
+  color: var(--dub-ink);
+  z-index: 3;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(43, 43, 43, 0.14);
+}
+
+.phase-a { animation: tagInOut 2.2s ease-in-out 0.2s forwards; }
+.phase-b { opacity: 0; animation: tagIn 0.5s ease-out 2.6s forwards; }
+
+/* --- Info block --- */
+.info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+}
+
 .meta {
   display: flex;
   align-items: baseline;
   gap: 18px;
-  animation: rise 0.6s ease-out 1.0s both;
+  animation: rise 0.5s ease-out 0.7s both;
 }
+
 .price {
   font-family: var(--dub-font-display);
   font-weight: 700;
-  font-size: 108px;
+  font-size: 96px;
   color: var(--dub-ink);
   line-height: 1;
 }
+
 .sku {
   font-family: var(--dub-font-body);
   font-weight: 600;
-  font-size: 22px;
+  font-size: 24px;
   color: var(--dub-ink);
   background: rgba(43, 43, 43, 0.08);
-  padding: 5px 14px;
+  padding: 6px 16px;
   border-radius: 999px;
   letter-spacing: 2px;
 }
+
+/* Per-color size pills inside the hero — only the active phase's pill is
+ * visible. Same timing as the phase-tags above. Bottom-left of the hero
+ * (opposite corner from the phase tag in top-left). Bumped up to match
+ * the bigger pill style across product-2colors / product-3colors. */
+.hero-size {
+  position: absolute;
+  bottom: 28px;
+  left: 28px;
+  font-family: var(--dub-font-body);
+  font-weight: 700;
+  font-size: 30px;
+  color: var(--dub-soft);
+  background: rgba(43, 43, 43, 0.82);
+  padding: 11px 24px;
+  border-radius: 999px;
+  letter-spacing: 2px;
+  white-space: nowrap;
+  backdrop-filter: blur(4px);
+  box-shadow: 0 6px 14px rgba(43, 43, 43, 0.28);
+  z-index: 4;
+}
+
+.hero-size:empty { display: none; }
+
+.hero-size-a { animation: tagInOut 2.2s ease-in-out 0.2s forwards; }
+.hero-size-b { opacity: 0; animation: tagIn 0.5s ease-out 2.6s forwards; }
+
 .footer {
   font-family: var(--dub-font-body);
   font-weight: 700;
-  font-size: 48px;
+  font-size: 32px;
   color: var(--dub-ink);
   letter-spacing: 4px;
-  animation: rise 0.6s ease-out 1.3s both;
+  margin-top: 2px;
+  animation: rise 0.5s ease-out 1.1s both;
 }
 
-@keyframes slideL {
-  from { opacity: 0; transform: translateX(-40px); }
-  to { opacity: 1; transform: translateX(0); }
+/* Shop now chip with URL inline */
+.shop-chip {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 16px;
+  font-family: var(--dub-font-display);
+  font-style: italic;
+  font-weight: 600;
+  font-size: 38px;
+  color: var(--dub-ink);
+  position: relative;
+  padding: 4px 12px 14px;
+  animation: rise 0.5s ease-out 1.3s both;
 }
-@keyframes slideR {
-  from { opacity: 0; transform: translateX(40px); }
-  to { opacity: 1; transform: translateX(0); }
+
+.shop-chip::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 6px;
+  height: 1.5px;
+  background: var(--dub-ink);
+  opacity: 0.55;
 }
+
+.shop-chip-label { line-height: 1; }
+
+.shop-chip-arrow {
+  font-family: var(--dub-font-body);
+  font-size: 42px;
+  line-height: 1;
+  display: inline-block;
+  animation: arrowSlide 1.8s ease-in-out 2.2s infinite;
+}
+
+.shop-chip-url {
+  font-family: var(--dub-font-body);
+  font-style: normal;
+  font-weight: 500;
+  font-size: 28px;
+  letter-spacing: 2px;
+  color: var(--dub-ink);
+  opacity: 0.78;
+  line-height: 1;
+}
+
+.shop-badge { display: none; }
+
+/* --- Keyframes ---
+ * No-fade rule respected: the BASE photo (.layer-a) is visible at frame 0,
+ * never animates opacity. Layer-B's "reveal" is a clip-path expansion, not
+ * an opacity fade, so the audience perceives a deliberate swipe rather
+ * than a fade-in. */
+
+/* Diagonal clip-path expansion top-left to bottom-right. The polygon
+ * grows along the diagonal — at start it's a degenerate point at (0,0);
+ * mid-way it covers the upper-left triangle; finally it covers the
+ * full square. */
+@keyframes diagonalWipe {
+  0%   { clip-path: polygon(0% 0%, 0% 0%, 0% 0%, 0% 0%); }
+  100% { clip-path: polygon(0% 0%, 200% 0%, 0% 200%, 0% 0%); }
+}
+
+@keyframes edgeFlash {
+  0%   { opacity: 0; transform: translate(-30%, -30%); }
+  20%  { opacity: 0.85; }
+  100% { opacity: 0;   transform: translate(40%, 40%); }
+}
+
+@keyframes slowZoomA {
+  from { transform: scale(1.04); }
+  to   { transform: scale(1); }
+}
+@keyframes slowZoomB {
+  from { transform: scale(1.06); }
+  to   { transform: scale(1); }
+}
+
+@keyframes tagInOut {
+  0%   { opacity: 0; transform: translateX(-12px); }
+  10%  { opacity: 1; transform: translateX(0); }
+  85%  { opacity: 1; transform: translateX(0); }
+  100% { opacity: 0; transform: translateX(0); }
+}
+@keyframes tagIn {
+  0%   { opacity: 0; transform: translateX(-12px); }
+  100% { opacity: 1; transform: translateX(0); }
+}
+
 @keyframes rise {
-  from { opacity: 0; transform: translateY(20px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes scriptDrift {
+  0%, 100% { transform: translateY(0) rotate(-1deg); }
+  50%      { transform: translateY(-4px) rotate(0deg); }
+}
+@keyframes arrowSlide {
+  0%, 100% { transform: translateX(0); }
+  50%      { transform: translateX(14px); }
 }

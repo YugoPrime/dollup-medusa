@@ -1,0 +1,229 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: var(--story-w); height: var(--story-h); overflow: hidden; }
+
+/* v2: cream canvas with a BOLD saturated blush/coral circle behind the cutout.
+ * Much higher contrast than v1's soft pulse circle. */
+.canvas {
+  width: var(--story-w);
+  height: var(--story-h);
+  background:
+    radial-gradient(circle at 80% 90%, rgba(196, 117, 137, 0.12) 0%, transparent 50%),
+    linear-gradient(180deg, var(--dub-soft) 0%, var(--dub-cream) 100%);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Bold colored circle — deep blush/coral. Subtle scale breathing so it
+ * doesn't feel static, but solid color (no gradient) for max contrast
+ * against the cream canvas. */
+.bg-circle {
+  position: absolute;
+  width: 820px;
+  height: 820px;
+  border-radius: 50%;
+  background: #d99aa6;
+  top: 44%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 40px 100px rgba(196, 117, 137, 0.35);
+  animation: circleBreathe 5s ease-in-out 0.8s infinite;
+}
+
+/* Decorative cream dots float around the colored circle */
+.bg-dot {
+  position: absolute;
+  border-radius: 50%;
+  background: #fff;
+  opacity: 0.85;
+}
+.bg-dot-1 { top: 14%; right: 12%; width: 18px; height: 18px; animation: dotFloat 3.2s ease-in-out 1.2s infinite; }
+.bg-dot-2 { top: 32%; left: 8%; width: 12px; height: 12px; animation: dotFloat 3.4s ease-in-out 1.8s infinite; }
+.bg-dot-3 { bottom: 22%; right: 16%; width: 14px; height: 14px; animation: dotFloat 3.8s ease-in-out 2.4s infinite; }
+
+.scene {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 70px 50px 60px;
+  gap: 10px;
+}
+
+/* Kicker pill — cream chip on top of the colored field */
+.kicker {
+  font-family: var(--dub-font-body);
+  font-weight: 700;
+  font-size: 24px;
+  color: #c47589;
+  background: #fff;
+  padding: 10px 26px;
+  border-radius: 999px;
+  letter-spacing: 6px;
+  text-transform: uppercase;
+  box-shadow: 0 6px 16px rgba(196, 117, 137, 0.28);
+  animation: rise 0.5s ease-out 0.1s both,
+             kickerPulse 3s ease-in-out 1.8s infinite;
+}
+
+/* Headline: tracked caps display serif, ink solid (not outlined v1 style).
+ * Sits on cream above the colored circle. */
+.headline {
+  font-family: var(--dub-font-display);
+  font-weight: 700;
+  font-size: 96px;
+  color: var(--dub-ink);
+  letter-spacing: 14px;
+  text-transform: uppercase;
+  text-align: center;
+  line-height: 1;
+  margin-top: 4px;
+  animation: rise 0.5s ease-out 0.25s both,
+             headlineDrift 5s ease-in-out 1.8s infinite;
+}
+
+.cutout-wrap {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  min-height: 0;
+}
+
+/* Cutout floats over the bold circle — visible at frame 0, only tiny settle.
+ * Drop-shadow tuned for cutout over a saturated bg. */
+.cutout {
+  max-width: 84%;
+  max-height: 100%;
+  object-fit: contain;
+  filter: drop-shadow(0 24px 50px rgba(43, 43, 43, 0.35));
+  animation: cutoutSettle 0.6s ease-out 0s both,
+             float 4.5s ease-in-out 1.2s infinite;
+}
+
+/* --- v2 typography: italic script price + tracked caps for everything else --- */
+.info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+}
+
+/* Italic-script price — big, expressive, brand-voice */
+.price-script {
+  font-family: var(--dub-font-display);
+  font-style: italic;
+  font-weight: 700;
+  font-size: 108px;
+  color: var(--dub-ink);
+  line-height: 1;
+  letter-spacing: -1px;
+  animation: rise 0.5s ease-out 0.6s both;
+}
+
+/* SKU + size in tracked caps on a single row, separated by a small dot */
+.caps-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 16px;
+  font-family: var(--dub-font-body);
+  font-weight: 600;
+  font-size: 24px;
+  color: var(--dub-ink);
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  animation: rise 0.5s ease-out 0.8s both;
+}
+
+.dot-sep {
+  color: #c47589;
+  font-size: 22px;
+  opacity: 0.7;
+}
+
+.sku, .size {
+  font-family: var(--dub-font-body);
+  font-weight: 600;
+  font-size: 24px;
+  color: var(--dub-ink);
+  letter-spacing: 4px;
+  white-space: nowrap;
+}
+
+.size:empty,
+.size:empty + .dot-sep { display: none; }
+
+.footer {
+  font-family: var(--dub-font-body);
+  font-weight: 700;
+  font-size: 32px;
+  color: var(--dub-ink);
+  letter-spacing: 6px;
+  text-transform: uppercase;
+  margin-top: 4px;
+  animation: rise 0.5s ease-out 1.0s both;
+}
+
+/* Shop now chip — tracked caps URL (v2 differentiation: URL is uppercase here) */
+.shop-chip {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 16px;
+  font-family: var(--dub-font-display);
+  font-style: italic;
+  font-weight: 600;
+  font-size: 36px;
+  color: var(--dub-ink);
+  position: relative;
+  padding: 4px 12px 12px;
+  animation: rise 0.5s ease-out 1.2s both;
+}
+
+.shop-chip::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 4px;
+  height: 1.5px;
+  background: var(--dub-ink);
+  opacity: 0.55;
+}
+
+.shop-chip-label { line-height: 1; }
+
+.shop-chip-arrow {
+  font-family: var(--dub-font-body);
+  font-size: 40px;
+  line-height: 1;
+  display: inline-block;
+  animation: arrowSlide 1.8s ease-in-out 2.4s infinite;
+}
+
+.shop-chip-url {
+  font-family: var(--dub-font-body);
+  font-style: normal;
+  font-weight: 700;
+  font-size: 22px;
+  letter-spacing: 4px;
+  color: var(--dub-ink);
+  opacity: 0.8;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.shop-badge { display: none; }
+
+/* --- Keyframes --- */
+@keyframes cutoutSettle { from { transform: translateY(12px); } to { transform: translateY(0); } }
+@keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-14px); } }
+@keyframes circleBreathe { 0%, 100% { transform: translate(-50%, -50%) scale(1); } 50% { transform: translate(-50%, -50%) scale(1.04); } }
+@keyframes dotFloat { 0%, 100% { transform: translateY(0); opacity: 0.85; } 50% { transform: translateY(-12px); opacity: 1; } }
+@keyframes kickerPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.04); } }
+@keyframes headlineDrift { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+@keyframes arrowSlide { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(14px); } }

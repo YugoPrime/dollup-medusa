@@ -79,6 +79,37 @@ describe("pickTemplate", () => {
     expect(picked!.slot_inputs.hero).toBe("https://r2/pink.jpg")
     expect(picked!.text_overrides.old_price).toBe("Rs.1490")
     expect(picked!.text_overrides.new_price).toBe("Rs.990")
+    // Auto-computed discount % — floor((1490-990)/1490 * 100) = 33%
+    expect(picked!.text_overrides.discount_pct).toBe("-33%")
+  })
+
+  it("on-sale discount_pct is floored so we never overstate the discount", () => {
+    const s = snapshot({
+      price_mur: 999,
+      compare_at_price_mur: 1490, // floor((1490-999)/1490 * 100) = 32
+      variants_in_stock: [color("pink", ["front", "back"])],
+      variant_in_stock_count: 1,
+    })
+    const picked = pickTemplate(s, 0)!
+    expect(picked.template_slug).toBe("on-sale")
+    expect(picked.text_overrides.discount_pct).toBe("-32%")
+  })
+
+  it("on-sale omits discount_pct when there is no real saving", () => {
+    // Edge: compare_at equals price → no saving → on-sale isn't picked anyway,
+    // but if a future change ever lets it through, the % should be undefined,
+    // never "-0%". Force it via direct buildTextOverrides path: easier to test
+    // by setting compare_at JUST above price so on-sale fires but the floor
+    // produces 0.
+    const s = snapshot({
+      price_mur: 1490,
+      compare_at_price_mur: 1500, // floor(10/1500*100) = 0 → omit
+      variants_in_stock: [color("pink", ["front", "back"])],
+      variant_in_stock_count: 1,
+    })
+    const picked = pickTemplate(s, 0)!
+    expect(picked.template_slug).toBe("on-sale")
+    expect(picked.text_overrides.discount_pct).toBeUndefined()
   })
 
   it("ignores compare_at when it's not above current price", () => {
@@ -194,6 +225,87 @@ describe("pickTemplate", () => {
     expect(picked.slot_inputs.back).toBe("https://r2/pink-b.jpg")
   })
 
+  it("product-2colors populates per-color size_a / size_b and OMITS the global size", () => {
+    const s = snapshot({
+      variants_in_stock: [
+        color("pink", ["front", "back"], { sizes: ["S", "M"] }),
+        color("blue", ["front", "back"], { sizes: ["S", "M", "L"] }),
+      ],
+      variant_in_stock_count: 2,
+    })
+    const picked = pickTemplate(s, 0)!
+    expect(picked.template_slug).toBe("product-2colors")
+    expect(picked.text_overrides.size_a).toBe("S · M")
+    expect(picked.text_overrides.size_b).toBe("S · M · L")
+    // Global `size` is intentionally NOT set on multi-color templates anymore
+    // — sizes are surfaced per color so we never imply a size is available
+    // in a color that doesn't stock it.
+    expect(picked.text_overrides.size).toBeUndefined()
+  })
+
+  it("product-2colors-front populates per-color size_a / size_b on the wipe-reveal hero", () => {
+    const s = snapshot({
+      variants_in_stock: [
+        color("pink", ["front"], { sizes: ["S", "M"] }),
+        color("blue", ["front"], { sizes: ["L", "XL"] }),
+      ],
+      variant_in_stock_count: 2,
+    })
+    const picked = pickTemplate(s, 0)!
+    expect(picked.template_slug).toBe("product-2colors-front")
+    expect(picked.text_overrides.size_a).toBe("S · M")
+    expect(picked.text_overrides.size_b).toBe("L · XL")
+    expect(picked.text_overrides.size).toBeUndefined()
+  })
+
+  it("product-3colors populates per-color size_a / size_b / size_c on the 2x2 grid", () => {
+    const s = snapshot({
+      variants_in_stock: [
+        color("pink", ["front", "back"], { sizes: ["S", "M"] }),
+        color("blue", ["front"], { sizes: ["M", "L"] }),
+        color("cream", ["front"], { sizes: ["S", "M", "L", "XL"] }),
+      ],
+      variant_in_stock_count: 3,
+    })
+    const picked = pickTemplate(s, 0)!
+    expect(picked.template_slug).toBe("product-3colors")
+    expect(picked.text_overrides.size_a).toBe("S · M")
+    expect(picked.text_overrides.size_b).toBe("M · L")
+    expect(picked.text_overrides.size_c).toBe("S · M · L · XL")
+    expect(picked.text_overrides.size).toBeUndefined()
+  })
+
+  it("color-mood-rail also populates per-color size_a / size_b / size_c", () => {
+    const s = snapshot({
+      variants_in_stock: [
+        color("pink", ["front"], { sizes: ["S", "M"] }),
+        color("blue", ["front"], { sizes: ["L"] }),
+        color("cream", ["front"], { sizes: ["M", "L"] }),
+      ],
+      variant_in_stock_count: 3,
+    })
+    const picked = pickTemplate(s, 0)!
+    expect(picked.template_slug).toBe("color-mood-rail")
+    expect(picked.text_overrides.size_a).toBe("S · M")
+    expect(picked.text_overrides.size_b).toBe("L")
+    expect(picked.text_overrides.size_c).toBe("M · L")
+    expect(picked.text_overrides.size).toBeUndefined()
+  })
+
+  it("per-color size_a shows 'One size' when that color has no size variants", () => {
+    const s = snapshot({
+      variants_in_stock: [
+        color("pink", ["front", "back"], { sizes: [] }),
+        color("blue", ["front", "back"], { sizes: ["S", "M"] }),
+      ],
+      variant_in_stock_count: 2,
+    })
+    const picked = pickTemplate(s, 0)!
+    expect(picked.template_slug).toBe("product-2colors")
+    expect(picked.text_overrides.size_a).toBe("One size")
+    expect(picked.text_overrides.size_b).toBe("S · M")
+  })
+
   it("product-2colors-front is skipped when a color has no clean front (e.g. only real shots)", () => {
     // Second color only has a real shot. pickFront returns null for it, so
     // the 2-color cascade can't fire either with or without back. Falls
@@ -221,6 +333,28 @@ describe("pickTemplate", () => {
     )
     expect(picked.slot_inputs.front).toBe("https://r2/pink.jpg")
     expect(picked.slot_inputs.back).toBe("https://r2/pink-b.jpg")
+  })
+
+  it("product-1color populates size text override with · separator", () => {
+    const s = snapshot({
+      variants_in_stock: [
+        color("pink", ["front", "back"], { sizes: ["S", "M", "L"] }),
+      ],
+      variant_in_stock_count: 1,
+    })
+    const picked = pickTemplate(s, 0)!
+    expect(picked.template_slug).toBe("product-1color")
+    expect(picked.text_overrides.size).toBe("Size: S · M · L")
+  })
+
+  it("product-1color size collapses to 'One size' when product has no sized variants", () => {
+    const s = snapshot({
+      variants_in_stock: [color("pink", ["front", "back"], { sizes: [] })],
+      variant_in_stock_count: 1,
+    })
+    const picked = pickTemplate(s, 0)!
+    expect(picked.template_slug).toBe("product-1color")
+    expect(picked.text_overrides.size).toBe("One size")
   })
 
   it("rotates [product-1color, product-1color-featured, new-drop-arch] by slot_index for 1-color front+back", () => {
@@ -434,17 +568,19 @@ describe("pickTemplate", () => {
       expect(slugsOver10Slots).toContain("lifestyle-overlay")
     })
 
-    it("cutout-spotlight is one entry in the 6-template single-image rotation when a cutout exists", () => {
+    it("cutout-spotlight + cutout-spotlight-v2 are two entries in the 7-template single-image rotation when a cutout exists", () => {
       // 2026-05-19: cutout-spotlight stopped winning unconditionally and joined
       // the rotation alongside the hero variants.
       // 2026-05-21: just-arrived-editorial added to the rotation, so the
       // cutout-enabled pool is now 6 entries: 5 base + cutout-spotlight as
       // the final entry. Order: ink → blush → lifestyle → cream → editorial → cutout.
+      // 2026-05-22: cutout-spotlight-v2 added (bold blush circle + italic-script
+      // typography variant). Pool is now 7: base 5 + cutout v1 + cutout v2.
       const s = snapshot({
         variants_in_stock: [color("pink", ["front", "cutout"])],
         variant_in_stock_count: 1,
       })
-      const slugs = [0, 1, 2, 3, 4, 5].map((i) => pickTemplate(s, i)!.template_slug)
+      const slugs = [0, 1, 2, 3, 4, 5, 6].map((i) => pickTemplate(s, i)!.template_slug)
       expect(slugs).toEqual([
         "in-stock-hero",
         "in-stock-hero-blush",
@@ -452,7 +588,21 @@ describe("pickTemplate", () => {
         "in-stock-hero-cream",
         "just-arrived-editorial",
         "cutout-spotlight",
+        "cutout-spotlight-v2",
       ])
+    })
+
+    it("cutout-spotlight-v2 lands at slot index 6 with the cutout PNG in product_cutout", () => {
+      // Slot 6 is the 7th item in the cutout-enabled rotation pool — that's
+      // the v2 layout (bold blush circle + script typography). Same slot
+      // contract as v1 so the picker can route either way.
+      const s = snapshot({
+        variants_in_stock: [color("pink", ["front", "cutout"])],
+        variant_in_stock_count: 1,
+      })
+      const picked = pickTemplate(s, 6)!
+      expect(picked.template_slug).toBe("cutout-spotlight-v2")
+      expect(picked.slot_inputs.product_cutout).toBe("https://r2/pink-cutout.png")
     })
 
     it("cutout-spotlight slot_inputs.product_cutout is the -cutout PNG URL when the rotation lands on it", () => {
@@ -556,6 +706,63 @@ describe("pickTemplate", () => {
       })
       const slugs = [0, 1, 2, 3, 4, 5].map((i) => pickTemplate(s, i)!.template_slug)
       expect(slugs).toContain("cutout-spotlight")
+    })
+
+    it("DAILY GUARANTEE: cutout-spotlight forced when product is cutout-eligible and no cutout has fired today", () => {
+      // 2026-05-22: enforce at least one cutout per day so the daily feed
+      // always surfaces the editorial cutout layout. Without this, cutout
+      // was just 2/7 of the rotation and on most days zero cutouts shipped.
+      // The guarantee only fires when a per-day count map is passed AND no
+      // cutout has fired yet — so the first cutout-eligible slot of the day
+      // is forced to cutout-spotlight, regardless of slot index.
+      const s = snapshot({
+        variants_in_stock: [color("pink", ["front", "cutout"])],
+        variant_in_stock_count: 1,
+      })
+      const dayCounts = new Map<string, number>()
+      // Slot 0 would normally pick "in-stock-hero" (first in rotation),
+      // but the daily guarantee bumps it to cutout-spotlight instead.
+      const picked = pickTemplate(s, 0, dayCounts)!
+      expect(picked.template_slug).toBe("cutout-spotlight")
+      expect(picked.slot_inputs.product_cutout).toBe("https://r2/pink-cutout.png")
+    })
+
+    it("DAILY GUARANTEE: only fires ONCE per day — second cutout-eligible slot falls back to rotation", () => {
+      const s = snapshot({
+        variants_in_stock: [color("pink", ["front", "cutout"])],
+        variant_in_stock_count: 1,
+      })
+      // Simulate slot 0 already picked cutout-spotlight.
+      const dayCounts = new Map<string, number>([["cutout-spotlight", 1]])
+      const picked = pickTemplate(s, 1, dayCounts)!
+      // Slot 1 should NOT be cutout-spotlight again (guarantee satisfied).
+      expect(picked.template_slug).not.toBe("cutout-spotlight")
+    })
+
+    it("DAILY GUARANTEE: skipped when product has no cutout PNG (can't render what doesn't exist)", () => {
+      const s = snapshot({
+        variants_in_stock: [color("pink", ["front"])], // no cutout
+        variant_in_stock_count: 1,
+      })
+      const dayCounts = new Map<string, number>()
+      const picked = pickTemplate(s, 0, dayCounts)!
+      // No cutout PNG → guarantee skipped, slot falls to normal rotation.
+      expect(picked.template_slug).not.toBe("cutout-spotlight")
+      expect(picked.template_slug).not.toBe("cutout-spotlight-v2")
+    })
+
+    it("DAILY GUARANTEE: counts both cutout-spotlight AND cutout-spotlight-v2 toward the daily quota", () => {
+      // If v2 fires first, the guarantee for v1 is already satisfied —
+      // we want AT LEAST one cutout, not specifically v1.
+      const s = snapshot({
+        variants_in_stock: [color("pink", ["front", "cutout"])],
+        variant_in_stock_count: 1,
+      })
+      const dayCounts = new Map<string, number>([["cutout-spotlight-v2", 1]])
+      const picked = pickTemplate(s, 1, dayCounts)!
+      // V2 already fired → no guarantee bump → normal rotation picks.
+      expect(picked.template_slug).not.toBe("cutout-spotlight")
+      expect(picked.template_slug).not.toBe("cutout-spotlight-v2")
     })
   })
 
@@ -830,7 +1037,7 @@ describe("pickTemplate", () => {
       expect(picked.template_slug).toBe("new-drop-arch")
       expect(picked.text_overrides.headline).toBe("Cowl Neck Satin Midi")
       expect(picked.text_overrides.price).toBe("Rs.1290")
-      expect(picked.text_overrides.size).toBe("Size: S, M, L")
+      expect(picked.text_overrides.size).toBe("Size: S · M · L")
       expect(picked.text_overrides.sku).toBe("IS2200")
     })
 
@@ -871,7 +1078,7 @@ describe("pickTemplate", () => {
       expect(picked.template_slug).toBe("just-arrived-editorial")
       expect(picked.text_overrides.product_name).toBe("Linen Wrap Mini")
       expect(picked.text_overrides.price).toBe("Rs.990")
-      expect(picked.text_overrides.size).toBe("Size: S, M")
+      expect(picked.text_overrides.size).toBe("Size: S · M")
     })
 
     it("on-sale still wins over just-arrived-editorial", () => {

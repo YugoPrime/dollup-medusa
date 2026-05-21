@@ -29,6 +29,11 @@
       "max_chars": 10
     },
     {
+      "id": "size",
+      "default": "Size: S · M · L",
+      "max_chars": 28
+    },
+    {
       "id": "footer",
       "default": "DM to ORDER",
       "max_chars": 20

@@ -111,8 +111,35 @@ function firstSku(snapshot: ProductSnapshot): string | null {
 function collectSizes(snapshot: ProductSnapshot, maxChars: number): string {
   const seen = new Set<string>()
   for (const v of snapshot.variants_in_stock) for (const s of v.sizes) seen.add(s)
-  if (seen.size === 0) return "Size: S, M, L".slice(0, maxChars)
-  const label = `Size: ${Array.from(seen).join(", ")}`
+  if (seen.size === 0) return "One size"
+  if (seen.size === 1) {
+    const only = Array.from(seen)[0]
+    // Single-size products that are explicitly "One size" / "OS" / "Free size"
+    // shouldn't display "Size: One size" — normalize to a clean label.
+    if (/^(one ?size|os|free ?size|f)$/i.test(only)) return "One size"
+    const single = `Size: ${only}`
+    return single.length <= maxChars ? single : single.slice(0, maxChars - 1) + "…"
+  }
+  const label = `Size: ${Array.from(seen).join(" · ")}`
+  return label.length <= maxChars ? label : label.slice(0, maxChars - 1) + "…"
+}
+
+/**
+ * Per-color size label for a single variant. Returned WITHOUT a "Size:" prefix
+ * so the per-card pills stay compact ("S · M · L"). Single-size variants show
+ * just the size ("M"); zero-size variants get "One size" so the rule "always
+ * show size when product has sizes" still surfaces something readable.
+ */
+function sizesForVariant(variant: SnapshotVariant | undefined, maxChars: number): string {
+  if (!variant) return ""
+  const sizes = variant.sizes
+  if (sizes.length === 0) return "One size"
+  if (sizes.length === 1) {
+    const only = sizes[0]
+    if (/^(one ?size|os|free ?size|f)$/i.test(only)) return "One size"
+    return only.length <= maxChars ? only : only.slice(0, maxChars - 1) + "…"
+  }
+  const label = sizes.join(" · ")
   return label.length <= maxChars ? label : label.slice(0, maxChars - 1) + "…"
 }
 
@@ -255,6 +282,13 @@ function buildTextOverrides(
       out.old_price = priceLabel(snapshot.compare_at_price_mur ?? snapshot.price_mur)
       out.new_price = price
       out.size = collectSizes(snapshot, 28)
+      // Auto-compute the savings %. Floor the % so we never overstate the
+      // discount. Only set when there's a real saving (compare_at > price).
+      const oldP = snapshot.compare_at_price_mur
+      if (oldP != null && oldP > snapshot.price_mur && snapshot.price_mur > 0) {
+        const pct = Math.floor(((oldP - snapshot.price_mur) / oldP) * 100)
+        if (pct > 0) out.discount_pct = `-${pct}%`
+      }
       if (sku) out.sku = sku
       return out
     }
@@ -272,7 +306,8 @@ function buildTextOverrides(
       if (sku) out.sku = sku
       return out
     }
-    case "cutout-spotlight": {
+    case "cutout-spotlight":
+    case "cutout-spotlight-v2": {
       out.price = price
       out.size = collectSizes(snapshot, 28)
       if (sku) out.sku = sku
@@ -294,9 +329,13 @@ function buildTextOverrides(
     }
     case "color-mood-rail": {
       out.price = price
-      out.size = collectSizes(snapshot, 28)
-      out.product_name = productNameLabel(snapshot, 28)
+      // Per-color size pills — variants_in_stock[0..2] map to color_a/b/c slots
+      // in the rail layout, so each color shows its OWN available sizes.
       const colors = snapshot.variants_in_stock
+      out.size_a = sizesForVariant(colors[0], 22)
+      out.size_b = sizesForVariant(colors[1], 22)
+      out.size_c = sizesForVariant(colors[2], 22)
+      out.product_name = productNameLabel(snapshot, 28)
       const a = colorLabel(colors[0], 18)
       const b = colorLabel(colors[1], 18)
       const c = colorLabel(colors[2], 18)
@@ -306,14 +345,35 @@ function buildTextOverrides(
       if (sku) out.sku = sku
       return out
     }
+    case "product-2colors":
+    case "product-2colors-front": {
+      // Per-color size pills — variants_in_stock[0..1] match the front_a/front_b
+      // slots that pickTemplate fills below, so the size badge on each card
+      // reflects ONLY that color's in-stock sizes.
+      const colors = snapshot.variants_in_stock
+      out.price = price
+      out.size_a = sizesForVariant(colors[0], 22)
+      out.size_b = sizesForVariant(colors[1], 22)
+      if (sku) out.sku = sku
+      return out
+    }
+    case "product-3colors": {
+      // Per-color size pills for the 2x2 grid — variants_in_stock[0..2] map to
+      // front_a/b/c slots.
+      const colors = snapshot.variants_in_stock
+      out.price = price
+      out.size_a = sizesForVariant(colors[0], 22)
+      out.size_b = sizesForVariant(colors[1], 22)
+      out.size_c = sizesForVariant(colors[2], 22)
+      if (sku) out.sku = sku
+      return out
+    }
     case "new-arrival":
     case "product-1color":
     case "product-1color-featured":
-    case "product-2colors":
-    case "product-2colors-front":
-    case "product-3colors":
     case "many-photos": {
       out.price = price
+      out.size = collectSizes(snapshot, 28)
       if (sku) out.sku = sku
       return out
     }
@@ -495,9 +555,36 @@ export function pickTemplate(
   // most of the catalog has cutouts uploaded.
   const cutoutUrl = pickCutout(colors)
   const cutoutEligible = cutoutUrl != null && !hasRealShot(colors)
+  // Both cutout-spotlight (v1, cream/blush soft) and cutout-spotlight-v2
+  // (bold blush circle + italic-script typography) are valid layouts for
+  // any product with a cutout. Both share the same `product_cutout` slot
+  // contract and same text_overrides — picker rotates between them on
+  // separate slot indexes so the daily feed alternates the two looks.
   const pool: readonly string[] = cutoutEligible
-    ? [...SINGLE_IMAGE_ROTATION, "cutout-spotlight"]
+    ? [...SINGLE_IMAGE_ROTATION, "cutout-spotlight", "cutout-spotlight-v2"]
     : SINGLE_IMAGE_ROTATION
+
+  // Daily guarantee: when a count map is present AND this product is
+  // cutout-eligible AND no cutout has fired yet today, FORCE cutout-spotlight
+  // (or v2) for this slot. Without this, cutout was just 2/7 of the rotation
+  // and on most days the daily feed had zero cutout stories — even though
+  // every product in the catalog has a cutout PNG.
+  //
+  // Picks v1 first; if v1 is already at cap (shouldn't happen since count is 0
+  // when guarantee fires, but defensive) falls through to v2.
+  if (pickedSoFar && cutoutEligible) {
+    const cutoutCount = countOf(pickedSoFar, "cutout-spotlight") + countOf(pickedSoFar, "cutout-spotlight-v2")
+    if (cutoutCount === 0 && cutoutUrl) {
+      const cutoutSlug = isSaturated(pickedSoFar, "cutout-spotlight")
+        ? "cutout-spotlight-v2"
+        : "cutout-spotlight"
+      return {
+        template_slug: cutoutSlug,
+        slot_inputs: { product_cutout: cutoutUrl },
+        text_overrides: buildTextOverrides(cutoutSlug, snapshot),
+      }
+    }
+  }
 
   // When the caller passes a per-day count map, prefer the least-used template
   // in the pool. Without it, fall back to the deterministic slotIndex rotation
@@ -505,7 +592,7 @@ export function pickTemplate(
   const slug = pickedSoFar
     ? leastUsed(pool, pickedSoFar)
     : pool[slotIndex % pool.length]
-  if (slug === "cutout-spotlight" && cutoutUrl) {
+  if ((slug === "cutout-spotlight" || slug === "cutout-spotlight-v2") && cutoutUrl) {
     return {
       template_slug: slug,
       slot_inputs: { product_cutout: cutoutUrl },

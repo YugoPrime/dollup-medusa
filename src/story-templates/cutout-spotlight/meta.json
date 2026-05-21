@@ -35,7 +35,7 @@
     },
     {
       "id": "size",
-      "default": "Size: S, M, L",
+      "default": "Size: S · M · L",
       "max_chars": 28
     },
     {

@@ -56,8 +56,8 @@ html, body { width: var(--story-w); height: var(--story-h); overflow: hidden; ba
   flex-direction: column;
   animation: rise 0.6s ease-out 1.2s both;
 }
-.price { font-family: var(--dub-font-display); font-size: 56px; font-weight: 700; line-height: 1; }
-.sku { font-family: var(--dub-font-body); font-weight: 600; font-size: 22px; color: var(--dub-cream); background: rgba(245,230,216,0.15); padding: 5px 14px; border-radius: 999px; letter-spacing: 2px; }
+.price { font-family: var(--dub-font-display); font-size: 56px; font-weight: 700; line-height: 1; color: var(--dub-ink); }
+.sku { font-family: var(--dub-font-body); font-weight: 600; font-size: 22px; color: var(--dub-ink); background: rgba(43, 43, 43, 0.10); padding: 5px 14px; border-radius: 999px; letter-spacing: 2px; margin-top: 6px; align-self: flex-start; }
 .footer {
   font-family: var(--dub-font-body);
   font-weight: 700;

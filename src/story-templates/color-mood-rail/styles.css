@@ -43,25 +43,31 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; }
 
 .brand-head { display: flex; justify-content: center; animation: rise 0.7s ease-out 0.1s both; }
 
+/* Headline shrunk + inline so "Same style, different mood" reads on ONE row.
+ * Frees vertical space so all 3 color thumbs in the rail fit on screen. */
 .headline {
   font-family: var(--dub-font-display);
   font-weight: 700;
-  font-size: 110px;
+  font-size: 56px;
   color: #3d2a2a;
-  line-height: 1;
-  letter-spacing: -1px;
+  line-height: 1.05;
+  letter-spacing: -0.5px;
   position: relative;
-  padding-right: 80px;
+  padding-right: 40px;
+  white-space: nowrap;
 }
-.line-a { display: block; animation: wordSlide 0.9s cubic-bezier(.6,.05,.25,1) 0.3s both; }
+/* Headline lines: rise from a small Y offset, no opacity fade so the type is
+ * legible from frame 0 (audience-retention rule applies to text too when it
+ * sits this prominent above the photo). */
+.line-a { display: inline; animation: softRise 0.7s cubic-bezier(.6,.05,.25,1) 0.2s both; margin-right: 10px; }
 .line-b {
-  display: block;
+  display: inline;
   font-family: var(--dub-font-display);
   font-style: italic;
   font-weight: 700;
-  font-size: 96px;
+  font-size: 52px;
   color: #c47589;
-  animation: wordSlide 0.9s cubic-bezier(.6,.05,.25,1) 0.55s both;
+  animation: softRise 0.7s cubic-bezier(.6,.05,.25,1) 0.4s both;
 }
 .underline {
   display: block;
@@ -77,7 +83,9 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; }
 
 .grid { flex: 1; display: grid; grid-template-columns: 1fr 360px; gap: 36px; min-height: 0; }
 
-.hero-col { display: flex; flex-direction: column; align-items: center; gap: 12px; animation: rise 0.9s ease-out 0.6s both; }
+/* Hero col: NO opacity fade — the big hero photo must be at full opacity
+ * from frame 0. Subtle softRise gives a gentle settle without hiding it. */
+.hero-col { display: flex; flex-direction: column; align-items: center; gap: 12px; animation: softRise 0.6s ease-out 0s both; }
 .hero-arch {
   width: 100%;
   flex: 1;
@@ -122,31 +130,51 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; }
   animation: rise 0.6s ease-out 1.8s both;
 }
 
-.rail { display: flex; flex-direction: column; gap: 18px; padding-top: 12px; }
-.rail-title { font-family: var(--dub-font-display); font-weight: 700; font-size: 38px; color: #3d2a2a; text-align: center; position: relative; animation: rise 0.6s ease-out 0.9s both; }
-.rail-underline { display: block; width: 70px; height: 2px; background: #c47589; margin: 8px auto 0; }
+/* Rail tightened so all 3 thumbs fit under the freed-up vertical space.
+ * Reduced gap (18 -> 10), smaller title (38 -> 30), removed top padding. */
+.rail { display: flex; flex-direction: column; gap: 10px; padding-top: 0; }
+.rail-title { font-family: var(--dub-font-display); font-weight: 700; font-size: 30px; color: #3d2a2a; text-align: center; position: relative; animation: rise 0.6s ease-out 0.4s both; }
+.rail-underline { display: block; width: 60px; height: 2px; background: #c47589; margin: 6px auto 0; }
 .thumb {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   animation: thumbRise 0.7s cubic-bezier(.45,1.6,.45,1) both;
 }
-.thumb:nth-of-type(2) { animation-delay: 1.1s; }
-.thumb:nth-of-type(3) { animation-delay: 1.3s; }
-.thumb:nth-of-type(4) { animation-delay: 1.5s; }
+/* Stagger the thumbs starting from frame 0 so the rail of color photos is
+ * visible immediately. Without opacity in thumbRise, the slide-in just
+ * adds a sense of arrival without hiding the images.
+ *
+ * NOTE: :nth-of-type counts ALL <div> siblings inside .rail, and .rail-title
+ * is the 1st div. So the 3 .thumb elements are nth(2), nth(3), nth(4).  */
+.thumb:nth-of-type(2) { animation-delay: 0.05s; }
+.thumb:nth-of-type(3) { animation-delay: 0.20s; }
+.thumb:nth-of-type(4) { animation-delay: 0.35s; }
 .thumb-arch {
-  width: 280px;
-  height: 320px;
+  width: 260px;
+  height: 280px;
   background: #fff;
-  border-radius: 140px 140px 16px 16px;
+  border-radius: 130px 130px 16px 16px;
   border: 2px solid #f0c5cf;
   box-shadow: 0 10px 22px rgba(196,117,137,0.18);
   overflow: hidden;
 }
 .thumb-arch img { width: 100%; height: 100%; object-fit: cover; }
-.thumb-heart { color: #c47589; font-size: 22px; margin-top: -2px; }
-.thumb-label { font-family: var(--dub-font-display); font-weight: 600; font-size: 28px; color: #3d2a2a; letter-spacing: 1px; }
+.thumb-heart { color: #c47589; font-size: 18px; margin-top: -2px; }
+.thumb-label { font-family: var(--dub-font-display); font-weight: 600; font-size: 24px; color: #3d2a2a; letter-spacing: 1px; }
+/* Per-color size text under each color label. No pill chrome — just clean
+ * tracked text so the dense rail stays breathing. */
+.thumb-size {
+  font-family: var(--dub-font-body);
+  font-weight: 600;
+  font-size: 20px;
+  color: #c47589;
+  letter-spacing: 3px;
+  margin-top: 2px;
+  white-space: nowrap;
+}
+.thumb-size:empty { display: none; }
 
 .cta {
   align-self: center;
@@ -171,13 +199,18 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; }
 .dot { color: #c47589; font-size: 18px; }
 
 @keyframes rise { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+/* softRise: NO opacity change — used for the hero column and headline lines
+ * so the photo + type are visible at frame 0 (audience-retention rule). */
+@keyframes softRise { from { transform: translateY(14px); } to { transform: translateY(0); } }
 @keyframes wordSlide { 0% { opacity: 0; transform: translateY(40px); } 100% { opacity: 1; transform: translateY(0); } }
 @keyframes drawLine { 0% { transform: scaleX(0); opacity: 0; } 100% { transform: scaleX(1); opacity: 1; } }
 @keyframes heartBeat { 0%, 100% { transform: scale(1); } 25% { transform: scale(1.18); } 50% { transform: scale(1); } 75% { transform: scale(1.12); } }
 @keyframes zoomHero { from { transform: scale(1.08); } to { transform: scale(1); } }
 @keyframes favPop { 0% { opacity: 0; transform: scale(0.2) rotate(-30deg); } 60% { opacity: 1; transform: scale(1.15) rotate(8deg); } 100% { opacity: 1; transform: scale(1) rotate(0); } }
 @keyframes favPulse { 0%, 100% { box-shadow: 0 8px 16px rgba(0,0,0,0.10); } 50% { box-shadow: 0 8px 24px rgba(196,117,137,0.55); } }
-@keyframes thumbRise { 0% { opacity: 0; transform: translateX(40px) scale(0.92); } 100% { opacity: 1; transform: translateX(0) scale(1); } }
+/* thumbRise: NO opacity fade so the color thumbnails are visible at frame 0.
+ * Only a horizontal slide + tiny scale for arrival energy. */
+@keyframes thumbRise { 0% { transform: translateX(40px) scale(0.94); } 100% { transform: translateX(0) scale(1); } }
 @keyframes ctaPulse { 0%, 100% { transform: scale(1); box-shadow: 0 14px 28px rgba(233,149,164,0.45); } 50% { transform: scale(1.035); box-shadow: 0 20px 38px rgba(233,149,164,0.65); } }
 @keyframes curveBreathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.04); } }
 @keyframes leafSway { 0%, 100% { transform: rotate(-15deg); } 50% { transform: rotate(-11deg) translateY(-6px); } }

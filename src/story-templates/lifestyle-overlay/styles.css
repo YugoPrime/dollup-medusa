@@ -1,34 +1,200 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body { width: var(--story-w); height: var(--story-h); overflow: hidden; }
-.canvas { position: relative; width: var(--story-w); height: var(--story-h); overflow: hidden; background: var(--dub-ink); }
-.bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: var(--dub-cream); animation: drift 5s ease-out both; }
+
+.canvas {
+  position: relative;
+  width: var(--story-w);
+  height: var(--story-h);
+  overflow: hidden;
+  background: var(--dub-ink);
+}
+
+/* Full-bleed lifestyle photo — visible at frame 0, subtle slow drift only */
+.bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: var(--dub-cream);
+  animation: drift 5s ease-out both;
+}
+
+/* Bottom-to-top dark fade so the price + size + footer pills sit on a
+ * legible base regardless of what's in the lower part of the photo. */
+.bottom-fade {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 56%;
+  background: linear-gradient(180deg,
+    rgba(0, 0, 0, 0) 0%,
+    rgba(0, 0, 0, 0.10) 35%,
+    rgba(0, 0, 0, 0.45) 70%,
+    rgba(0, 0, 0, 0.72) 100%
+  );
+  pointer-events: none;
+  animation: fadeRise 0.6s ease-out 0.4s both;
+}
+
+/* --- Pills shared --- */
 .pill {
   position: absolute;
-  background: rgba(0, 0, 0, 0.78);
-  color: var(--dub-cream);
+  background: rgba(0, 0, 0, 0.82);
+  color: var(--dub-soft);
   font-family: var(--dub-font-body);
   font-weight: 700;
   font-size: 32px;
-  padding: 14px 28px;
-  border-radius: 16px;
-  letter-spacing: 2px;
-  animation: pop 0.5s cubic-bezier(.2,.8,.2,1) both;
+  padding: 12px 26px;
+  border-radius: 999px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(6px);
+  white-space: nowrap;
 }
-.pill-status { top: 180px; left: 50%; transform: translateX(-50%); animation-delay: 0.2s; }
-.pill-size { top: 600px; left: 60px; animation-delay: 0.5s; }
-.pill-footer { bottom: 100px; left: 50%; transform: translateX(-50%); animation-delay: 1.4s; }
-.price-block {
-  position: absolute;
-  bottom: 280px;
-  left: 60px;
-  background: rgba(0, 0, 0, 0.78);
-  color: var(--dub-cream);
-  padding: 16px 28px;
-  border-radius: 16px;
-  animation: pop 0.5s cubic-bezier(.2,.8,.2,1) 1s both;
-}
-.price { font-family: var(--dub-font-display); font-size: 76px; font-weight: 700; line-height: 1; }
-.sku { font-family: var(--dub-font-body); font-weight: 600; font-size: 22px; color: var(--dub-ink); background: rgba(43,43,43,0.08); padding: 5px 14px; border-radius: 999px; letter-spacing: 2px; }
-@keyframes drift { from { transform: scale(1.04); } to { transform: scale(1); } }
-@keyframes pop { from { opacity: 0; transform: translateY(20px) scale(0.92); } to { opacity: 1; transform: translateY(0) scale(1); } }
 
+/* Status pill: top-center */
+.pill-status {
+  top: 140px;
+  left: 50%;
+  transform: translateX(-50%);
+  animation: pillIn 0.5s cubic-bezier(.2,.8,.2,1) 0.2s both,
+             statusPulse 3s ease-in-out 1.8s infinite;
+}
+
+/* Bottom corners row: price-block bottom-left, size pill bottom-right */
+.bottom-corners {
+  position: absolute;
+  left: 60px;
+  right: 60px;
+  bottom: 280px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+}
+
+.price-block {
+  background: rgba(0, 0, 0, 0.82);
+  color: var(--dub-soft);
+  padding: 14px 24px;
+  border-radius: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(6px);
+  animation: pillIn 0.5s cubic-bezier(.2,.8,.2,1) 0.5s both;
+}
+
+.price {
+  font-family: var(--dub-font-display);
+  font-size: 76px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.sku {
+  font-family: var(--dub-font-body);
+  font-weight: 600;
+  font-size: 20px;
+  color: var(--dub-soft);
+  opacity: 0.78;
+  letter-spacing: 3px;
+}
+
+.pill-size {
+  position: relative;
+  font-size: 26px;
+  padding: 10px 22px;
+  letter-spacing: 2px;
+  text-transform: none;
+  animation: pillIn 0.5s cubic-bezier(.2,.8,.2,1) 0.7s both,
+             pillGlow 3.6s ease-in-out 2.4s infinite;
+}
+
+.pill-size:empty { display: none; }
+
+/* Footer block: centered DM to ORDER + Shop now chip just above IG safe zone */
+.footer-block {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.footer {
+  font-family: var(--dub-font-body);
+  font-weight: 700;
+  font-size: 36px;
+  color: var(--dub-soft);
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.55);
+  animation: pillIn 0.5s cubic-bezier(.2,.8,.2,1) 0.9s both;
+}
+
+/* Shop now chip — light cream variant for the dark photo background */
+.shop-chip {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 16px;
+  font-family: var(--dub-font-display);
+  font-style: italic;
+  font-weight: 600;
+  font-size: 34px;
+  color: var(--dub-soft);
+  position: relative;
+  padding: 4px 12px 12px;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.55);
+  animation: pillIn 0.5s cubic-bezier(.2,.8,.2,1) 1.1s both;
+}
+
+.shop-chip::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 4px;
+  height: 1.5px;
+  background: var(--dub-soft);
+  opacity: 0.78;
+}
+
+.shop-chip-label { line-height: 1; }
+
+.shop-chip-arrow {
+  font-family: var(--dub-font-body);
+  font-size: 38px;
+  line-height: 1;
+  display: inline-block;
+  animation: arrowSlide 1.8s ease-in-out 2.4s infinite;
+}
+
+.shop-chip-url {
+  font-family: var(--dub-font-body);
+  font-style: normal;
+  font-weight: 500;
+  font-size: 24px;
+  letter-spacing: 2px;
+  color: var(--dub-soft);
+  opacity: 0.88;
+  line-height: 1;
+}
+
+.shop-badge { display: none; }
+
+/* --- Keyframes ---
+ * drift: NO opacity change so the photo is visible at frame 0. */
+@keyframes drift { from { transform: scale(1.05); } to { transform: scale(1); } }
+@keyframes pillIn { from { opacity: 0; transform: translateY(14px) scale(0.96); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes fadeRise { from { opacity: 0; } to { opacity: 1; } }
+@keyframes statusPulse { 0%, 100% { transform: translateX(-50%) scale(1); } 50% { transform: translateX(-50%) scale(1.05); } }
+@keyframes pillGlow { 0%, 100% { box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35); } 50% { box-shadow: 0 8px 24px rgba(244, 194, 194, 0.45), 0 8px 20px rgba(0, 0, 0, 0.35); } }
+@keyframes arrowSlide { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(14px); } }

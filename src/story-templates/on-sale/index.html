@@ -9,18 +9,28 @@
   <body>
     <div id="root" class="canvas" data-composition-id="main" data-start="0" data-duration="5" data-width="1080" data-height="1920">
       <div class="scene">
-        <span class="stamp">SALE</span>
-        <div class="hero-wrap"><img class="hero" data-hf-image="hero" alt="" /></div>
-        <div class="prices">
-          <span class="old" data-hf-text="old_price">Rs.0</span>
-          <span class="new" data-hf-text="new_price">Rs.0</span>
+        <div class="stamp-wrap">
+          <span class="stamp">SALE</span>
+          <span class="discount-pct" data-hf-text="discount_pct"></span>
         </div>
-        <div class="sku" data-hf-text="sku">IS0000</div>
-        <div class="size" data-hf-text="size">Size: S, M, L</div>
-        <div class="footer" data-hf-text="footer">DM to ORDER</div>
-        <span class="shop-badge" role="img" aria-label="Shop dollupboutique.com"></span>
+
+        <div class="hero-wrap"><img class="hero" data-hf-image="hero" alt="" /></div>
+
+        <div class="info">
+          <div class="prices">
+            <span class="old" data-hf-text="old_price">Rs.0</span>
+            <span class="new" data-hf-text="new_price">Rs.0</span>
+          </div>
+          <div class="sku" data-hf-text="sku">IS0000</div>
+          <span class="size-pill" data-hf-text="size">Size: S · M · L</span>
+          <div class="footer" data-hf-text="footer">DM to ORDER</div>
+          <a class="shop-chip" aria-label="Shop now at dollupboutique.com">
+            <span class="shop-chip-label">Shop now</span>
+            <span class="shop-chip-arrow" aria-hidden="true">&#8594;</span>
+            <span class="shop-chip-url">dollupboutique.com</span>
+          </a>
+        </div>
       </div>
     </div>
   </body>
 </html>
-

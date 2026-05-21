@@ -60,7 +60,13 @@ function validateOverride(override: unknown, slug: string): TemplateTextOverride
   }
   const o = override as Record<string, unknown>
   const id = stringField(o, "id", slug)
-  const def = stringField(o, "default", slug)
+  // `default` may be an empty string for OPTIONAL overrides (e.g. on-sale's
+  // discount_pct, which the picker only populates when there's a real
+  // saving — empty default + CSS `:empty { display: none }` hides the
+  // element when no value is provided). 2026-05-22.
+  const defRaw = o.default
+  if (typeof defRaw !== "string") invalid(slug, `text override ${id} default must be a string`)
+  const def = defRaw as string
   if (!Number.isInteger(o.max_chars) || Number(o.max_chars) < 1) {
     invalid(slug, `text override ${id} max_chars must be a positive integer`)
   }

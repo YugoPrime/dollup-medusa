@@ -39,8 +39,13 @@
       "max_chars": 12
     },
     {
+      "id": "sku",
+      "default": "IS0000",
+      "max_chars": 10
+    },
+    {
       "id": "size",
-      "default": "Available · S M L XL",
+      "default": "Size: S · M · L",
       "max_chars": 28
     },
     {

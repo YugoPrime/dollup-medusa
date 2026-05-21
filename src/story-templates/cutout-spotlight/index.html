@@ -8,20 +8,35 @@
   </head>
   <body>
     <div id="root" class="canvas" data-composition-id="main" data-start="0" data-duration="6" data-width="1080" data-height="1920">
-      <div class="bg-shape"></div>
+      <div class="bg-circle" aria-hidden="true"></div>
+      <div class="bg-dot bg-dot-1" aria-hidden="true"></div>
+      <div class="bg-dot bg-dot-2" aria-hidden="true"></div>
+
       <div class="scene">
         <span class="kicker" data-hf-text="kicker">MUST HAVE</span>
         <h1 class="headline" data-hf-text="headline">IN STOCK</h1>
+
         <div class="cutout-wrap">
           <img class="cutout" data-hf-image="product_cutout" alt="" />
         </div>
-        <div class="price-pill">
-          <span class="price" data-hf-text="price">Rs.0</span>
-          <span class="sku" data-hf-text="sku">IS0000</span>
+
+        <div class="info">
+          <div class="meta">
+            <span class="price" data-hf-text="price">Rs.0</span>
+            <span class="sku" data-hf-text="sku">IS0000</span>
+          </div>
+          <div class="size-divider">
+            <span class="size-rule"></span>
+            <span class="size" data-hf-text="size">Size: S · M · L</span>
+            <span class="size-rule"></span>
+          </div>
+          <div class="footer" data-hf-text="footer">DM to ORDER</div>
+          <a class="shop-chip" aria-label="Shop now at dollupboutique.com">
+            <span class="shop-chip-label">Shop now</span>
+            <span class="shop-chip-arrow" aria-hidden="true">&#8594;</span>
+            <span class="shop-chip-url">dollupboutique.com</span>
+          </a>
         </div>
-        <span class="size-pill" data-hf-text="size">Size: S, M, L</span>
-        <div class="footer" data-hf-text="footer">DM to ORDER</div>
-        <span class="shop-badge" role="img" aria-label="Shop dollupboutique.com"></span>
       </div>
     </div>
   </body>

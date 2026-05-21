@@ -9,17 +9,38 @@
   <body>
     <div id="root" class="canvas" data-composition-id="main" data-start="0" data-duration="6" data-width="1080" data-height="1920">
       <div class="scene">
-        <h1 class="headline" data-hf-text="headline">2 COLORS</h1>
-        <div class="grid">
-          <div class="panel panel-a"><img data-hf-image="front_a" alt="" /></div>
-          <div class="panel panel-b"><img data-hf-image="front_b" alt="" /></div>
+        <div class="headline-wrap">
+          <h1 class="headline-script">2 colors</h1>
+          <span class="headline-sub">— available —</span>
         </div>
-        <div class="meta">
-          <span class="price" data-hf-text="price">Rs.0</span>
-          <span class="sku" data-hf-text="sku">IS0000</span>
+
+        <div class="hero">
+          <!-- Color A is the always-visible base layer -->
+          <div class="layer layer-a"><img data-hf-image="front_a" alt="" /></div>
+          <!-- Color B layers on top and is revealed by a diagonal clip-path wipe at 2s -->
+          <div class="layer layer-b"><img data-hf-image="front_b" alt="" /></div>
+          <!-- Soft diagonal edge highlight that travels with the wipe front -->
+          <div class="wipe-edge" aria-hidden="true"></div>
+          <!-- Tiny corner markers naming each color, one per phase -->
+          <span class="phase-tag phase-a">COLOR 01</span>
+          <span class="phase-tag phase-b">COLOR 02</span>
+          <!-- Per-color size pills — visible only while their phase is on screen -->
+          <span class="hero-size hero-size-a" data-hf-text="size_a">S · M · L</span>
+          <span class="hero-size hero-size-b" data-hf-text="size_b">S · M · L</span>
         </div>
-        <div class="footer" data-hf-text="footer">DM to ORDER</div>
-        <span class="shop-badge" role="img" aria-label="Shop dollupboutique.com"></span>
+
+        <div class="info">
+          <div class="meta">
+            <span class="price" data-hf-text="price">Rs.0</span>
+            <span class="sku" data-hf-text="sku">IS0000</span>
+          </div>
+          <div class="footer" data-hf-text="footer">DM to ORDER</div>
+          <a class="shop-chip" aria-label="Shop now at dollupboutique.com">
+            <span class="shop-chip-label">Shop now</span>
+            <span class="shop-chip-arrow" aria-hidden="true">&#8594;</span>
+            <span class="shop-chip-url">dollupboutique.com</span>
+          </a>
+        </div>
       </div>
     </div>
   </body>
