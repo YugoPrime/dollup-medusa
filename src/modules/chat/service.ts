@@ -86,18 +86,29 @@ class ChatModuleService extends MedusaService({
       } as unknown as Parameters<this["createThreads"]>[0])) as any
     }
 
-    // 4. Insert message
-    const attachments =
-      input.attachments && input.attachments.length > 0
-        ? input.attachments
-        : null
+    // 4. Rehost inbound image attachments to R2 (Meta URLs expire), then insert
+    const rehosted: Array<{
+      kind: "image"
+      url_r2: string
+      mime: string
+      size: number
+    }> = []
+    if (input.attachments?.length) {
+      const { rehostMetaAttachment } = await import(
+        "./lib/rehost-meta-attachment.js"
+      )
+      for (const a of input.attachments) {
+        const out = await rehostMetaAttachment(a, (thread as any).id)
+        if (out) rehosted.push(out)
+      }
+    }
     const message = await this.createMessages({
       thread_id: (thread as any).id,
       direction: "inbound",
       external_id: input.messageId,
       sender_kind: "customer",
       body: input.text,
-      attachments,
+      attachments: rehosted.length > 0 ? rehosted : null,
       meta_status: "delivered",
     } as unknown as Parameters<this["createMessages"]>[0])
 
