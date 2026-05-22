@@ -17,5 +17,13 @@ export default defineMiddlewares({
         raw({ type: "*/*", limit: "10mb" }),
       ],
     },
+    {
+      matcher: "/admin/chat/uploads",
+      methods: ["POST"],
+      // Disable Medusa's JSON body parser so Busboy can read the multipart stream
+      // directly. Without this, express.json() consumes the body first and the
+      // upload handler hangs because req is already drained.
+      bodyParser: false,
+    },
   ],
 })
