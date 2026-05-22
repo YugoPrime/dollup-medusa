@@ -321,6 +321,15 @@ class StoriesModuleService extends MedusaService({
     const excluded = new Set(
       await this.getExcludedProductIds(settings.anti_repeat_days),
     )
+    // Schedule-aware dedup: also exclude products already assigned to slots on
+    // OTHER plans that haven't posted yet. Publication-log only covers products
+    // that have actually shipped; without this, the daily cron at 18:00 MU can
+    // assign a product to tomorrow that's still scheduled (e.g. 21:00) today.
+    const scheduled = await this.listStorySlots({}, { take: 10000 })
+    for (const s of scheduled) {
+      if (s.plan_id === planId) continue
+      if (s.product_id && !s.posted_at) excluded.add(s.product_id)
+    }
     await this.pickProductsForPlan(planId, deps, excluded)
   }
 
