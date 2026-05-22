@@ -137,26 +137,41 @@ export async function runExport(container: MedusaContainer): Promise<ExportResul
   const since = new Date()
   since.setDate(since.getDate() - LOOKBACK_DAYS)
 
+  // Medusa v2: order totals are calculated, NOT stored. To make query.graph
+  // populate `total`, `shipping_total`, `discount_total`, you must list each
+  // calculated field explicitly AND request `summary.*`, `items.*`, and
+  // `shipping_methods.*` — the order module hydrates totals off those.
+  // (Docs: commerce-modules/order/order-totals — the "+" prefix used in the
+  // earlier version of this job is NOT the right knob and silently returned
+  // 0 for line-item orders that had no metadata.total_override_mur set.)
   const { data: orders } = await query.graph({
     entity: "order",
     fields: [
       "id",
       "display_id",
       "created_at",
+      "currency_code",
       "metadata",
-      // Medusa v2 order totals are calculated fields — without a "+" prefix
-      // query.graph returns 0/null instead of the real values.
-      "+discount_total",
-      "+shipping_total",
-      "+total",
+      "total",
+      "subtotal",
+      "shipping_total",
+      "shipping_subtotal",
+      "discount_total",
+      "item_total",
+      "item_subtotal",
+      "tax_total",
+      "summary.*",
       "items.id",
       "items.title",
       "items.quantity",
+      "items.unit_price",
       "items.variant_id",
       "items.variant_sku",
       "items.variant_title",
       "items.product_handle",
       "items.product_title",
+      "shipping_methods.id",
+      "shipping_methods.amount",
       "shipping_address.first_name",
       "shipping_address.last_name",
       "shipping_address.phone",
@@ -175,6 +190,7 @@ export async function runExport(container: MedusaContainer): Promise<ExportResul
   })
 
   const rows: (string | number)[][] = [HEADERS as unknown as string[]]
+  const totalSourceTally = { override: 0, graph: 0, computed: 0, zero: 0 }
 
   for (const o of sortedOrders) {
     if (!o) continue
@@ -203,13 +219,63 @@ export async function runExport(container: MedusaContainer): Promise<ExportResul
       .join(", ")
     const buyerPhone = (addr?.phone as string | null) ?? ""
 
+    // Totals — three sources, in priority order:
+    //   1. metadata.total_override_mur (operator typed a manual total in the
+    //      admin order-entry "Total" field)
+    //   2. order's calculated `total` from query.graph (with summary/items/
+    //      shipping_methods loaded above, this is normally correct)
+    //   3. fallback: sum line items + shipping − discount. This is what the
+    //      admin UI effectively shows via REST, and it guarantees the sheet
+    //      never publishes a zero row just because v2 calculated fields
+    //      didn't hydrate for an edge-case order shape.
+    const toNum = (v: unknown): number => {
+      // Medusa v2 BigNumber comes back as either a plain number or
+      // { value: "129000" } / { numeric: 1290 } depending on context.
+      if (typeof v === "number" && Number.isFinite(v)) return v
+      if (v && typeof v === "object") {
+        const obj = v as { numeric?: unknown; value?: unknown }
+        if (typeof obj.numeric === "number" && Number.isFinite(obj.numeric)) {
+          return obj.numeric
+        }
+        if (typeof obj.value === "string") {
+          const n = Number(obj.value)
+          if (Number.isFinite(n)) return n
+        }
+        if (typeof obj.value === "number" && Number.isFinite(obj.value)) {
+          return obj.value
+        }
+      }
+      const n = Number(v ?? 0)
+      return Number.isFinite(n) ? n : 0
+    }
+
+    const shippingMethodsSum = (
+      (o as unknown as { shipping_methods?: { amount?: unknown }[] | null })
+        .shipping_methods ?? []
+    ).reduce((acc, sm) => acc + toNum(sm?.amount), 0)
+    const itemsSum = items.reduce(
+      (acc, i) => acc + toNum((i as { unit_price?: unknown }).unit_price) * Number(i.quantity ?? 0),
+      0,
+    )
+
+    const graphShipping = toNum((o as { shipping_total?: unknown }).shipping_total)
+    const graphDiscount = toNum((o as { discount_total?: unknown }).discount_total)
+    const graphTotal = toNum((o as { total?: unknown }).total)
+
+    const shipping = graphShipping > 0 ? graphShipping : shippingMethodsSum
+    const discount = graphDiscount
+    const computedTotal = Math.max(0, itemsSum + shipping - discount)
+
     const totalOverride =
       typeof meta.total_override_mur === "number"
         ? meta.total_override_mur
         : null
-    const total = totalOverride ?? Number(o.total ?? 0)
-    const shipping = Number(o.shipping_total ?? 0)
-    const discount = Number(o.discount_total ?? 0)
+    const total =
+      totalOverride ?? (graphTotal > 0 ? graphTotal : computedTotal)
+    if (totalOverride != null) totalSourceTally.override++
+    else if (graphTotal > 0) totalSourceTally.graph++
+    else if (computedTotal > 0) totalSourceTally.computed++
+    else totalSourceTally.zero++
 
     const entryDate = o.created_at ? muDate(new Date(o.created_at)) : ""
     const deliveryDate =
@@ -272,7 +338,7 @@ export async function runExport(container: MedusaContainer): Promise<ExportResul
   const ordersCount = sortedOrders.length
 
   logger.info(
-    `[export-orders-csv] wrote ${rows.length} rows (${ordersCount} orders) to spreadsheet ${SPREADSHEET_ID} at ${updatedAt}`,
+    `[export-orders-csv] wrote ${rows.length} rows (${ordersCount} orders) to spreadsheet ${SPREADSHEET_ID} at ${updatedAt} — total source tally: override=${totalSourceTally.override} graph=${totalSourceTally.graph} computed=${totalSourceTally.computed} zero=${totalSourceTally.zero}`,
   )
 
   return {
