@@ -36,7 +36,7 @@ export async function rehostMetaAttachment(
 
   let resp: Response
   try {
-    resp = await fetch(attachment.url)
+    resp = await fetch(attachment.url, { signal: AbortSignal.timeout(10_000) })
   } catch {
     return null
   }
@@ -45,8 +45,13 @@ export async function rehostMetaAttachment(
   const ct = (resp.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase()
   if (!ALLOWED_IMAGE_MIME.has(ct)) return null
 
-  const ab = await resp.arrayBuffer()
-  const body = Buffer.from(ab)
+  let body: Buffer
+  try {
+    const ab = await resp.arrayBuffer()
+    body = Buffer.from(ab)
+  } catch {
+    return null
+  }
   if (body.byteLength === 0) return null
 
   try {

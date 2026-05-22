@@ -8,11 +8,15 @@ jest.mock("../../../../lib/r2-inbox-uploader", () => ({
 
 import { rehostMetaAttachment } from "../rehost-meta-attachment"
 
+const originalFetch = global.fetch
 const fetchMock = jest.fn()
 beforeEach(() => {
   uploadMock.mockReset()
   fetchMock.mockReset()
   ;(global as any).fetch = fetchMock
+})
+afterAll(() => {
+  global.fetch = originalFetch
 })
 
 describe("rehostMetaAttachment", () => {
@@ -64,5 +68,32 @@ describe("rehostMetaAttachment", () => {
   it("returns null when URL missing", async () => {
     const result = await rehostMetaAttachment({ type: "image", url: "" }, "thr_1")
     expect(result).toBeNull()
+  })
+
+  it("returns null when fetch throws (timeout / abort)", async () => {
+    fetchMock.mockRejectedValueOnce(
+      Object.assign(new Error("The operation was aborted."), { name: "TimeoutError" }),
+    )
+    const result = await rehostMetaAttachment(
+      { type: "image", url: "https://meta.example/x" },
+      "thr_1",
+    )
+    expect(result).toBeNull()
+  })
+
+  it("returns null when arrayBuffer() throws (truncated body)", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      headers: new Map([["content-type", "image/jpeg"]]) as any,
+      arrayBuffer: async () => {
+        throw new Error("Premature close")
+      },
+    })
+    const result = await rehostMetaAttachment(
+      { type: "image", url: "https://meta.example/x" },
+      "thr_1",
+    )
+    expect(result).toBeNull()
+    expect(uploadMock).not.toHaveBeenCalled()
   })
 })
