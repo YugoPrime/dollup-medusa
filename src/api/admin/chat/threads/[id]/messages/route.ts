@@ -19,15 +19,24 @@ export const POST = async (req: MedusaRequest, res: MedusaResponse) => {
   const body = (req.body ?? {}) as {
     text?: string
     tag?: "HUMAN_AGENT" | null
+    attachments?: Array<{ url_r2: string; mime: string; size?: number }>
   }
 
   const text = (body.text ?? "").toString()
-  if (!text.trim()) {
-    res.status(400).json({ error: "text is required" })
+  const hasText = text.trim().length > 0
+  const hasAttachments =
+    Array.isArray(body.attachments) && body.attachments.length > 0
+
+  if (!hasText && !hasAttachments) {
+    res.status(400).json({ error: "Must include text or attachments" })
     return
   }
-  if (text.length > 2000) {
-    res.status(400).json({ error: "text exceeds 2000 chars" })
+  if (hasText && text.length > 2000) {
+    res.status(400).json({ error: "Text exceeds 2000 chars" })
+    return
+  }
+  if (hasAttachments && body.attachments!.length > 5) {
+    res.status(400).json({ error: "Max 5 attachments per send" })
     return
   }
 
@@ -38,26 +47,55 @@ export const POST = async (req: MedusaRequest, res: MedusaResponse) => {
     res.status(404).json({ error: "thread not found" })
     return
   }
+  if (thread.channel !== "messenger") {
+    res.status(501).json({
+      error: `Outbound not yet implemented for ${thread.channel}`,
+    })
+    return
+  }
 
   const userId = (req as any).auth?.actor_id ?? null
 
   try {
-    let result: { message: any; thread: any }
-    if (thread.channel === "messenger") {
-      result = await chat.sendOutboundMessenger({
+    const messages: any[] = []
+    let updatedThread: any = thread
+    if (hasText) {
+      const out = await chat.sendOutboundMessenger({
         threadId: id,
         text,
         senderUserId: userId,
         tag: body.tag ?? null,
       })
-    } else {
-      res.status(501).json({
-        error: `Outbound not yet implemented for ${thread.channel}`,
-      })
+      messages.push(out.message)
+      updatedThread = out.thread
+    }
+    if (hasAttachments) {
+      for (const a of body.attachments!) {
+        const out = await chat.sendOutboundMessengerImage({
+          threadId: id,
+          attachment: a,
+          senderUserId: userId,
+          tag: body.tag ?? null,
+        })
+        messages.push(out.message)
+        updatedThread = out.thread
+      }
+    }
+    res.json({
+      messages,
+      thread: updatedThread,
+      message: messages[messages.length - 1],
+    })
+  } catch (err) {
+    const msg = (err as Error).message
+    if (/Thread not found/.test(msg)) {
+      res.status(404).json({ error: msg })
       return
     }
-    res.json({ message: result.message, thread: result.thread })
-  } catch (err) {
-    res.status(400).json({ error: (err as Error).message })
+    if (/Outside 24h/.test(msg) || /Invalid attachment/.test(msg)) {
+      res.status(400).json({ error: msg })
+      return
+    }
+    res.status(400).json({ error: msg })
   }
 }
