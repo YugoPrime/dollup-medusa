@@ -252,6 +252,128 @@ class ChatModuleService extends MedusaService({
   }
 
   /**
+   * Send one image on a Messenger thread. Returns a chat_message row with
+   * direction=outbound and the R2 URL in attachments[0].url_r2. Mirrors
+   * sendOutboundMessenger's 24h gate + failure-row persistence. Caller is
+   * responsible for uploading the file to R2 (via /admin/chat/uploads) and
+   * passing the public R2 URL here. Loop this from the route to send up to
+   * 5 images — Meta has no true multi-attach in Messenger.
+   */
+  async sendOutboundMessengerImage(input: {
+    threadId: string
+    attachment: { url_r2: string; mime: string; size?: number }
+    senderUserId?: string | null
+    tag?: "HUMAN_AGENT" | null
+  }): Promise<{ message: any; thread: any }> {
+    const { url_r2, mime } = input.attachment
+    if (!url_r2 || !mime.startsWith("image/")) {
+      throw new Error("Invalid attachment: must have url_r2 and image mime")
+    }
+
+    const [thread] = await this.listThreads({ id: input.threadId })
+    if (!thread) throw new Error(`Thread not found: ${input.threadId}`)
+    if (thread.channel !== "messenger") {
+      throw new Error(`sendOutboundMessengerImage called on ${thread.channel} thread`)
+    }
+    const [contact] = await this.listContacts({ id: thread.contact_id })
+    if (!contact) throw new Error(`Contact not found for thread ${input.threadId}`)
+
+    const lastInbound = thread.last_inbound_at
+      ? new Date(thread.last_inbound_at).getTime()
+      : 0
+    const outsideWindow = !lastInbound || Date.now() - lastInbound > MESSENGER_24H_MS
+    if (outsideWindow && !input.tag) {
+      throw new Error(
+        "Outside 24h window — pass tag: 'HUMAN_AGENT' to send (page must be allowlisted)",
+      )
+    }
+
+    const accessToken = process.env.META_PAGE_ACCESS_TOKEN
+    const graphVersion = process.env.META_GRAPH_VERSION || "v20.0"
+    const persistedAttachment = {
+      kind: "image" as const,
+      url_r2,
+      mime,
+      size: input.attachment.size,
+    }
+
+    if (!accessToken) {
+      const failed = await this.createMessages({
+        thread_id: thread.id,
+        direction: "outbound",
+        external_id: null,
+        sender_kind: "staff",
+        sender_user_id: input.senderUserId ?? null,
+        body: null,
+        attachments: [persistedAttachment],
+        meta_status: "failed",
+        meta_error: "META_PAGE_ACCESS_TOKEN not configured",
+      } as unknown as Parameters<this["createMessages"]>[0])
+      return { message: failed, thread }
+    }
+
+    const url = `https://graph.facebook.com/${graphVersion}/me/messages?access_token=${encodeURIComponent(
+      accessToken,
+    )}`
+    const body: Record<string, unknown> = {
+      recipient: { id: contact.external_id },
+      message: {
+        attachment: {
+          type: "image",
+          payload: { url: url_r2, is_reusable: false },
+        },
+      },
+      messaging_type: input.tag ? "MESSAGE_TAG" : "RESPONSE",
+    }
+    if (input.tag) body.tag = input.tag
+
+    let metaMid: string | null = null
+    let metaError: string | null = null
+    try {
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
+      const json = (await resp.json().catch(() => ({}))) as {
+        message_id?: string
+        error?: { message?: string; code?: number }
+      }
+      if (!resp.ok || json.error) {
+        metaError =
+          json.error?.message ||
+          `Meta send failed (${resp.status} ${resp.statusText})`
+      } else {
+        metaMid = json.message_id ?? null
+      }
+    } catch (err) {
+      metaError = (err as Error).message || "network error"
+    }
+
+    const message = await this.createMessages({
+      thread_id: thread.id,
+      direction: "outbound",
+      external_id: metaMid,
+      sender_kind: "staff",
+      sender_user_id: input.senderUserId ?? null,
+      body: null,
+      attachments: [persistedAttachment],
+      meta_status: metaError ? "failed" : "sent",
+      meta_error: metaError,
+    } as unknown as Parameters<this["createMessages"]>[0])
+
+    let updatedThread = thread
+    if (!metaError) {
+      updatedThread = (await this.updateThreads({
+        id: thread.id,
+        last_message_at: new Date(),
+      } as unknown as Parameters<this["updateThreads"]>[0])) as any
+    }
+
+    return { message, thread: updatedThread }
+  }
+
+  /**
    * Aggregate counts for the nav badge + dashboard tile. Cheap enough to
    * call on every nav render at v1 volume; revisit with a materialized
    * counter if it ever shows up in slow-query logs.
