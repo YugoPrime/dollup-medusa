@@ -213,3 +213,68 @@ function throwUnconfigured(): never {
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
+
+/**
+ * Inspect the Page Access Token via Meta's /debug_token endpoint.
+ * Returns `expires_at` as a unix seconds timestamp — 0 means "never expires"
+ * (the long-lived Page token issued after the user token swap typically
+ * reports 0 OR a real ~60-day expiry depending on how it was minted).
+ *
+ * Requires META_APP_ID + META_APP_SECRET so we can build an app access token
+ * (`app_id|app_secret`). Without those we can't call debug_token reliably —
+ * returns `null` and lets the caller decide what to do.
+ */
+export type TokenInfo = {
+  /** Unix seconds. 0 = never expires (long-lived page token). */
+  expires_at: number
+  /** Unix seconds. When the user_access_token underlying this page token expires. */
+  data_access_expires_at?: number
+  is_valid: boolean
+  scopes?: string[]
+  type?: string
+  app_id?: string
+}
+
+// Public Meta App ID for "DOLL UP OS". Not a secret — exposed in the Pixel
+// snippet and every Graph API URL. Kept as a default so the cron works with
+// only META_APP_SECRET in Coolify (matches setup-meta-token.mjs).
+const DEFAULT_META_APP_ID = "1396051052286039"
+
+export async function inspectPageAccessToken(
+  cfg: MetaIgConfig = readMetaIgEnv() ?? throwUnconfigured(),
+): Promise<TokenInfo | null> {
+  const appId = process.env.META_APP_ID ?? DEFAULT_META_APP_ID
+  const appSecret = process.env.META_APP_SECRET
+  if (!appId || !appSecret) return null
+
+  const url = new URL(`https://graph.facebook.com/${cfg.apiVersion}/debug_token`)
+  url.searchParams.set("input_token", cfg.pageAccessToken)
+  url.searchParams.set("access_token", `${appId}|${appSecret}`)
+
+  const res = await fetch(url, { method: "GET" })
+  let json: any = null
+  try {
+    json = await res.json()
+  } catch {
+    /* non-JSON */
+  }
+  if (!res.ok) {
+    const err = json?.error
+    throw new MetaIgError(
+      err?.message ?? `debug_token ${res.status}`,
+      res.status,
+      { fbtraceId: err?.fbtrace_id, code: err?.code, subcode: err?.error_subcode },
+    )
+  }
+  const d = json?.data
+  if (!d) return null
+  return {
+    expires_at: typeof d.expires_at === "number" ? d.expires_at : 0,
+    data_access_expires_at:
+      typeof d.data_access_expires_at === "number" ? d.data_access_expires_at : undefined,
+    is_valid: d.is_valid === true,
+    scopes: Array.isArray(d.scopes) ? d.scopes : undefined,
+    type: typeof d.type === "string" ? d.type : undefined,
+    app_id: typeof d.app_id === "string" ? d.app_id : undefined,
+  }
+}

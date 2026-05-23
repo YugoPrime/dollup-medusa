@@ -93,7 +93,14 @@ export async function POST(req: AuthenticatedMedusaRequest, res: MedusaResponse)
       const renderSvc =
         req.scope.resolve<StoriesRenderModuleService>(STORIES_RENDER_MODULE)
       renderSvc.uploadToR2 = uploadStoryRenderToR2
-      const render = await renderSvc.render(slot.id, picked)
+      // Forward plan_id + slot_index so audio-mixer's per-plan no-repeat
+      // permutation matches what batch.ts uses. Without this the audio
+      // picker falls back to per-slot hash and can repeat within a day.
+      const render = await renderSvc.render(slot.id, {
+        ...picked,
+        plan_id: slot.plan_id,
+        slot_index: slot.slot_index,
+      })
       await stories.updateSlotMetadata(slot.id, {
         render,
         render_error: null,
