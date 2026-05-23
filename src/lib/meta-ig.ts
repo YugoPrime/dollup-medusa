@@ -131,15 +131,38 @@ export async function pollContainerUntilReady(
     creationId: string
     timeoutMs?: number
     pollIntervalMs?: number
+    statusUnavailableFallbackMs?: number
   },
   cfg: MetaIgConfig = readMetaIgEnv() ?? throwUnconfigured(),
 ): Promise<void> {
   const timeoutMs = args.timeoutMs ?? 90_000
   const pollIntervalMs = args.pollIntervalMs ?? 3000
+  const statusUnavailableFallbackMs =
+    args.statusUnavailableFallbackMs ?? Math.min(60_000, timeoutMs)
+  const startedAt = Date.now()
   const deadline = Date.now() + timeoutMs
 
   while (Date.now() < deadline) {
-    const { status_code } = await getContainerStatus(args.creationId, cfg)
+    let status_code: ContainerStatusCode
+    try {
+      ;({ status_code } = await getContainerStatus(args.creationId, cfg))
+    } catch (err) {
+      if (
+        err instanceof MetaIgError &&
+        isContainerStatusVisibilityError(err) &&
+        Date.now() - startedAt >= statusUnavailableFallbackMs
+      ) {
+        // Meta sometimes accepts a freshly-created IG Story container, then
+        // returns code 100/subcode 33 when reading that same container status.
+        // After a conservative wait, let media_publish be authoritative.
+        return
+      }
+      if (err instanceof MetaIgError && isContainerStatusVisibilityError(err)) {
+        await sleep(pollIntervalMs)
+        continue
+      }
+      throw err
+    }
     if (status_code === "FINISHED" || status_code === "PUBLISHED") return
     if (status_code === "ERROR") {
       throw new MetaIgError(
@@ -159,6 +182,10 @@ export async function pollContainerUntilReady(
     `Container ${args.creationId} did not finish within ${timeoutMs}ms`,
     504,
   )
+}
+
+export function isContainerStatusVisibilityError(err: MetaIgError): boolean {
+  return err.metaErrorCode === 100 && err.metaErrorSubcode === 33
 }
 
 export async function publishContainer(

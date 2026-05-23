@@ -427,7 +427,7 @@ class StoriesModuleService extends MedusaService({
     const allSlots = await this.listStorySlots({ plan_id: input.plan_id })
     const nextIndex = allSlots.reduce((max, s) => Math.max(max, s.slot_index), -1) + 1
 
-    const slot = await this.createStorySlots({
+    const createdSlot = await this.createStorySlots({
       plan_id: input.plan_id,
       slot_index: nextIndex,
       scheduled_at: input.scheduled_at,
@@ -438,6 +438,10 @@ class StoriesModuleService extends MedusaService({
       fallback_used: false,
       pick_attempt: 1,
     } as unknown as Parameters<this["createStorySlots"]>[0])
+    const slot = (Array.isArray(createdSlot) ? createdSlot[0] : createdSlot) as {
+      id: string
+    }
+    if (!slot) throw new Error("Failed to create filler slot")
 
     await this.updateStoryPlans({
       id: input.plan_id,
