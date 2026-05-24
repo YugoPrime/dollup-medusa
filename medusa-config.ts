@@ -140,6 +140,9 @@ module.exports = defineConfig({
       resolve: "./src/modules/sourcing-settings",
     },
     {
+      resolve: "./src/modules/preorder",
+    },
+    {
       resolve: "./src/modules/chat",
     },
     {
