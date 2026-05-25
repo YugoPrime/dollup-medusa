@@ -126,17 +126,23 @@ class StoriesModuleService extends MedusaService({
   async markPosted(slotId: string): Promise<void> {
     const [slot] = await this.listStorySlots({ id: slotId })
     if (!slot) throw new Error(`Slot ${slotId} not found`)
-    if (!slot.product_id) throw new Error("Cannot mark posted: slot has no product")
     if (slot.posted_at) return  // idempotent
 
     const now = new Date()
 
     await this.updateStorySlots({ id: slotId, posted_at: now })
-    await this.createPublicationLogs({
-      product_id: slot.product_id,
-      slot_id: slot.id,
-      posted_at: now,
-    })
+    // Filler slots (e.g. how-to-order) have product_id=null by design — skip
+    // the publication_log row in that case. The log table's anti-repeat use
+    // only cares about real products. Without this guard, IG publish succeeds
+    // but markPosted throws, the cron retries, and the same filler gets
+    // posted multiple times until MAX_ATTEMPTS.
+    if (slot.product_id) {
+      await this.createPublicationLogs({
+        product_id: slot.product_id,
+        slot_id: slot.id,
+        posted_at: now,
+      })
+    }
 
     const [plan] = await this.listStoryPlans({ id: slot.plan_id })
     const allSlots = await this.listStorySlots({ plan_id: plan.id })

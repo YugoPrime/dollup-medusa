@@ -143,23 +143,29 @@ moduleIntegrationTestRunner<StoriesModuleService>({
         expect(reloadedPlan.status).toBe("active")
       })
 
-      it("markPosted refuses if slot has no product_id", async () => {
+      it("markPosted accepts filler slots (product_id=null) and skips the publication_log row", async () => {
         const plan = await service.createPlan({
           plan_date: "2026-07-03",
           category_distribution: [{ category_id: "c", count: 1 }],
           scheduled_times: ["09:00"],
         })
-        const empty = await service.createStorySlots({
+        const filler = await service.createStorySlots({
           plan_id: plan.id,
           slot_index: 0,
           scheduled_at: new Date("2026-07-03T09:00:00+04:00"),
-          category_id: "c",
+          category_id: "__filler__",
           product_id: null,
           product_snapshot: null,
           fallback_used: false,
           pick_attempt: 1,
         })
-        await expect(service.markPosted(empty.id)).rejects.toThrow(/no product/i)
+
+        await service.markPosted(filler.id)
+
+        const [reloaded] = await service.listStorySlots({ id: filler.id })
+        expect(reloaded.posted_at).toBeInstanceOf(Date)
+        const logs = await service.listPublicationLogs({ slot_id: filler.id })
+        expect(logs).toHaveLength(0)
       })
     })
 
