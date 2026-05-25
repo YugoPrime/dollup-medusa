@@ -18,8 +18,13 @@ export class MigrationLeads20260525120000 extends Migration {
     // Insert the General list with a stable, known id so we can reference it
     // from the lead.list_id backfill in the same migration without a separate
     // SELECT round-trip. Subsequent lists get random ids from the service.
+    // NOTE: can't use ON CONFLICT against the partial unique index created
+    // above in the same transaction (Postgres infer_arbiter_indexes fails,
+    // error 42P10). Use WHERE NOT EXISTS guard instead.
     this.addSql(
-      "insert into \"lead_list\" (\"id\", \"name\") values ('leadlist_general', 'General') on conflict (\"name\") do nothing;",
+      "insert into \"lead_list\" (\"id\", \"name\") " +
+        "select 'leadlist_general', 'General' " +
+        "where not exists (select 1 from \"lead_list\" where \"name\" = 'General' and \"deleted_at\" is null);",
     )
 
     this.addSql('alter table "lead" add column if not exists "list_id" text null;')
