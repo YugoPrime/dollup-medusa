@@ -80,6 +80,7 @@ class LeadsModuleService extends MedusaService({ Lead, LeadList }) {
     const name = input.name?.trim() || null
     const phone = input.phone?.trim() || null
     const note = input.note?.trim() || null
+    const list_id = input.list_id?.trim() || "leadlist_general"
 
     if (!name && !phone) {
       throw new MedusaError(
@@ -107,23 +108,50 @@ class LeadsModuleService extends MedusaService({ Lead, LeadList }) {
       )
     }
 
+    // Verify the target list exists; otherwise fall back to General. The
+    // generated listLeadLists method (lowercase l) is the framework's CRUD
+    // helper — distinct from the custom getLeadListsWithCounts wrapper added
+    // in B1.
     const service = this as unknown as {
-      createLeads: (input: CreateLeadInput) => Promise<LeadDTO>
+      createLeads: (input: {
+        name: string | null
+        phone: string | null
+        note: string | null
+        list_id: string
+      }) => Promise<LeadDTO>
+      listLeadLists: (
+        filters: Record<string, unknown>,
+      ) => Promise<Array<{ id: string }>>
     }
-    return service.createLeads({ name, phone, note })
+    const found = await service.listLeadLists({ id: list_id })
+    const safeListId = found.length > 0 ? list_id : "leadlist_general"
+
+    return service.createLeads({ name, phone, note, list_id: safeListId })
   }
 
-  async listActiveLeads(): Promise<LeadDTO[]> {
+  async listActiveLeads(filters?: {
+    list_id?: string
+    used?: boolean
+  }): Promise<LeadDTO[]> {
     const service = this as unknown as {
       listLeads: (
         filters: Record<string, unknown>,
         config?: Record<string, unknown>,
       ) => Promise<LeadDTO[]>
     }
-    const rows = await service.listLeads(
-      { used_at: null },
-      { order: { created_at: "DESC" }, take: 200 },
-    )
+    const where: Record<string, unknown> = {}
+    if (filters?.used === true) {
+      where.used_at = { $ne: null }
+    } else if (filters?.used === false || filters?.used === undefined) {
+      where.used_at = null
+    }
+    if (filters?.list_id) {
+      where.list_id = filters.list_id
+    }
+    const rows = await service.listLeads(where, {
+      order: { created_at: "DESC" },
+      take: 200,
+    })
     return rows
   }
 
@@ -219,6 +247,48 @@ class LeadsModuleService extends MedusaService({ Lead, LeadList }) {
       await service.updateLeads({ id: lead.id, list_id: input.move_to })
     }
     await service.deleteLeadLists(input.id)
+  }
+
+  async updateLead(input: UpdateLeadInput): Promise<LeadDTO> {
+    const patch: Record<string, unknown> = { id: input.id }
+    if (input.name !== undefined) {
+      const trimmed = input.name?.trim() || null
+      if (trimmed && trimmed.length > 200) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          "Name must be 200 characters or fewer",
+        )
+      }
+      patch.name = trimmed
+    }
+    if (input.phone !== undefined) {
+      const trimmed = input.phone?.trim() || null
+      if (trimmed && trimmed.length > 50) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          "Phone must be 50 characters or fewer",
+        )
+      }
+      patch.phone = trimmed
+    }
+    if (input.note !== undefined) {
+      const trimmed = input.note?.trim() || null
+      if (trimmed && trimmed.length > 500) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          "Note must be 500 characters or fewer",
+        )
+      }
+      patch.note = trimmed
+    }
+    if (input.list_id !== undefined) {
+      patch.list_id = input.list_id
+    }
+
+    const service = this as unknown as {
+      updateLeads: (input: Record<string, unknown>) => Promise<LeadDTO>
+    }
+    return service.updateLeads(patch)
   }
 
   // Returns how many leads were marked used. Matches active (used_at IS NULL)
