@@ -357,18 +357,21 @@ describe("pickTemplate", () => {
     expect(picked.text_overrides.size).toBe("One size")
   })
 
-  it("rotates [product-1color, product-1color-featured, new-drop-arch] by slot_index for 1-color front+back", () => {
-    // 3-template 1-color pool (2026-05-21: added new-drop-arch — pampas arch
-    // with back-bubble inset). Without a count map, picker rotates by
-    // slotIndex mod 3 for deterministic test behavior.
+  it("rotates the 15-template 1-color pool by slot_index for 1-color front+back", () => {
+    // 15-template pool (2026-05-25: original 3 layouts × 4 palette siblings
+    // each, plus the 3 originals). Without a count map, picker rotates by
+    // slotIndex mod 15 for deterministic test behavior. Order follows
+    // ONE_COLOR_FRONT_BACK_ROTATION exactly.
     const s = snapshot({
       variants_in_stock: [color("pink", ["front", "back"])],
       variant_in_stock_count: 1,
     })
     expect(pickTemplate(s, 0)!.template_slug).toBe("product-1color")
-    expect(pickTemplate(s, 1)!.template_slug).toBe("product-1color-featured")
-    expect(pickTemplate(s, 2)!.template_slug).toBe("new-drop-arch")
-    expect(pickTemplate(s, 3)!.template_slug).toBe("product-1color")
+    expect(pickTemplate(s, 1)!.template_slug).toBe("product-1color-blush")
+    expect(pickTemplate(s, 5)!.template_slug).toBe("product-1color-featured")
+    expect(pickTemplate(s, 10)!.template_slug).toBe("new-drop-arch")
+    // Wrap-around: slot 15 == slot 0.
+    expect(pickTemplate(s, 15)!.template_slug).toBe("product-1color")
   })
 
   it("REGRESSION: product-1color is NOT used when the only second image is a detail/real/size_chart shot", () => {
@@ -893,36 +896,50 @@ describe("pickTemplate", () => {
       })
     }
 
-    it("first 6 single-color-with-back picks round-robin the 1-color pool (max 2 each)", () => {
-      // With the 3-template 1-color pool [product-1color,
-      // product-1color-featured, new-drop-arch], true round-robin gives
-      // [A, B, C, A, B, C] — all three at exactly 2 by slot 6.
+    it("first 15 single-color-with-back picks round-robin the 1-color pool (each once before any repeat)", () => {
+      // 2026-05-25: pool grew from 3 to 15 templates (3 layouts × 4 palettes
+      // + originals). True least-used round-robin produces each slug exactly
+      // once across 15 slots; only on slot 16 does the first slug repeat.
       const s = oneColorWithBack()
       const counts = new Map<string, number>()
       const picks: string[] = []
-      for (let i = 0; i < 6; i++) {
+      for (let i = 0; i < 15; i++) {
         const p = pickTemplate(s, i, counts)!
         picks.push(p.template_slug)
         counts.set(p.template_slug, (counts.get(p.template_slug) ?? 0) + 1)
       }
-      expect(picks).toEqual([
-        "product-1color",
-        "product-1color-featured",
-        "new-drop-arch",
-        "product-1color",
-        "product-1color-featured",
-        "new-drop-arch",
-      ])
+      // Every slug should appear exactly once — leastUsed prefers count=0
+      // candidates, and ties resolve by pool order.
+      const unique = new Set(picks)
+      expect(unique.size).toBe(15)
+      expect(picks[0]).toBe("product-1color")
+      // Slot 16: the head of the pool comes around for its second hit.
+      const p16 = pickTemplate(s, 15, counts)!
+      expect(p16.template_slug).toBe("product-1color")
     })
 
-    it("7th single-color-with-back falls through to the single-image rotation when all 1-color templates are capped", () => {
+    it("16th single-color-with-back falls through to the single-image rotation when all 1-color templates are capped", () => {
+      // 2026-05-25: was 7th with a 3-template pool. With 15 templates, all
+      // need to be at MAX_TEMPLATE_PER_DAY=2 before the fallthrough fires.
       const s = oneColorWithBack()
       const counts = new Map<string, number>([
         ["product-1color", 2],
+        ["product-1color-blush", 2],
+        ["product-1color-cream", 2],
+        ["product-1color-sage", 2],
+        ["product-1color-coral", 2],
         ["product-1color-featured", 2],
+        ["product-1color-featured-blush", 2],
+        ["product-1color-featured-cream", 2],
+        ["product-1color-featured-sage", 2],
+        ["product-1color-featured-coral", 2],
         ["new-drop-arch", 2],
+        ["new-drop-arch-blush", 2],
+        ["new-drop-arch-cream", 2],
+        ["new-drop-arch-sage", 2],
+        ["new-drop-arch-coral", 2],
       ])
-      const p = pickTemplate(s, 6, counts)!
+      const p = pickTemplate(s, 30, counts)!
       expect([
         "in-stock-hero",
         "in-stock-hero-blush",
@@ -995,7 +1012,10 @@ describe("pickTemplate", () => {
       expect(["product-3colors", "color-mood-rail"]).toContain(p.template_slug)
     })
 
-    it("product-2colors falls through to product-2colors-front when capped", () => {
+    it("all five product-2colors palette siblings must be capped before falling through to product-2colors-front", () => {
+      // 2026-05-25: 2-color pool grew from 1 to 5 siblings. The
+      // `TWO_COLOR_BACK_ROTATION.some(...)` guard means fall-through only
+      // fires when EVERY sibling is at cap.
       const s = snapshot({
         variants_in_stock: [
           color("red", ["front", "back"]),
@@ -1003,7 +1023,13 @@ describe("pickTemplate", () => {
         ],
         variant_in_stock_count: 2,
       })
-      const counts = new Map<string, number>([["product-2colors", 2]])
+      const counts = new Map<string, number>([
+        ["product-2colors", 2],
+        ["product-2colors-blush", 2],
+        ["product-2colors-cream", 2],
+        ["product-2colors-sage", 2],
+        ["product-2colors-coral", 2],
+      ])
       const p = pickTemplate(s, 0, counts)!
       expect(p.template_slug).toBe("product-2colors-front")
     })
@@ -1011,13 +1037,14 @@ describe("pickTemplate", () => {
     it("when no pickedSoFar is passed, picker behavior is unchanged (back-compat)", () => {
       const s = oneColorWithBack()
       const slugs = [0, 1, 2, 3].map((i) => pickTemplate(s, i)!.template_slug)
-      // Without a count map, the picker stays deterministic by slotIndex,
-      // rotating across the 3-pool — no cap enforced.
+      // Without a count map, the picker stays deterministic by slotIndex
+      // across the 15-template 1-color pool (added 2026-05-25). Slots 0..3
+      // land on the first four entries of ONE_COLOR_FRONT_BACK_ROTATION.
       expect(slugs).toEqual([
         "product-1color",
-        "product-1color-featured",
-        "new-drop-arch",
-        "product-1color",
+        "product-1color-blush",
+        "product-1color-cream",
+        "product-1color-sage",
       ])
     })
   })
@@ -1030,8 +1057,9 @@ describe("pickTemplate", () => {
         ],
         variant_in_stock_count: 1,
       })
-      // Slot index 2 lands on new-drop-arch in the 3-template 1-color rotation.
-      const picked = pickTemplate(s, 2)!
+      // Slot index 10 lands on new-drop-arch in the 15-template 1-color
+      // rotation (5 product-1color + 5 product-1color-featured + 5 new-drop-arch).
+      const picked = pickTemplate(s, 10)!
       expect(picked.template_slug).toBe("new-drop-arch")
       expect(picked.slot_inputs.front).toBe("https://r2/pink.jpg")
       expect(picked.slot_inputs.back).toBe("https://r2/pink-b.jpg")
@@ -1049,7 +1077,7 @@ describe("pickTemplate", () => {
         variant_in_stock_count: 1,
         price_mur: 1290,
       })
-      const picked = pickTemplate(s, 2)!
+      const picked = pickTemplate(s, 10)!
       expect(picked.template_slug).toBe("new-drop-arch")
       expect(picked.text_overrides.headline).toBe("Cowl Neck Satin Midi")
       expect(picked.text_overrides.price).toBe("Rs.1290")
@@ -1063,7 +1091,7 @@ describe("pickTemplate", () => {
         variants_in_stock: [color("pink", ["front", "back"])],
         variant_in_stock_count: 1,
       })
-      const picked = pickTemplate(s, 2)!
+      const picked = pickTemplate(s, 10)!
       expect(picked.template_slug).toBe("new-drop-arch")
       expect(picked.text_overrides.headline.length).toBeLessThanOrEqual(28)
       expect(picked.text_overrides.headline).toMatch(/…$/)
@@ -1214,6 +1242,90 @@ describe("pickTemplate", () => {
       // color-mood-rail has 0 picks vs product-3colors's 3 → least-used picks color-mood-rail
       const p = pickTemplate(s, 0, counts)!
       expect(p.template_slug).toBe("color-mood-rail")
+    })
+  })
+
+  describe("2026-05-25: palette siblings (blush / cream / sage / coral)", () => {
+    it("1-color rotation includes all 15 layout × palette siblings", () => {
+      const s = snapshot({
+        variants_in_stock: [color("pink", ["front", "back"])],
+        variant_in_stock_count: 1,
+      })
+      const slugs = Array.from({ length: 15 }, (_, i) =>
+        pickTemplate(s, i)!.template_slug,
+      )
+      const expectedSiblings = [
+        "product-1color-blush",
+        "product-1color-cream",
+        "product-1color-sage",
+        "product-1color-coral",
+        "product-1color-featured-blush",
+        "product-1color-featured-cream",
+        "product-1color-featured-sage",
+        "product-1color-featured-coral",
+        "new-drop-arch-blush",
+        "new-drop-arch-cream",
+        "new-drop-arch-sage",
+        "new-drop-arch-coral",
+      ]
+      for (const sibling of expectedSiblings) {
+        expect(slugs).toContain(sibling)
+      }
+    })
+
+    it("2-color back rotation hands out all 5 palette siblings across 5 slots when a count map is passed", () => {
+      const s = snapshot({
+        variants_in_stock: [
+          color("red", ["front", "back"]),
+          color("pink", ["front"]),
+        ],
+        variant_in_stock_count: 2,
+      })
+      const counts = new Map<string, number>()
+      const picks: string[] = []
+      for (let i = 0; i < 5; i++) {
+        const p = pickTemplate(s, i, counts)!
+        picks.push(p.template_slug)
+        counts.set(p.template_slug, (counts.get(p.template_slug) ?? 0) + 1)
+      }
+      // Each of the 5 siblings should appear exactly once.
+      expect(new Set(picks).size).toBe(5)
+      expect(picks).toContain("product-2colors")
+      expect(picks).toContain("product-2colors-blush")
+      expect(picks).toContain("product-2colors-cream")
+      expect(picks).toContain("product-2colors-sage")
+      expect(picks).toContain("product-2colors-coral")
+    })
+
+    it("palette siblings preserve the slot contract — front_a / front_b / back routed correctly", () => {
+      // Regression guard: variant templates copy the base index.html, so the
+      // picker must pass the same slot_inputs regardless of which palette
+      // sibling is chosen.
+      const s = snapshot({
+        variants_in_stock: [
+          color("red", ["front", "back"]),
+          color("pink", ["front"]),
+        ],
+        variant_in_stock_count: 2,
+      })
+      const counts = new Map<string, number>([["product-2colors", 2]])
+      const p = pickTemplate(s, 0, counts)!
+      expect(p.template_slug).not.toBe("product-2colors") // pushed by count
+      expect(p.slot_inputs.front_a).toBeDefined()
+      expect(p.slot_inputs.front_b).toBeDefined()
+      expect(p.slot_inputs.back).toBeDefined()
+    })
+
+    it("1-color palette siblings reuse the front/back slot contract", () => {
+      const s = snapshot({
+        variants_in_stock: [color("pink", ["front", "back"])],
+        variant_in_stock_count: 1,
+      })
+      // Slot index 1 is product-1color-blush in the new rotation.
+      const p = pickTemplate(s, 1)!
+      expect(p.template_slug).toBe("product-1color-blush")
+      expect(p.slot_inputs.front).toBe("https://r2/pink.jpg")
+      expect(p.slot_inputs.back).toBe("https://r2/pink-b.jpg")
     })
   })
 })

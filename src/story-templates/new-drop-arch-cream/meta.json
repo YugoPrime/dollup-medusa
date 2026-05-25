@@ -1,0 +1,53 @@
+{
+  "slug": "new-drop-arch-cream",
+  "name": "New Drop · Pampas Arch — Cream",
+  "category": "single-product-multi-image",
+  "duration_seconds": 7,
+  "wave": 1,
+  "slots": [
+    {
+      "id": "front",
+      "hint": "front",
+      "label": "Front view (fills the arch)",
+      "required": true
+    },
+    {
+      "id": "back",
+      "hint": "back",
+      "label": "Back view (circle inset, bottom-right)",
+      "required": true
+    }
+  ],
+  "text_overrides": [
+    {
+      "id": "kicker",
+      "default": "NEW DROP",
+      "max_chars": 16
+    },
+    {
+      "id": "headline",
+      "default": "Product Name",
+      "max_chars": 28
+    },
+    {
+      "id": "price",
+      "default": "Rs.0",
+      "max_chars": 12
+    },
+    {
+      "id": "size",
+      "default": "Sizes: S · M · L",
+      "max_chars": 28
+    },
+    {
+      "id": "cta",
+      "default": "TAP TO SHOP",
+      "max_chars": 18
+    },
+    {
+      "id": "footer_url",
+      "default": "dollupboutique.com",
+      "max_chars": 32
+    }
+  ]
+}

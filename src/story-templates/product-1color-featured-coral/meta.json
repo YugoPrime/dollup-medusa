@@ -1,0 +1,53 @@
+{
+  "slug": "product-1color-featured-coral",
+  "name": "Product · 1 Color Featured (Cream Card + Circle Back) — Coral",
+  "category": "single-product-multi-image",
+  "duration_seconds": 6,
+  "wave": 1,
+  "slots": [
+    {
+      "id": "front",
+      "hint": "front",
+      "label": "Front view (large hero)",
+      "required": true
+    },
+    {
+      "id": "back",
+      "hint": "back",
+      "label": "Back view (circle inset)",
+      "required": true
+    }
+  ],
+  "text_overrides": [
+    {
+      "id": "price",
+      "default": "Rs.0",
+      "max_chars": 12
+    },
+    {
+      "id": "sku",
+      "default": "IS0000",
+      "max_chars": 14
+    },
+    {
+      "id": "size",
+      "default": "Size: S · M · L",
+      "max_chars": 28
+    },
+    {
+      "id": "footer",
+      "default": "DM TO ORDER",
+      "max_chars": 20
+    },
+    {
+      "id": "cta",
+      "default": "Shop now",
+      "max_chars": 16
+    },
+    {
+      "id": "footer_url",
+      "default": "dollupboutique.com",
+      "max_chars": 32
+    }
+  ]
+}

@@ -1,0 +1,227 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 1080px; height: 1920px; overflow: hidden; }
+
+.canvas {
+  width: 1080px;
+  height: 1920px;
+  background: linear-gradient(160deg, var(--dub-blush) 0%, var(--dub-pink) 100%);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Decorative silk drapes — soft cream blobs that hint at the reference flat-lay */
+.silk { position: absolute; border-radius: 50%; filter: blur(60px); opacity: 0.85; animation: drift 9s ease-in-out infinite; }
+.silk-tl { width: 540px; height: 540px; left: -180px; top: -160px; background: var(--dub-cream); }
+.silk-br { width: 620px; height: 620px; right: -220px; bottom: -200px; background: var(--dub-pink); animation-delay: -3s; }
+
+/* Pampas grass corners — diagonal pinstripe blocks reminiscent of dried botanicals */
+.pampas { position: absolute; width: 260px; height: 360px; opacity: 0.42; background: repeating-linear-gradient(110deg, transparent 0 14px, #d6b894 14px 16px); animation: sway 6s ease-in-out infinite; }
+.pampas-tr { top: -40px; right: -40px; transform: rotate(18deg); }
+.pampas-bl { bottom: -40px; left: -40px; transform: rotate(-18deg); animation-delay: -2s; }
+
+.scene { position: absolute; inset: 0; padding: 90px 70px 70px; display: flex; flex-direction: column; align-items: center; gap: 22px; }
+
+.header-logo { animation: rise 0.6s ease-out 0.1s both; }
+.kicker {
+  background: #f4c2c2;
+  color: #2b2b2b;
+  padding: 16px 40px;
+  border-radius: 999px;
+  font-family: var(--dub-font-body);
+  font-weight: 700;
+  font-size: 30px;
+  letter-spacing: 10px;
+  box-shadow: 0 8px 18px rgba(244, 194, 194, 0.55);
+  animation: stampDrop 0.9s cubic-bezier(.45,1.6,.45,1) both, kickerPulse 2.6s ease-in-out 1.2s infinite;
+}
+
+/* Arch wrapper: no opacity fade so the product photo is visible at frame 0.
+ * Subtle softRise only on translateY for a gentle settle without hiding the
+ * photo. */
+.arch-wrap { position: relative; width: 100%; flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; margin-top: 8px; animation: softRise 0.5s ease-out 0s both; }
+
+.arch {
+  width: 760px;
+  height: 980px;
+  border-radius: 380px 380px 28px 28px;
+  background: var(--dub-pink);
+  border: 3px solid #d8c5a8;
+  box-shadow: 0 24px 50px rgba(0,0,0,0.10), inset 0 0 0 14px var(--dub-cream);
+  overflow: hidden;
+  position: relative;
+}
+.front { width: 100%; height: 100%; object-fit: cover; display: block; animation: zoomSlow 7s ease-out both; }
+
+/* Wrapper is the positioned anchor; bubble does the circular clip; tag floats
+ * above the wrapper (NOT inside the bubble) so it isn't clipped into a pink
+ * slice. Fixed 2026-05-21. */
+.back-bubble-wrap {
+  position: absolute;
+  right: 30px;
+  bottom: 40px;
+  width: 280px;
+  height: 280px;
+  animation: bubbleIn 0.8s cubic-bezier(.45,1.6,.45,1) 0.9s both,
+             bubbleFloat 4.5s ease-in-out 2.4s infinite;
+}
+.back-bubble {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: var(--dub-pink);
+  border: 3px solid var(--dub-cream);
+  box-shadow: 0 14px 28px rgba(0,0,0,0.12);
+  overflow: hidden;
+}
+.back { width: 100%; height: 100%; object-fit: cover; }
+.back-tag {
+  position: absolute;
+  top: -18px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #f4c2c2;
+  color: #2b2b2b;
+  font-family: var(--dub-font-body);
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: 4px;
+  padding: 8px 22px;
+  border-radius: 999px;
+  z-index: 2;
+  white-space: nowrap;
+  box-shadow: 0 4px 10px rgba(43, 43, 43, 0.18);
+}
+.back-arrow {
+  position: absolute;
+  right: 320px;
+  bottom: 80px;
+  font-family: var(--dub-font-display);
+  font-size: 64px;
+  color: #2b2b2b;
+  animation: rise 0.5s ease-out 1.4s both;
+  transform: rotate(35deg);
+}
+
+.headline {
+  font-family: var(--dub-font-display);
+  font-weight: 700;
+  font-size: 84px;
+  color: #2b2b2b;
+  line-height: 1;
+  text-align: center;
+  animation: rise 0.5s ease-out 1.0s both,
+             headlineDrift 5s ease-in-out 2.2s infinite;
+}
+.divider {
+  width: 50px;
+  height: 2px;
+  background: #c9a96e;
+  display: block;
+  position: relative;
+  animation: rise 0.5s ease-out 1.2s both,
+             shimmer 3.6s ease-in-out 2.6s infinite;
+}
+.divider::after {
+  content: "♥";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  color: #f4c2c2;
+  font-size: 22px;
+  background: #fff5ec;
+  padding: 0 6px;
+  animation: heartbeat 2.2s ease-in-out 2.4s infinite;
+}
+
+.price {
+  font-family: var(--dub-font-display);
+  font-weight: 700;
+  font-size: 74px;
+  color: #2b2b2b;
+  line-height: 1;
+  animation: rise 0.5s ease-out 1.3s both;
+}
+.size-pill {
+  background: rgba(43,43,43,0.86);
+  color: #f5e6d8;
+  padding: 12px 28px;
+  border-radius: 999px;
+  font-family: var(--dub-font-body);
+  font-weight: 700;
+  font-size: 26px;
+  letter-spacing: 3px;
+  animation: rise 0.5s ease-out 1.5s both,
+             pillGlow 3.4s ease-in-out 2.8s infinite;
+}
+
+.cta {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  background: #2b2b2b;
+  color: #f5e6d8;
+  padding: 26px 64px;
+  border-radius: 999px;
+  font-family: var(--dub-font-body);
+  font-weight: 700;
+  letter-spacing: 6px;
+  box-shadow: 0 16px 32px rgba(0,0,0,0.22);
+  animation: rise 0.5s ease-out 1.7s both, ctaPulse 2.4s ease-in-out 2.4s infinite;
+}
+.cta-text { font-size: 32px; }
+.bag {
+  width: 36px;
+  height: 36px;
+  border: 2px solid #f5e6d8;
+  border-radius: 6px 6px 10px 10px;
+  position: relative;
+}
+.bag::before {
+  content: "";
+  position: absolute;
+  top: -14px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 22px;
+  height: 18px;
+  border: 2px solid #f5e6d8;
+  border-bottom: none;
+  border-radius: 12px 12px 0 0;
+}
+.spark { color: #f4c2c2; font-size: 32px; animation: sparkSpin 3s linear infinite; display: inline-block; }
+
+.footer-url {
+  font-family: var(--dub-font-body);
+  font-weight: 600;
+  font-size: 24px;
+  color: #2b2b2b;
+  letter-spacing: 2px;
+  opacity: 0.78;
+  animation: rise 0.5s ease-out 1.9s both;
+}
+
+@keyframes rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+/* softRise: NO opacity change — for elements that hold the product photo
+ * (audience-retention rule, photo visible at frame 0). Small Y travel only. */
+@keyframes softRise { from { transform: translateY(10px); } to { transform: translateY(0); } }
+@keyframes stampDrop { 0% { opacity: 0; transform: translateY(-50px) scale(1.4); } 60% { opacity: 1; transform: translateY(8px) scale(0.96); } 100% { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes kickerPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+@keyframes zoomSlow { from { transform: scale(1.08); } to { transform: scale(1); } }
+@keyframes bubbleIn { 0% { opacity: 0; transform: scale(0.4) rotate(-12deg); } 60% { opacity: 1; transform: scale(1.08) rotate(2deg); } 100% { opacity: 1; transform: scale(1) rotate(0); } }
+/* Gentle ambient bob for the back bubble — runs after bubbleIn settles */
+@keyframes bubbleFloat { 0%, 100% { transform: translateY(0) rotate(0); } 50% { transform: translateY(-8px) rotate(-1.5deg); } }
+/* Slow drift on the headline + heart divider for editorial liveliness */
+@keyframes headlineDrift { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+/* Soft heartbeat pulse for the heart in the divider */
+@keyframes heartbeat { 0%, 100% { transform: translate(-50%, -50%) scale(1); } 30% { transform: translate(-50%, -50%) scale(1.2); } 60% { transform: translate(-50%, -50%) scale(1); } 80% { transform: translate(-50%, -50%) scale(1.12); } }
+/* Ambient shimmer on the gold divider line */
+@keyframes shimmer { 0%, 100% { background: #c9a96e; } 50% { background: #e2c894; } }
+/* Subtle glow pulse on the size pill so it stays alive */
+@keyframes pillGlow { 0%, 100% { box-shadow: 0 0 0 0 rgba(244, 194, 194, 0); } 50% { box-shadow: 0 0 0 8px rgba(244, 194, 194, 0.18); } }
+@keyframes ctaPulse { 0%, 100% { transform: scale(1); box-shadow: 0 16px 32px rgba(0,0,0,0.22); } 50% { transform: scale(1.035); box-shadow: 0 20px 40px rgba(0,0,0,0.28); } }
+@keyframes sparkSpin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+@keyframes drift { 0%, 100% { transform: translate(0,0); } 50% { transform: translate(20px, -10px); } }
+@keyframes sway { 0%, 100% { transform: rotate(18deg); } 50% { transform: rotate(22deg); } }
+.pampas-bl { animation-name: swayLeft; }
+@keyframes swayLeft { 0%, 100% { transform: rotate(-18deg); } 50% { transform: rotate(-22deg); } }

@@ -29,6 +29,9 @@ describe("template-loader", () => {
   })
 
   it("lists all templates excluding private folders", async () => {
+    // 2026-05-25: round-1 palette variants added — product-1color,
+    // product-1color-featured, new-drop-arch, product-2colors each cloned
+    // into -blush / -cream / -sage / -coral siblings (16 new folders).
     const slugs = (await listTemplates(TEMPLATES_ROOT)).map((template) => template.slug)
     expect(slugs).toEqual([
       "color-mood-rail",
@@ -44,11 +47,27 @@ describe("template-loader", () => {
       "many-photos",
       "new-arrival",
       "new-drop-arch",
+      "new-drop-arch-blush",
+      "new-drop-arch-coral",
+      "new-drop-arch-cream",
+      "new-drop-arch-sage",
       "on-sale",
       "product-1color",
+      "product-1color-blush",
+      "product-1color-coral",
+      "product-1color-cream",
       "product-1color-featured",
+      "product-1color-featured-blush",
+      "product-1color-featured-coral",
+      "product-1color-featured-cream",
+      "product-1color-featured-sage",
+      "product-1color-sage",
       "product-2colors",
+      "product-2colors-blush",
+      "product-2colors-coral",
+      "product-2colors-cream",
       "product-2colors-front",
+      "product-2colors-sage",
       "product-3colors",
     ])
   })

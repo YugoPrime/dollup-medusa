@@ -1,0 +1,59 @@
+{
+  "slug": "product-2colors-sage",
+  "name": "Product · 2 Colors (Split + Back Overlay) — Sage",
+  "category": "single-product-multi-image",
+  "duration_seconds": 6,
+  "wave": 1,
+  "slots": [
+    {
+      "id": "front_a",
+      "hint": "front",
+      "label": "Front · color A",
+      "required": true
+    },
+    {
+      "id": "front_b",
+      "hint": "front",
+      "label": "Front · color B",
+      "required": true
+    },
+    {
+      "id": "back",
+      "hint": "back",
+      "label": "Back view (small, overlapping)",
+      "required": true
+    }
+  ],
+  "text_overrides": [
+    {
+      "id": "headline",
+      "default": "2 colors available",
+      "max_chars": 24
+    },
+    {
+      "id": "price",
+      "default": "Rs.0",
+      "max_chars": 12
+    },
+    {
+      "id": "sku",
+      "default": "IS0000",
+      "max_chars": 10
+    },
+    {
+      "id": "size_a",
+      "default": "S · M · L",
+      "max_chars": 22
+    },
+    {
+      "id": "size_b",
+      "default": "S · M · L",
+      "max_chars": 22
+    },
+    {
+      "id": "footer",
+      "default": "DM to ORDER",
+      "max_chars": 20
+    }
+  ]
+}

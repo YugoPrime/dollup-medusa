@@ -1,0 +1,43 @@
+{
+  "slug": "product-1color-blush",
+  "name": "Product · 1 Color (Big Front + Back Inset) — Blush",
+  "category": "single-product-multi-image",
+  "duration_seconds": 6,
+  "wave": 1,
+  "slots": [
+    {
+      "id": "front",
+      "hint": "front",
+      "label": "Front view",
+      "required": true
+    },
+    {
+      "id": "back",
+      "hint": "back",
+      "label": "Back view",
+      "required": true
+    }
+  ],
+  "text_overrides": [
+    {
+      "id": "price",
+      "default": "Rs.0",
+      "max_chars": 12
+    },
+    {
+      "id": "sku",
+      "default": "IS0000",
+      "max_chars": 10
+    },
+    {
+      "id": "size",
+      "default": "Size: S · M · L",
+      "max_chars": 28
+    },
+    {
+      "id": "footer",
+      "default": "DM to ORDER",
+      "max_chars": 20
+    }
+  ]
+}

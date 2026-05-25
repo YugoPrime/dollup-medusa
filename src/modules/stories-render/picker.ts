@@ -27,15 +27,42 @@ const SINGLE_IMAGE_ROTATION = [
   "just-arrived-editorial",
 ] as const
 
-// 1-color, front + back available: rotate between the split front|back layout
-// (product-1color), the cream featured-card layout with back-as-circle inset
-// (product-1color-featured), and the pampas-grass arch with back-bubble inset
-// (new-drop-arch, added 2026-05-21). All three share the same slot contract:
-// { front, back } — picker swaps purely by least-used / slotIndex for variety.
+// 1-color, front + back available: rotate between three layouts × four
+// palettes each, plus the original three (which use the canonical palette of
+// their family). All share the same slot contract { front, back }; the picker
+// swaps purely by least-used / slotIndex for variety.
+//
+// 2026-05-25: blush / cream / sage / coral palette siblings added for each of
+// product-1color, product-1color-featured, new-drop-arch. Same DOM, same
+// text contract; only the canvas + panel CSS differ.
 const ONE_COLOR_FRONT_BACK_ROTATION = [
   "product-1color",
+  "product-1color-blush",
+  "product-1color-cream",
+  "product-1color-sage",
+  "product-1color-coral",
   "product-1color-featured",
+  "product-1color-featured-blush",
+  "product-1color-featured-cream",
+  "product-1color-featured-sage",
+  "product-1color-featured-coral",
   "new-drop-arch",
+  "new-drop-arch-blush",
+  "new-drop-arch-cream",
+  "new-drop-arch-sage",
+  "new-drop-arch-coral",
+] as const
+
+// 2-color templates with a back image. Was a single template
+// (product-1color … sorry, product-2colors) until 2026-05-25 — palette
+// siblings added so consecutive 2-color products in the feed read distinct.
+// Same slot contract { front_a, front_b, back } across all five.
+const TWO_COLOR_BACK_ROTATION = [
+  "product-2colors",
+  "product-2colors-blush",
+  "product-2colors-cream",
+  "product-2colors-sage",
+  "product-2colors-coral",
 ] as const
 
 // 3+ colors. product-3colors needs a clean back; color-mood-rail (added
@@ -485,11 +512,25 @@ export function pickTemplate(
     const back =
       pickBack(colors[0], usedFor2) ??
       pickBackFromAnyOther(colors, 0, usedFor2)
-    if (a && b && back && !isSaturated(pickedSoFar, "product-2colors")) {
+    if (
+      a &&
+      b &&
+      back &&
+      TWO_COLOR_BACK_ROTATION.some((s) => !isSaturated(pickedSoFar, s))
+    ) {
+      // Palette rotation across the 5 siblings. With pickedSoFar use least-used
+      // so the feed alternates colours; otherwise fall back to slotIndex
+      // deterministic rotation (test back-compat — old tests expected
+      // product-2colors as the default head).
+      const slug = pickedSoFar
+        ? leastUsed(TWO_COLOR_BACK_ROTATION, pickedSoFar)
+        : TWO_COLOR_BACK_ROTATION[
+            slotIndex % TWO_COLOR_BACK_ROTATION.length
+          ]
       return {
-        template_slug: "product-2colors",
+        template_slug: slug,
         slot_inputs: { front_a: a, front_b: b, back },
-        text_overrides: buildTextOverrides("product-2colors", snapshot),
+        text_overrides: buildTextOverrides(slug, snapshot),
       }
     }
     if (a && b && !isSaturated(pickedSoFar, "product-2colors-front")) {
@@ -499,7 +540,7 @@ export function pickTemplate(
         text_overrides: buildTextOverrides("product-2colors-front", snapshot),
       }
     }
-    // Both 2-color templates saturated OR no distinct second front available
+    // All 2-color templates saturated OR no distinct second front available
     // → fall through to 1-color / rotation.
   }
 
