@@ -1,6 +1,7 @@
 import { MedusaError, MedusaService } from "@medusajs/framework/utils"
 
 import Lead from "./models/lead"
+import LeadList from "./models/lead-list"
 
 export type LeadDTO = {
   id: string
@@ -41,7 +42,7 @@ export function normalizePhone(value: string | null | undefined): string | null 
   return digits.slice(-8)
 }
 
-class LeadsModuleService extends MedusaService({ Lead }) {
+class LeadsModuleService extends MedusaService({ Lead, LeadList }) {
   async createLead(input: CreateLeadInput): Promise<LeadDTO> {
     const name = input.name?.trim() || null
     const phone = input.phone?.trim() || null
