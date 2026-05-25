@@ -18,6 +18,28 @@ export type CreateLeadInput = {
   name?: string | null
   phone?: string | null
   note?: string | null
+  list_id?: string
+}
+
+export type LeadListDTO = {
+  id: string
+  name: string
+  created_at: Date
+  updated_at: Date
+}
+
+export type LeadListWithCountDTO = LeadListDTO & { lead_count: number }
+
+export type CreateLeadListInput = { name: string }
+export type RenameLeadListInput = { id: string; name: string }
+export type DeleteLeadListInput = { id: string; move_to: string }
+
+export type UpdateLeadInput = {
+  id: string
+  name?: string | null
+  phone?: string | null
+  note?: string | null
+  list_id?: string
 }
 
 export type MatchAndUseInput = {
@@ -40,6 +62,17 @@ export function normalizePhone(value: string | null | undefined): string | null 
   const digits = value.replace(/\D/g, "")
   if (digits.length === 0) return null
   return digits.slice(-8)
+}
+
+function validateListName(name: string): string {
+  const trimmed = (name ?? "").trim()
+  if (trimmed.length < 1 || trimmed.length > 80) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      "List name must be 1..80 characters",
+    )
+  }
+  return trimmed
 }
 
 class LeadsModuleService extends MedusaService({ Lead, LeadList }) {
@@ -99,6 +132,93 @@ class LeadsModuleService extends MedusaService({ Lead, LeadList }) {
       deleteLeads: (id: string) => Promise<void>
     }
     await service.deleteLeads(id)
+  }
+
+  async createLeadList(input: CreateLeadListInput): Promise<LeadListDTO> {
+    const name = validateListName(input.name)
+    const service = this as unknown as {
+      createLeadLists: (input: CreateLeadListInput) => Promise<LeadListDTO>
+    }
+    return service.createLeadLists({ name })
+  }
+
+  async getLeadListsWithCounts(): Promise<LeadListWithCountDTO[]> {
+    const service = this as unknown as {
+      listLeadLists: (
+        filters: Record<string, unknown>,
+        config?: Record<string, unknown>,
+      ) => Promise<LeadListDTO[]>
+      listLeads: (
+        filters: Record<string, unknown>,
+        config?: Record<string, unknown>,
+      ) => Promise<Array<{ list_id: string }>>
+    }
+    const [lists, activeLeads] = await Promise.all([
+      service.listLeadLists({}, { order: { created_at: "ASC" } }),
+      service.listLeads({ used_at: null }, { take: 1000 }),
+    ])
+    const counts = new Map<string, number>()
+    for (const l of activeLeads) {
+      counts.set(l.list_id, (counts.get(l.list_id) ?? 0) + 1)
+    }
+    return lists.map((l) => ({ ...l, lead_count: counts.get(l.id) ?? 0 }))
+  }
+
+  async renameLeadList(input: RenameLeadListInput): Promise<LeadListDTO> {
+    const name = validateListName(input.name)
+    const service = this as unknown as {
+      updateLeadLists: (
+        input: { id: string; name: string },
+      ) => Promise<LeadListDTO>
+    }
+    return service.updateLeadLists({ id: input.id, name })
+  }
+
+  async deleteLeadList(input: DeleteLeadListInput): Promise<void> {
+    if (input.id === input.move_to) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        "Cannot move leads to the list being deleted",
+      )
+    }
+    const service = this as unknown as {
+      retrieveLeadList: (id: string) => Promise<LeadListDTO | null>
+      listLeadLists: (
+        filters: Record<string, unknown>,
+      ) => Promise<LeadListDTO[]>
+      listLeads: (
+        filters: Record<string, unknown>,
+        config?: Record<string, unknown>,
+      ) => Promise<Array<{ id: string }>>
+      updateLeads: (
+        input: { id: string; list_id: string },
+      ) => Promise<unknown>
+      deleteLeadLists: (id: string) => Promise<void>
+    }
+
+    const allLists = await service.listLeadLists({})
+    if (allLists.length <= 1) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        "Cannot delete the last remaining list",
+      )
+    }
+    const target = allLists.find((l) => l.id === input.move_to)
+    if (!target) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_FOUND,
+        "move_to list does not exist",
+      )
+    }
+
+    const leadsInList = await service.listLeads(
+      { list_id: input.id },
+      { take: 1000 },
+    )
+    for (const lead of leadsInList) {
+      await service.updateLeads({ id: lead.id, list_id: input.move_to })
+    }
+    await service.deleteLeadLists(input.id)
   }
 
   // Returns how many leads were marked used. Matches active (used_at IS NULL)
