@@ -37,3 +37,7 @@ render-sample-*.mp4
 
 # Local-render daemon working dir
 /logs/
+
+# One-off seed inputs (contain customer PII — never commit)
+/toys-seed.tsv
+*.local-seed.tsv
