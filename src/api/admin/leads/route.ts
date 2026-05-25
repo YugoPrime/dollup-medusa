@@ -12,7 +12,15 @@ export const GET = async (
   res: MedusaResponse,
 ) => {
   const service = req.scope.resolve<LeadsModuleService>(LEADS_MODULE)
-  const leads = await service.listActiveLeads()
+  const query = req.query as Record<string, unknown>
+  const listId =
+    typeof query.list_id === "string" && query.list_id.length > 0
+      ? query.list_id
+      : undefined
+  const usedRaw = typeof query.used === "string" ? query.used : undefined
+  const used =
+    usedRaw === "true" ? true : usedRaw === "false" ? false : undefined
+  const leads = await service.listActiveLeads({ list_id: listId, used })
   res.json({ leads })
 }
 
@@ -25,6 +33,7 @@ export const POST = async (
     name: typeof body.name === "string" ? body.name : null,
     phone: typeof body.phone === "string" ? body.phone : null,
     note: typeof body.note === "string" ? body.note : null,
+    list_id: typeof body.list_id === "string" ? body.list_id : undefined,
   }
 
   const service = req.scope.resolve<LeadsModuleService>(LEADS_MODULE)
