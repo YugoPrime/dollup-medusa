@@ -680,21 +680,37 @@ describe("pickTemplate", () => {
       ])
     })
 
-    it("cutout-spotlight is suppressed when a -r real shot exists (lifestyle wins)", () => {
-      // Product has both a cutout AND a real shot. The new rule (2026-05-19):
-      // real-shot products are stronger as lifestyle-overlay, so cutout is
-      // reserved for studio-only products with no real photography.
+    it("cutout-spotlight is eligible even when a -r real shot exists", () => {
+      // Until 2026-05-25 the picker suppressed cutout-spotlight whenever a
+      // real shot was present. That gate is gone — no template uses real
+      // shots anymore (2026-05-19 policy), so the original "real wins as
+      // lifestyle" rationale died. Cutout now joins the rotation pool
+      // whenever a cutout PNG exists, regardless of whether a real shot
+      // also exists. Slots 0..3 still resolve to the first four base
+      // templates by deterministic index, but the daily-guarantee branch
+      // (separate test below) will force cutout-spotlight on the first
+      // slot of a plan that hasn't shipped one yet.
       const s = snapshot({
         variants_in_stock: [color("pink", ["front", "real", "cutout"])],
         variant_in_stock_count: 1,
       })
-      const slugs = [0, 1, 2, 3].map((i) => pickTemplate(s, i)!.template_slug)
-      expect(slugs).toEqual([
-        "in-stock-hero",
-        "in-stock-hero-blush",
-        "lifestyle-overlay",
-        "in-stock-hero-cream",
-      ])
+      const slugs = [0, 1, 2, 3, 4, 5, 6].map((i) => pickTemplate(s, i)!.template_slug)
+      expect(slugs).toContain("cutout-spotlight")
+      expect(slugs).toContain("cutout-spotlight-v2")
+    })
+
+    it("DAILY GUARANTEE fires for cutout+real products (post-2026-05-25 gate removal)", () => {
+      // Regression guard for the 2026-05-25 fix. Before that, hasRealShot
+      // blocked the daily guarantee whenever a -real upload existed, and
+      // cutout-spotlight never appeared in published stories despite 239
+      // cutout PNGs being uploaded to R2.
+      const s = snapshot({
+        variants_in_stock: [color("pink", ["front", "real", "cutout"])],
+        variant_in_stock_count: 1,
+      })
+      const dayCounts = new Map<string, number>()
+      const picked = pickTemplate(s, 0, dayCounts)!
+      expect(picked.template_slug).toBe("cutout-spotlight")
     })
 
     it("cutout-spotlight still appears in the rotation when product has cutout but NO real shot", () => {

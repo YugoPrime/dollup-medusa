@@ -229,21 +229,6 @@ function pickCutout(colors: SnapshotVariant[]): string | null {
 }
 
 /**
- * True when any variant has a "-r" real / on-model shot. cutout-spotlight is
- * intentionally suppressed when a real shot exists — lifestyle-overlay gives
- * a stronger story for products with real photography. Cutout is the fallback
- * for studio-only products.
- */
-function hasRealShot(colors: SnapshotVariant[]): boolean {
-  for (const c of colors) {
-    for (const url of c.image_urls) {
-      if (classifyImageKind(url) === "real") return true
-    }
-  }
-  return false
-}
-
-/**
  * Returns the best image to plug into the lifestyle-overlay template.
  *
  * Per boutique policy (set 2026-05-19): real / on-model shots (`-r`, `-real`)
@@ -548,13 +533,16 @@ export function pickTemplate(
     }
   }
 
-  // Build the rotation pool dynamically. cutout-spotlight joins the pool when
-  // a -cutout PNG is available AND no real shot exists (real shots are stronger
-  // as lifestyle-overlay). Without this, products with cutouts would ALWAYS
-  // pick cutout-spotlight and the daily feed would lose visual variety once
-  // most of the catalog has cutouts uploaded.
+  // Build the rotation pool dynamically. cutout-spotlight joins the pool
+  // whenever a -cutout PNG is available. Until 2026-05-25 there was an
+  // additional `!hasRealShot()` gate (the rationale: real-shot products were
+  // "stronger" as lifestyle-overlay). That rationale died with the 2026-05-19
+  // policy that real shots are NEVER used in any story template — lifestyle-
+  // overlay now uses front shots like every other template. The gate was
+  // silently suppressing cutout-spotlight on most of the catalog (most
+  // products have a -real upload), so it was removed.
   const cutoutUrl = pickCutout(colors)
-  const cutoutEligible = cutoutUrl != null && !hasRealShot(colors)
+  const cutoutEligible = cutoutUrl != null
   // Both cutout-spotlight (v1, cream/blush soft) and cutout-spotlight-v2
   // (bold blush circle + italic-script typography) are valid layouts for
   // any product with a cutout. Both share the same `product_cutout` slot
