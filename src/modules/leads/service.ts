@@ -5,6 +5,7 @@ import LeadList from "./models/lead-list"
 
 export type LeadDTO = {
   id: string
+  list_id: string
   name: string | null
   phone: string | null
   note: string | null
