@@ -73,14 +73,27 @@ COPY .yarn .yarn
 RUN yarn install --immutable && \
     rm -rf .yarn/cache /root/.yarn/berry/cache /root/.cache/yarn 2>/dev/null || true
 
-# Copy source + build (backend + admin dashboard)
+# Copy source + build (backend + admin dashboard).
+# Bump Node's heap to 4GB — the admin Vite compile OOM'd at the 1.5GB default
+# (Coolify build 2026-05-26, log line "Reached heap limit Allocation failed").
+# Without this the admin build silently crashes mid-Vite, but `medusa build`
+# still returns 0 because the backend compile finished first → Docker keeps
+# going and ships an image with no admin/index.html, which then crash-loops
+# in prod with "Could not find index.html in the admin build directory".
 COPY . .
-RUN yarn build && \
+RUN NODE_OPTIONS="--max-old-space-size=4096" yarn build && \
     rm -rf .yarn/cache /root/.yarn/berry/cache /root/.cache/yarn 2>/dev/null || true
 
-# Ensure admin build is in the expected location
-RUN mkdir -p /app/public && \
-    cp -r /app/.medusa/server/public/admin /app/public/admin 2>/dev/null || true
+# Ensure admin build is in the expected location. Hard-fail the build if the
+# admin static assets are missing — better to fail Docker build than ship a
+# broken image that crash-loops in production.
+RUN set -e; \
+    mkdir -p /app/public; \
+    if [ ! -f /app/.medusa/server/public/admin/index.html ]; then \
+      echo "ERROR: /app/.medusa/server/public/admin/index.html is missing — admin compile likely OOM'd. Check the previous RUN step."; \
+      exit 1; \
+    fi; \
+    cp -r /app/.medusa/server/public/admin /app/public/admin
 
 EXPOSE 9000
 
