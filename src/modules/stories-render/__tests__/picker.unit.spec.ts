@@ -619,9 +619,11 @@ describe("pickTemplate", () => {
       expect(picked.slot_inputs.product_cutout).toBe("https://r2/pink-cutout.png")
     })
 
-    it("multi-color cascade still wins over cutout-spotlight (cutout is single-product editorial only)", () => {
-      // 2 colors with backs → product-2colors is the right call. The cutout
-      // template is for solo-product editorial moments, not multi-color carousels.
+    it("multi-color cascade always wins over cutout-spotlight (cutout is single-color only)", () => {
+      // 2026-05-26 policy: cutout-spotlight is reserved for SINGLE-COLOR
+      // products. Multi-color products with a cutout PNG still use their
+      // native multi-color template (product-2colors / 3colors / etc).
+      // The daily guarantee at the top of pickTemplate respects this.
       const s = snapshot({
         variants_in_stock: [
           color("pink", ["front", "back", "cutout"]),
@@ -632,7 +634,10 @@ describe("pickTemplate", () => {
       expect(pickTemplate(s, 0)!.template_slug).toBe("product-2colors")
     })
 
-    it("on-sale still wins over cutout-spotlight", () => {
+    it("on-sale wins over cutout-spotlight when NO per-day count map is passed (back-compat)", () => {
+      // When the count map IS passed (production batch render), the 2026-05-26
+      // daily guarantee promotes cutout ABOVE on-sale on the first eligible
+      // slot — see the "wins over on-sale and new-arrival" test below.
       const s = snapshot({
         price_mur: 990,
         compare_at_price_mur: 1490,
@@ -642,9 +647,9 @@ describe("pickTemplate", () => {
       expect(pickTemplate(s, 0)!.template_slug).toBe("on-sale")
     })
 
-    it("new-arrival still wins over cutout-spotlight for fresh products", () => {
-      // New arrival is the rarest signal; preserve it when set so the NEW
-      // stamp doesn't get hidden behind a cutout shot.
+    it("new-arrival wins over cutout-spotlight when NO per-day count map is passed (back-compat)", () => {
+      // Same caveat as on-sale above: this is the count-map-free path. With
+      // a count map, the daily guarantee fires before new-arrival can match.
       const s = snapshot({
         variants_in_stock: [color("pink", ["front", "cutout"])],
         variant_in_stock_count: 1,
@@ -782,6 +787,57 @@ describe("pickTemplate", () => {
       // V2 already fired → no guarantee bump → normal rotation picks.
       expect(picked.template_slug).not.toBe("cutout-spotlight")
       expect(picked.template_slug).not.toBe("cutout-spotlight-v2")
+    })
+
+    it("DAILY GUARANTEE 2026-05-26: SKIPPED for multi-color cutout-eligible products (single-color only)", () => {
+      // Boutique policy 2026-05-26: cutout-spotlight is a single-product
+      // editorial layout — multi-color products belong in product-2colors /
+      // product-3colors / color-mood-rail. The guarantee MUST NOT hijack a
+      // multi-color story to fire cutout, even though the cutout PNG exists.
+      const s = snapshot({
+        variants_in_stock: [
+          { id: "red", sku: "IS2008-M-R", color: "Red", color_code: null, sizes: ["S", "M"], image_urls: ["https://r2/IS2008-red-front.jpg", "https://r2/IS2008-red-back.jpg", "https://r2/IS2008-cutout.png"] },
+          { id: "blue", sku: "IS2008-M-B", color: "Blue", color_code: null, sizes: ["M"], image_urls: ["https://r2/IS2008-blue-front.jpg", "https://r2/IS2008-blue-back.jpg"] },
+        ],
+        variant_in_stock_count: 2,
+      })
+      const dayCounts = new Map<string, number>()
+      const picked = pickTemplate(s, 0, dayCounts)!
+      expect(picked.template_slug).not.toBe("cutout-spotlight")
+      expect(picked.template_slug).not.toBe("cutout-spotlight-v2")
+    })
+
+    it("DAILY GUARANTEE 2026-05-26: fires for single-color product with back image (was unreachable before)", () => {
+      // Real-world bug found 2026-05-26: 4/7 cutout-eligible slots in
+      // tomorrow's plan, 0 cutouts picked. Root cause: the guarantee sat
+      // AFTER the 1-color-front-back branch which returns early. Any single-
+      // color product with a back image exited before reaching cutout.
+      // Promotion of the guarantee + single-color constraint fixes this.
+      const s = snapshot({
+        variants_in_stock: [color("pink", ["front", "back", "cutout"])],
+        variant_in_stock_count: 1,
+      })
+      const dayCounts = new Map<string, number>()
+      const picked = pickTemplate(s, 0, dayCounts)!
+      expect(picked.template_slug).toBe("cutout-spotlight")
+      expect(picked.slot_inputs.product_cutout).toBe("https://r2/pink-cutout.png")
+    })
+
+    it("DAILY GUARANTEE 2026-05-26: wins over on-sale and new-arrival for single-color first eligible slot", () => {
+      // The promotion intentionally hijacks on-sale / new-arrival when this
+      // is the day's only cutout chance. Sales are still shown in *other*
+      // slots; the policy is "≥1 cutout per day if a single-color eligible
+      // product exists" not "no cutout if anything else is competing".
+      const s = snapshot({
+        variants_in_stock: [color("pink", ["front", "back", "cutout"])],
+        variant_in_stock_count: 1,
+        is_new_arrival: true,
+        compare_at_price_mur: 9999,
+        price_mur: 4999,
+      })
+      const dayCounts = new Map<string, number>()
+      const picked = pickTemplate(s, 0, dayCounts)!
+      expect(picked.template_slug).toBe("cutout-spotlight")
     })
   })
 

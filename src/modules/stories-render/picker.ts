@@ -439,6 +439,35 @@ export function pickTemplate(
   const leadFront = pickFront(colors[0])
   if (!leadFront) return null
 
+  // Daily cutout guarantee — runs BEFORE every other branch, but ONLY for
+  // single-color products. Until 2026-05-26 this lived at the bottom of the
+  // function inside the single-image fallback, so any product with 2+ colors
+  // / back image / on-sale / new-arrival returned via its native branch first
+  // and never reached cutout (verified 2026-05-26: 4/7 cutout-eligible slots,
+  // 0 cutouts picked). Promoted up so the first single-color cutout-eligible
+  // product of the day claims cutout-spotlight, hijacking on-sale / new-arrival
+  // / 1-color-front-back. Multi-color products are intentionally excluded —
+  // cutout-spotlight is an editorial single-product layout; multi-color
+  // products belong in product-2colors / product-3colors / color-mood-rail.
+  // Cost: days where every cutout-eligible product is multi-color ship zero
+  // cutouts. Tradeoff accepted 2026-05-26.
+  const cutoutUrlEarly = pickCutout(colors)
+  if (pickedSoFar && cutoutUrlEarly && colors.length === 1) {
+    const cutoutCount =
+      countOf(pickedSoFar, "cutout-spotlight") +
+      countOf(pickedSoFar, "cutout-spotlight-v2")
+    if (cutoutCount === 0) {
+      const cutoutSlug = isSaturated(pickedSoFar, "cutout-spotlight")
+        ? "cutout-spotlight-v2"
+        : "cutout-spotlight"
+      return {
+        template_slug: cutoutSlug,
+        slot_inputs: { product_cutout: cutoutUrlEarly },
+        text_overrides: buildTextOverrides(cutoutSlug, snapshot),
+      }
+    }
+  }
+
   // on-sale is exempt from the cap — sales are rare and high-value; capping
   // them would mean hiding a price drop from the feed.
   if (
@@ -593,27 +622,11 @@ export function pickTemplate(
     ? [...SINGLE_IMAGE_ROTATION, "cutout-spotlight", "cutout-spotlight-v2"]
     : SINGLE_IMAGE_ROTATION
 
-  // Daily guarantee: when a count map is present AND this product is
-  // cutout-eligible AND no cutout has fired yet today, FORCE cutout-spotlight
-  // (or v2) for this slot. Without this, cutout was just 2/7 of the rotation
-  // and on most days the daily feed had zero cutout stories — even though
-  // every product in the catalog has a cutout PNG.
-  //
-  // Picks v1 first; if v1 is already at cap (shouldn't happen since count is 0
-  // when guarantee fires, but defensive) falls through to v2.
-  if (pickedSoFar && cutoutEligible) {
-    const cutoutCount = countOf(pickedSoFar, "cutout-spotlight") + countOf(pickedSoFar, "cutout-spotlight-v2")
-    if (cutoutCount === 0 && cutoutUrl) {
-      const cutoutSlug = isSaturated(pickedSoFar, "cutout-spotlight")
-        ? "cutout-spotlight-v2"
-        : "cutout-spotlight"
-      return {
-        template_slug: cutoutSlug,
-        slot_inputs: { product_cutout: cutoutUrl },
-        text_overrides: buildTextOverrides(cutoutSlug, snapshot),
-      }
-    }
-  }
+  // (The daily cutout guarantee runs at the top of pickTemplate now — see
+  // comment near line 442. Down here cutout-spotlight just sits in the
+  // single-image rotation pool alongside the other 1-photo templates so a
+  // 1-color-no-back-no-newarrival product can still pick it naturally if the
+  // guarantee already claimed today's cutout from someone else.)
 
   // When the caller passes a per-day count map, prefer the least-used template
   // in the pool. Without it, fall back to the deterministic slotIndex rotation
