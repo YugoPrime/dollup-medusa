@@ -332,7 +332,11 @@ function buildTextOverrides(
       if (sku) out.sku = sku
       return out
     }
-    case "new-drop-arch": {
+    case "new-drop-arch":
+    case "new-drop-arch-blush":
+    case "new-drop-arch-cream":
+    case "new-drop-arch-sage":
+    case "new-drop-arch-coral": {
       out.price = price
       out.size = collectSizes(snapshot, 28)
       out.headline = productNameLabel(snapshot, 28)
@@ -358,6 +362,10 @@ function buildTextOverrides(
       return out
     }
     case "product-2colors":
+    case "product-2colors-blush":
+    case "product-2colors-cream":
+    case "product-2colors-sage":
+    case "product-2colors-coral":
     case "product-2colors-front": {
       // Per-color size pills — variants_in_stock[0..1] match the front_a/front_b
       // slots that pickTemplate fills below, so the size badge on each card
@@ -382,7 +390,15 @@ function buildTextOverrides(
     }
     case "new-arrival":
     case "product-1color":
+    case "product-1color-blush":
+    case "product-1color-cream":
+    case "product-1color-sage":
+    case "product-1color-coral":
     case "product-1color-featured":
+    case "product-1color-featured-blush":
+    case "product-1color-featured-cream":
+    case "product-1color-featured-sage":
+    case "product-1color-featured-coral":
     case "many-photos": {
       out.price = price
       out.size = collectSizes(snapshot, 28)
@@ -390,6 +406,15 @@ function buildTextOverrides(
       return out
     }
     default:
+      // Unknown slug → empty overrides means the template renders with its
+      // `default` placeholder values (Rs.0 / IS0000 / etc). Loud warn so a
+      // missed switch arm shows up in render logs instead of shipping
+      // garbage. Hit 2026-05-26 when 13 palette-variant slugs (product-1color-
+      // blush/cream/sage/coral, product-1color-featured-*, new-drop-arch-*,
+      // product-2colors-*) were added to templates but not to this switch.
+      console.warn(
+        `[stories-picker] buildTextOverrides: no case for slug "${slug}" — rendering with template defaults (likely Rs.0 / IS0000). Add a switch arm.`,
+      )
       return out
   }
 }

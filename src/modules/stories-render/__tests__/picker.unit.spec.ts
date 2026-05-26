@@ -1384,4 +1384,116 @@ describe("pickTemplate", () => {
       expect(p.slot_inputs.back).toBe("https://r2/pink-b.jpg")
     })
   })
+
+  describe("2026-05-26: palette variants populate text_overrides (regression for Rs.0 / IS0000 bug)", () => {
+    // Bug shipped on 2026-05-26: the rendered MP4 for product-1color-blush
+    // showed "Rs.0" and "IS0000" — the template's default placeholder values
+    // — because buildTextOverrides only had a case arm for the base slug
+    // (product-1color), not for the palette siblings. They fell through to
+    // the default branch which returned {} → template rendered with defaults.
+    // These regressions assert every palette sibling gets the same overrides
+    // its base does.
+
+    const ONE_COLOR_PALETTE_SLUGS = [
+      "product-1color-blush",
+      "product-1color-cream",
+      "product-1color-sage",
+      "product-1color-coral",
+      "product-1color-featured-blush",
+      "product-1color-featured-cream",
+      "product-1color-featured-sage",
+      "product-1color-featured-coral",
+    ] as const
+
+    const NEW_DROP_ARCH_PALETTE_SLUGS = [
+      "new-drop-arch-blush",
+      "new-drop-arch-cream",
+      "new-drop-arch-sage",
+      "new-drop-arch-coral",
+    ] as const
+
+    const TWO_COLORS_PALETTE_SLUGS = [
+      "product-2colors-blush",
+      "product-2colors-cream",
+      "product-2colors-sage",
+      "product-2colors-coral",
+    ] as const
+
+    // Walk the deterministic (no-count-map) rotation and find the first slot
+    // index where the picker lands on the requested slug. Returns null if
+    // the slug never appears in 60 slots — useful for skipping cases where
+    // rotation order doesn't reach a palette in the test snapshot.
+    function findSlotIndexFor(s: ProductSnapshot, slug: string): number | null {
+      for (let i = 0; i < 60; i++) {
+        const p = pickTemplate(s, i)
+        if (p?.template_slug === slug) return i
+      }
+      return null
+    }
+
+    it.each(ONE_COLOR_PALETTE_SLUGS)(
+      "%s populates price + size + sku (not template defaults)",
+      (slug) => {
+        const s = snapshot({
+          name: "Satin Dress",
+          price_mur: 1290,
+          variants_in_stock: [color("pink", ["front", "back"], { sku: "IS2161-M-PINK" })],
+          variant_in_stock_count: 1,
+        })
+        const idx = findSlotIndexFor(s, slug)
+        expect(idx).not.toBeNull()
+        // No count map = deterministic slot-index rotation. The slug at idx
+        // by deterministic rotation is what findSlotIndexFor returned.
+        const p = pickTemplate(s, idx!)!
+        expect(p.template_slug).toBe(slug)
+        expect(p.text_overrides.price).toBe("Rs.1290")
+        expect(p.text_overrides.size).toBe("Size: S · M")
+        expect(p.text_overrides.sku).toBe("IS2161")
+      },
+    )
+
+    it.each(NEW_DROP_ARCH_PALETTE_SLUGS)(
+      "%s populates price + size + headline + sku",
+      (slug) => {
+        const s = snapshot({
+          name: "Satin Maxi Dress",
+          price_mur: 1290,
+          variants_in_stock: [color("pink", ["front", "back"], { sku: "IS2008-M-PINK" })],
+          variant_in_stock_count: 1,
+        })
+        const idx = findSlotIndexFor(s, slug)
+        expect(idx).not.toBeNull()
+        const p = pickTemplate(s, idx!)!
+        expect(p.template_slug).toBe(slug)
+        expect(p.text_overrides.price).toBe("Rs.1290")
+        expect(p.text_overrides.size).toBe("Size: S · M")
+        expect(p.text_overrides.headline).toBe("Satin Maxi Dress")
+        expect(p.text_overrides.sku).toBe("IS2008")
+      },
+    )
+
+    it.each(TWO_COLORS_PALETTE_SLUGS)(
+      "%s populates price + size_a + size_b + sku",
+      (slug) => {
+        const s = snapshot({
+          name: "Two Color Dress",
+          price_mur: 1290,
+          variants_in_stock: [
+            color("red", ["front", "back"], { sku: "IS2058-M-RED", sizes: ["S", "M"] }),
+            color("blue", ["front", "back"], { sku: "IS2058-M-BLUE", sizes: ["M", "L"] }),
+          ],
+          variant_in_stock_count: 2,
+        })
+        const idx = findSlotIndexFor(s, slug)
+        expect(idx).not.toBeNull()
+        const p = pickTemplate(s, idx!)!
+        expect(p.template_slug).toBe(slug)
+        expect(p.text_overrides.price).toBe("Rs.1290")
+        expect(p.text_overrides.size_a).toBe("S · M")
+        expect(p.text_overrides.size_b).toBe("M · L")
+        expect(p.text_overrides.sku).toBe("IS2058")
+      },
+    )
+
+  })
 })
