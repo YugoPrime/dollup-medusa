@@ -72,6 +72,10 @@ export const PATCH = async (
           body.category_id === undefined
             ? undefined
             : (body.category_id as string | null),
+        color_images:
+          body.color_images === undefined
+            ? undefined
+            : (body.color_images as Record<string, string> | null),
       },
       { reason: body.reason === undefined ? undefined : String(body.reason) },
     )

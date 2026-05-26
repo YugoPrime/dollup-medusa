@@ -560,6 +560,7 @@ class SourcingModuleService extends MedusaService({
       notes: string | null
       position: number
       uploaded_image_r2_key: string | null
+      color_images: Record<string, string> | null
       ref: string | null
       selling_price_mur: string | number | null
       category_id: string | null
@@ -589,6 +590,7 @@ class SourcingModuleService extends MedusaService({
       source_type?: "alibaba" | "pdf" | "manual"
       uploaded_image_r2_key?: string | null
       category_id?: string | null
+      color_images?: Record<string, string> | null
     },
     opts: { reason?: string } = {},
   ) {
@@ -613,6 +615,20 @@ class SourcingModuleService extends MedusaService({
     if (input.uploaded_image_r2_key !== undefined)
       patch.uploaded_image_r2_key = input.uploaded_image_r2_key
     if (input.category_id !== undefined) patch.category_id = input.category_id
+    if (input.color_images !== undefined) {
+      // Normalize: drop empty/null entries; null whole map if it becomes empty
+      const ci = input.color_images
+      if (ci === null) {
+        patch.color_images = null
+      } else {
+        const cleaned: Record<string, string> = {}
+        for (const [k, v] of Object.entries(ci)) {
+          if (typeof v === "string" && v.length > 0) cleaned[k] = v
+        }
+        patch.color_images =
+          Object.keys(cleaned).length === 0 ? null : cleaned
+      }
+    }
 
     const oldCost = Number(item.cost_usd)
     const newCost = input.cost_usd
@@ -962,6 +978,7 @@ class SourcingModuleService extends MedusaService({
       selling_price_mur: string | number | null
       scraped_image_url: string | null
       uploaded_image_r2_key: string | null
+      color_images: Record<string, string> | null
       category_id: string | null
       published_product_id: string | null
       ref: string | null
@@ -1034,6 +1051,16 @@ class SourcingModuleService extends MedusaService({
             ]
           : [{ title: "Size", values: sizes }]
 
+        const r2Base = r2PublicUrl.replace(/\/$/, "")
+        const colorImageUrls: Record<string, string> = {}
+        if (item.color_images && typeof item.color_images === "object") {
+          for (const [color, key] of Object.entries(item.color_images)) {
+            if (typeof key === "string" && key.length > 0) {
+              colorImageUrls[color] = `${r2Base}/${key}`
+            }
+          }
+        }
+
         const productVariants = usable.map((v) => {
           const priceMur =
             v.override_price_mur !== null
@@ -1043,6 +1070,8 @@ class SourcingModuleService extends MedusaService({
           const variantOptions: Record<string, string> = hasColors
             ? { Color: v.color ?? "", Size: v.size }
             : { Size: v.size }
+          const variantImageUrl =
+            v.color && colorImageUrls[v.color] ? colorImageUrls[v.color] : null
           return {
             title: v.color ? `${v.color} / ${v.size}` : v.size,
             sku,
@@ -1054,12 +1083,23 @@ class SourcingModuleService extends MedusaService({
                 currency_code: "mur",
               },
             ],
+            ...(variantImageUrl
+              ? { metadata: { image_urls: [variantImageUrl] } }
+              : {}),
           }
         })
 
-        const imageUrl = item.uploaded_image_r2_key
-          ? `${r2PublicUrl.replace(/\/$/, "")}/${item.uploaded_image_r2_key}`
+        const primaryImageUrl = item.uploaded_image_r2_key
+          ? `${r2Base}/${item.uploaded_image_r2_key}`
           : item.scraped_image_url ?? null
+
+        // Build product images list: primary first (becomes thumbnail), then
+        // each unique color image. Storefront swaps via variant.metadata.image_url.
+        const imageList: string[] = []
+        if (primaryImageUrl) imageList.push(primaryImageUrl)
+        for (const url of Object.values(colorImageUrls)) {
+          if (!imageList.includes(url)) imageList.push(url)
+        }
 
         const productInput = {
           title: (item.working_name && item.working_name.trim()) || assignedRef,
@@ -1071,8 +1111,11 @@ class SourcingModuleService extends MedusaService({
           ...(item.category_id
             ? { categories: [{ id: item.category_id }] }
             : {}),
-          ...(imageUrl
-            ? { images: [{ url: imageUrl }], thumbnail: imageUrl }
+          ...(imageList.length > 0
+            ? {
+                images: imageList.map((url) => ({ url })),
+                thumbnail: imageList[0],
+              }
             : {}),
         }
         const { result: prodResult } = await createProductsWorkflow(

@@ -17,6 +17,10 @@ const DraftItem = model.define("DraftItem", {
   notes: model.text().nullable(),
   position: model.number().default(0),
   uploaded_image_r2_key: model.text().nullable(),
+  // Map of color name -> R2 key for per-color hero image. JSON column.
+  // Empty/null means no per-color images; storefront falls back to the
+  // product's primary image (uploaded_image_r2_key / scraped_image_url).
+  color_images: model.json().nullable(),
   // Stage B additions
   ref: model.text().nullable(),
   selling_price_mur: model.number().nullable(),
