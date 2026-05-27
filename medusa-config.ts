@@ -39,21 +39,28 @@ module.exports = defineConfig({
         redisUrl: process.env.EVENTS_REDIS_URL || process.env.REDIS_URL,
       },
     },
-    {
-      resolve: "@medusajs/medusa/locking",
-      options: {
-        providers: [
+    // locking-redis is only registered when a Redis URL is available so the
+    // backend boots cleanly in test environments that have no Redis server.
+    ...(process.env.LOCKING_REDIS_URL || process.env.REDIS_URL
+      ? [
           {
-            resolve: "@medusajs/medusa/locking-redis",
-            id: "locking-redis",
-            is_default: true,
+            resolve: "@medusajs/medusa/locking",
             options: {
-              redisUrl: process.env.LOCKING_REDIS_URL || process.env.REDIS_URL,
+              providers: [
+                {
+                  resolve: "@medusajs/medusa/locking-redis",
+                  id: "locking-redis",
+                  is_default: true,
+                  options: {
+                    redisUrl:
+                      process.env.LOCKING_REDIS_URL || process.env.REDIS_URL,
+                  },
+                },
+              ],
             },
           },
-        ],
-      },
-    },
+        ]
+      : []),
     {
       // System payment provider (COD) auto-registers as pp_system_default.
       resolve: "@medusajs/medusa/payment",
