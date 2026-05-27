@@ -2,10 +2,13 @@ import type {
   AuthenticatedMedusaRequest,
   MedusaResponse,
 } from "@medusajs/framework/http"
+import { Modules, ContainerRegistrationKeys } from "@medusajs/framework/utils"
 import { createProductsWorkflow } from "@medusajs/medusa/core-flows"
 
 import { PREORDER_MODULE } from "../../../../modules/preorder"
 import type PreorderModuleService from "../../../../modules/preorder/service"
+
+const PREORDER_SHIPPING_PROFILE_NAME = "Pre-Order Shipping"
 
 type CreatePreorderProductBody = {
   title: string
@@ -15,13 +18,21 @@ type CreatePreorderProductBody = {
   description?: string
   colors?: string[]
   sizes?: string[]
-  salesChannelId?: string
 }
 
 export const POST = async (
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
 ) => {
+  const PREORDER_SALES_CHANNEL_ID = process.env.PREORDER_SALES_CHANNEL_ID
+  if (!PREORDER_SALES_CHANNEL_ID) {
+    res.status(500).json({
+      message:
+        "PREORDER_SALES_CHANNEL_ID env var is not set on the backend. Cannot create pre-order products without a sales channel binding.",
+    })
+    return
+  }
+
   const body = (req.body ?? {}) as Partial<CreatePreorderProductBody>
 
   const errors: string[] = []
@@ -45,6 +56,22 @@ export const POST = async (
   const svc = req.scope.resolve<PreorderModuleService>(PREORDER_MODULE)
   const preview = await svc.previewPrice({ sheinPriceUsd: body.sheinPriceUsd! })
   const settings = await svc.getSettings()
+
+  // Look up the Pre-Order shipping profile so the product's variants get the
+  // correct fulfillment routing. Falls back to creating the product without an
+  // explicit profile if setup-preorder-shipping.ts hasn't been run yet, in
+  // which case the variant will land on the default profile and shipping at
+  // checkout will silently use apex options. We log loudly so this is caught.
+  const fulfillmentService = req.scope.resolve(Modules.FULFILLMENT)
+  const [preorderProfile] = await fulfillmentService.listShippingProfiles({
+    name: PREORDER_SHIPPING_PROFILE_NAME,
+  })
+  const logger = req.scope.resolve(ContainerRegistrationKeys.LOGGER) as any
+  if (!preorderProfile) {
+    logger.warn?.(
+      `[preorder/products POST] Pre-Order shipping profile "${PREORDER_SHIPPING_PROFILE_NAME}" not found. Run yarn medusa exec ./src/scripts/setup-preorder-shipping.ts. Product will be created on the default shipping profile.`,
+    )
+  }
 
   const colors = body.colors?.length ? body.colors : ["Default"]
   const sizes = body.sizes?.length ? body.sizes : ["One Size"]
@@ -90,9 +117,10 @@ export const POST = async (
             preorder_eta_max_days: settings.eta_max_days,
             preorder_priced_at: new Date().toISOString(),
           },
-          sales_channels: body.salesChannelId
-            ? [{ id: body.salesChannelId }]
-            : undefined,
+          sales_channels: [{ id: PREORDER_SALES_CHANNEL_ID }],
+          ...(preorderProfile
+            ? { shipping_profile_id: preorderProfile.id }
+            : {}),
         },
       ],
     },
@@ -100,4 +128,73 @@ export const POST = async (
 
   const created = (result.result as { id: string }[])[0]
   res.json({ product: created, preview })
+}
+
+/**
+ * GET /admin/preorder/products
+ *
+ * Lists all preorder products (any status) for the admin list view. Filters
+ * by the Pre-Order sales channel — since the channel is dedicated to preorder
+ * products, channel membership is a reliable isolation gate (more reliable
+ * than jsonb metadata filtering in Medusa v2 query.graph).
+ *
+ * Belt-and-suspenders: also checks metadata.is_preorder===true client-side so
+ * a stray non-preorder product in the channel can't pollute the list.
+ *
+ * Returns lightweight fields — admin list only needs thumb, title, MUR price,
+ * SHEIN URL (from metadata), status, created_at.
+ */
+export const GET = async (
+  req: AuthenticatedMedusaRequest,
+  res: MedusaResponse,
+) => {
+  const PREORDER_SALES_CHANNEL_ID = process.env.PREORDER_SALES_CHANNEL_ID
+  if (!PREORDER_SALES_CHANNEL_ID) {
+    res.status(500).json({
+      message: "PREORDER_SALES_CHANNEL_ID env var is not set on the backend.",
+    })
+    return
+  }
+
+  const query = req.scope.resolve(ContainerRegistrationKeys.QUERY)
+
+  const limit = Math.min(Number(req.query.limit ?? 100), 200)
+  const offset = Math.max(Number(req.query.offset ?? 0), 0)
+
+  const { data } = await query.graph({
+    entity: "product",
+    fields: [
+      "id",
+      "title",
+      "handle",
+      "thumbnail",
+      "status",
+      "created_at",
+      "metadata",
+      "sales_channels.id",
+      "variants.id",
+      "variants.prices.amount",
+      "variants.prices.currency_code",
+    ],
+    filters: {
+      sales_channels: { id: PREORDER_SALES_CHANNEL_ID },
+    } as any,
+    pagination: {
+      take: limit,
+      skip: offset,
+      order: { created_at: "DESC" },
+    },
+  })
+
+  const products = (data as any[]).filter((p) => {
+    const meta = (p?.metadata ?? null) as Record<string, unknown> | null
+    return meta?.is_preorder === true
+  })
+
+  res.json({
+    products,
+    count: products.length,
+    limit,
+    offset,
+  })
 }
