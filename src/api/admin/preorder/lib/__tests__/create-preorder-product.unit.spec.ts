@@ -68,4 +68,42 @@ describe("validateBookmarkletInput", () => {
       /at least one size/i,
     )
   })
+
+  it("accepts color without sheinGoodsId — derives from sheinUrl", () => {
+    const input = {
+      ...valid,
+      colors: [
+        {
+          name: "Orange",
+          sheinUrl: "https://shein.com/Foo-p-12345.html",
+          // sheinGoodsId omitted
+          images: ["https://img.ltwebstatic.com/x.jpg"],
+        },
+      ],
+    }
+    expect(() => validateBookmarkletInput(input)).not.toThrow()
+  })
+
+  it("rejects when colors length exceeds 20", () => {
+    const bad = {
+      ...valid,
+      colors: Array.from({ length: 21 }, (_, i) => ({
+        name: `c${i}`,
+        sheinUrl: "https://shein.com/x-p-1.html",
+        images: ["https://img.ltwebstatic.com/x.jpg"],
+      })),
+    }
+    expect(() => validateBookmarkletInput(bad)).toThrow(/max 20/i)
+  })
+
+  it("rejects when sheinPriceUsd is absurdly large", () => {
+    expect(() =>
+      validateBookmarkletInput({ ...valid, sheinPriceUsd: 100000 }),
+    ).toThrow(/<= 10000/)
+  })
 })
+
+// TODO(preorder): add shape-level tests for the workflow input
+// (variant fan-out, productImages flat-mapping, thumbnail pick,
+//  per-color metadata structure). Blocked on cleanly mocking
+// createProductsWorkflow + ContainerRegistrationKeys.LINK.

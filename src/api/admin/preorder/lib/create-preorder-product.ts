@@ -11,7 +11,7 @@ const SHEIN_CDN_REGEX = /^https:\/\/img\.ltwebstatic\.com\//
 export type CreatePreorderColor = {
   name: string
   sheinUrl: string
-  sheinGoodsId: string
+  sheinGoodsId?: string  // derived from sheinUrl when missing
   images: string[]
 }
 
@@ -26,7 +26,7 @@ export type CreatePreorderProductInput = {
 }
 
 export type CreatePreorderProductResult = {
-  product: { id: string; handle: string }
+  product: { id: string; handle: string } & Record<string, unknown>
   preview: {
     sheinPriceMur: number
     finalPriceMur: number
@@ -36,6 +36,11 @@ export type CreatePreorderProductResult = {
   colorCount: number
 }
 
+function deriveGoodsIdFromUrl(url: string): string {
+  const m = url.match(/-p-(\d+)\.html/)
+  return m ? m[1] : ""
+}
+
 /**
  * Pure input validator. Exported separately so it can be unit-tested without
  * spinning up the container.
@@ -43,13 +48,19 @@ export type CreatePreorderProductResult = {
 export function validateBookmarkletInput(input: unknown): asserts input is CreatePreorderProductInput {
   if (!input || typeof input !== "object") throw new Error("input must be an object")
   const i = input as Record<string, any>
-  if (!i.title || typeof i.title !== "string") throw new Error("title required")
+  if (typeof i.title !== "string" || !i.title.trim()) throw new Error("title required")
+  if (i.title.length > 255) throw new Error("title too long (max 255 chars)")
   if (!i.sheinUrl || typeof i.sheinUrl !== "string") throw new Error("sheinUrl required")
-  if (!/(^https?:\/\/)(m\.)?shein\.com\//i.test(i.sheinUrl)) {
+  if (!/^https?:\/\/(?:[a-z]+\.)?shein\.com\//i.test(i.sheinUrl)) {
     throw new Error("sheinUrl must be a shein.com URL")
   }
-  if (typeof i.sheinPriceUsd !== "number" || !(i.sheinPriceUsd > 0)) {
-    throw new Error("sheinPriceUsd must be a positive number")
+  if (
+    typeof i.sheinPriceUsd !== "number" ||
+    !Number.isFinite(i.sheinPriceUsd) ||
+    i.sheinPriceUsd <= 0 ||
+    i.sheinPriceUsd > 10000
+  ) {
+    throw new Error("sheinPriceUsd must be a finite positive number <= 10000")
   }
   if (!Array.isArray(i.sizes) || i.sizes.length === 0) {
     throw new Error("sizes: at least one size required")
@@ -64,7 +75,6 @@ export function validateBookmarkletInput(input: unknown): asserts input is Creat
     if (!c || typeof c !== "object") throw new Error("each color must be an object")
     if (!c.name || typeof c.name !== "string") throw new Error("color.name required")
     if (!c.sheinUrl || typeof c.sheinUrl !== "string") throw new Error("color.sheinUrl required")
-    if (!c.sheinGoodsId || typeof c.sheinGoodsId !== "string") throw new Error("color.sheinGoodsId required")
     if (!Array.isArray(c.images) || c.images.length === 0) {
       throw new Error(`color "${c.name}" must have at least one image`)
     }
@@ -73,6 +83,19 @@ export function validateBookmarkletInput(input: unknown): asserts input is Creat
         throw new Error(`color "${c.name}" image URLs must be on img.ltwebstatic.com`)
       }
     }
+  }
+  if (i.colors.length > 20) throw new Error("colors: max 20")
+  if (i.sizes.length > 15) throw new Error("sizes: max 15")
+  for (const c of i.colors) {
+    if (c.images.length > 20) throw new Error(`color "${c.name}": max 20 images`)
+  }
+  const colorNames = i.colors.map((c: any) => c.name.toLowerCase().trim())
+  if (new Set(colorNames).size !== colorNames.length) {
+    throw new Error("colors: duplicate color names")
+  }
+  const sizeSet = i.sizes.map((s: string) => s.trim())
+  if (new Set(sizeSet).size !== sizeSet.length) {
+    throw new Error("sizes: duplicate values")
   }
 }
 
@@ -104,8 +127,9 @@ export async function createPreorderProduct(
     )
   }
 
-  const variants = input.colors.flatMap((color) =>
-    input.sizes.map((size) => ({
+  const variants = input.colors.flatMap((color) => {
+    const goodsId = color.sheinGoodsId || deriveGoodsIdFromUrl(color.sheinUrl)
+    return input.sizes.map((size) => ({
       title: `${color.name} / ${size}`,
       sku: undefined,
       options: { Color: color.name, Size: size },
@@ -114,10 +138,10 @@ export async function createPreorderProduct(
       metadata: {
         image_urls: color.images,
         shein_url: color.sheinUrl,
-        shein_goods_id: color.sheinGoodsId,
+        shein_goods_id: goodsId,
       },
-    })),
-  )
+    }))
+  })
 
   const handle =
     input.title
@@ -164,7 +188,7 @@ export async function createPreorderProduct(
     },
   })
 
-  const created = (result.result as Array<{ id: string; handle: string }>)[0]
+  const created = (result.result as unknown as Array<{ id: string; handle: string } & Record<string, unknown>>)[0]
 
   // Explicit channel link — see 2026-05-27 fix in memory for why the workflow
   // input alone silently no-ops.
@@ -177,19 +201,23 @@ export async function createPreorderProduct(
       },
     })
   } catch (err: any) {
-    if (
-      !err?.message?.includes("already exists") &&
-      !err?.message?.includes("duplicate") &&
-      err?.code !== "23505"
-    ) {
+    const isDup = err?.message?.includes("already exists")
+      || err?.message?.includes("duplicate")
+      || err?.code === "23505"
+    if (isDup) {
+      // already linked — desired state, swallow
+    } else {
       logger.warn?.(
-        `[create-preorder-product] channel link failed for ${created.id}: ${err?.message ?? err}`,
+        `[create-preorder-product] channel link FAILED for product ${created.id}: ${err?.message ?? err}. Product was created but is NOT linked to Pre-Order channel.`,
+      )
+      throw new Error(
+        `Product created (${created.id}) but failed to link to Pre-Order sales channel: ${err?.message ?? err}`,
       )
     }
   }
 
   return {
-    product: { id: created.id, handle: created.handle },
+    product: created,
     preview,
     variantCount: variants.length,
     colorCount: input.colors.length,
