@@ -20,12 +20,20 @@ import WelcomeEmail, { type WelcomeEmailData } from "./templates/welcome"
 import PasswordResetEmail, {
   type PasswordResetEmailData,
 } from "./templates/password-reset"
+import CartRecoveryCheckinEmail, {
+  type CartRecoveryCheckinData,
+} from "./templates/cart-recovery-checkin"
+import CartRecoveryCouponEmail, {
+  type CartRecoveryCouponData,
+} from "./templates/cart-recovery-coupon"
 
 export enum EmailTemplate {
   ORDER_PLACED = "order-placed",
   ORDER_SHIPPED = "order-shipped",
   WELCOME = "welcome",
   PASSWORD_RESET = "password-reset",
+  CART_RECOVERY_CHECKIN = "cart-recovery-checkin",
+  CART_RECOVERY_COUPON = "cart-recovery-coupon",
 }
 
 // RFC 2606 reserved TLDs that will never resolve on the public internet.
@@ -60,6 +68,16 @@ const renderers: Record<EmailTemplate, TemplateRenderer> = {
     React.createElement(WelcomeEmail, data as WelcomeEmailData),
   [EmailTemplate.PASSWORD_RESET]: (data) =>
     React.createElement(PasswordResetEmail, data as PasswordResetEmailData),
+  [EmailTemplate.CART_RECOVERY_CHECKIN]: (data) =>
+    React.createElement(
+      CartRecoveryCheckinEmail,
+      data as CartRecoveryCheckinData,
+    ),
+  [EmailTemplate.CART_RECOVERY_COUPON]: (data) =>
+    React.createElement(
+      CartRecoveryCouponEmail,
+      data as CartRecoveryCouponData,
+    ),
 }
 
 const defaultSubjects: Record<EmailTemplate, (data: unknown) => string> = {
@@ -82,6 +100,12 @@ const defaultSubjects: Record<EmailTemplate, (data: unknown) => string> = {
   [EmailTemplate.WELCOME]: () => "Welcome to Doll Up Boutique",
   [EmailTemplate.PASSWORD_RESET]: () =>
     "Reset your Doll Up Boutique password",
+  [EmailTemplate.CART_RECOVERY_CHECKIN]: () =>
+    "Did something go wrong with your order? 💭",
+  [EmailTemplate.CART_RECOVERY_COUPON]: (data) => {
+    const pct = (data as CartRecoveryCouponData).couponPercentage
+    return `Here's ${pct}% off to come back 🎁`
+  },
 }
 
 export type ResendNotificationOptions = {
