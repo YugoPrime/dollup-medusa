@@ -9,8 +9,16 @@ import {
 import type { INotificationModuleService } from "@medusajs/framework/types"
 
 import { EmailTemplate } from "../../../../../modules/notification-resend/service"
+import { createPromotionsWorkflow } from "@medusajs/medusa/core-flows"
+
+import {
+  generateCouponCode,
+  couponExpiryISO,
+} from "../../../../../lib/recovery-coupon"
 
 const ALLOWED_TEMPLATES = ["checkin", "coupon"] as const
+const COUPON_PERCENTAGE = 5
+const COUPON_EXPIRY_DAYS = 14
 type Template = (typeof ALLOWED_TEMPLATES)[number]
 
 type RecoveryEmailEntry = {
@@ -114,28 +122,77 @@ export const POST = async (
       quantity: it.quantity ?? 1,
     }))
 
-    // Coupon branch is added in Task 6.
+    let couponCode: string | undefined
+    let couponExpiresAt: string | undefined
+
     if (tpl === "coupon") {
-      return res
-        .status(501)
-        .json({ message: "coupon template not yet implemented" })
+      const currencyCode = (cart.currency_code ?? "mur").toLowerCase()
+      couponCode = generateCouponCode()
+      couponExpiresAt = couponExpiryISO(COUPON_EXPIRY_DAYS)
+
+      try {
+        await createPromotionsWorkflow(req.scope).run({
+          input: {
+            promotionsData: [
+              {
+                code: couponCode,
+                type: "standard",
+                status: "active" as const,
+                is_automatic: false,
+                application_method: {
+                  type: "percentage",
+                  target_type: "items",
+                  allocation: "across",
+                  value: COUPON_PERCENTAGE,
+                  currency_code: currencyCode,
+                },
+                rules: [],
+              },
+            ],
+          },
+        })
+      } catch (err) {
+        const m = (err as Error)?.message ?? "failed to create coupon"
+        logger.error(
+          `[admin/abandoned-carts email] coupon promo create failed for cart=${cart.id}: ${m}`,
+        )
+        return res
+          .status(500)
+          .json({ message: `failed to create coupon: ${m}` })
+      }
     }
 
     const notificationService = req.scope.resolve<INotificationModuleService>(
       Modules.NOTIFICATION,
     )
 
-    const notifData = {
-      storefrontUrl,
-      customerFirstName: firstName,
-      cartResumeUrl,
-      items,
-    }
+    const templateKey =
+      tpl === "checkin"
+        ? EmailTemplate.CART_RECOVERY_CHECKIN
+        : EmailTemplate.CART_RECOVERY_COUPON
+
+    const notifData =
+      tpl === "checkin"
+        ? {
+            storefrontUrl,
+            customerFirstName: firstName,
+            cartResumeUrl,
+            items,
+          }
+        : {
+            storefrontUrl,
+            customerFirstName: firstName,
+            cartResumeUrl: `${cartResumeUrl}&promo=${couponCode}`,
+            items,
+            couponCode: couponCode!,
+            couponExpiresAt: couponExpiresAt!,
+            couponPercentage: COUPON_PERCENTAGE,
+          }
 
     const sendResult = (await notificationService.createNotifications({
       to: cart.email,
       channel: "email",
-      template: EmailTemplate.CART_RECOVERY_CHECKIN,
+      template: templateKey,
       data: notifData as unknown as Record<string, unknown>,
     })) as { id?: string; provider_id?: string } | { id?: string }[] | undefined
 
@@ -151,6 +208,8 @@ export const POST = async (
     const newEntry: RecoveryEmailEntry = {
       template: tpl,
       sent_at,
+      ...(couponCode ? { code: couponCode } : {}),
+      ...(couponExpiresAt ? { expires_at: couponExpiresAt } : {}),
       ...(resendId ? { resend_id: resendId } : {}),
     }
 
@@ -164,6 +223,8 @@ export const POST = async (
 
     return res.status(200).json({
       sent_at,
+      ...(couponCode ? { code: couponCode } : {}),
+      ...(couponExpiresAt ? { expires_at: couponExpiresAt } : {}),
       ...(resendId ? { resend_id: resendId } : {}),
     })
   } catch (err) {
