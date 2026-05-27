@@ -161,32 +161,31 @@ export const GET = async (
   const limit = Math.min(Number(req.query.limit ?? 100), 200)
   const offset = Math.max(Number(req.query.offset ?? 0), 0)
 
-  // Filter products by sales-channel membership via the sales_channel entity.
-  // Going the other direction (entity: "product", filters: { sales_channels: ... })
-  // throws "Trying to query by not existing property Product.sales_channels" —
-  // sales_channels is a module link, not a direct relation on Product.
-  const { data: channels } = await query.graph({
-    entity: "sales_channel",
+  // Query.graph filter parser in Medusa v2 chokes on module-link relations
+  // (sales_channels) and on jsonb path filters (metadata.is_preorder) — both
+  // throw at runtime. So we fetch direct product fields with no relation
+  // filter, then filter in-memory by metadata.is_preorder. Sales-channel
+  // membership is enforced at WRITE time in POST (sales_channels: [{ id:
+  // PREORDER_SALES_CHANNEL_ID }]), so we don't need to re-validate it here.
+  // The catalog is small (curated preorder products, <50 in practice), so
+  // a full product scan is acceptable.
+  const { data: products } = await query.graph({
+    entity: "product",
     fields: [
-      "products.id",
-      "products.title",
-      "products.handle",
-      "products.thumbnail",
-      "products.status",
-      "products.created_at",
-      "products.metadata",
-      "products.variants.id",
-      "products.variants.prices.amount",
-      "products.variants.prices.currency_code",
+      "id",
+      "title",
+      "handle",
+      "thumbnail",
+      "status",
+      "created_at",
+      "metadata",
+      "variants.id",
+      "variants.prices.amount",
+      "variants.prices.currency_code",
     ],
-    filters: { id: PREORDER_SALES_CHANNEL_ID } as any,
   })
 
-  const allProducts: any[] = (channels[0] as any)?.products ?? []
-
-  // Defense-in-depth: also filter by metadata.is_preorder so a stray
-  // non-preorder product in the channel can't pollute the list.
-  const filtered = allProducts.filter((p) => {
+  const filtered = (products as any[]).filter((p) => {
     const meta = (p?.metadata ?? null) as Record<string, unknown> | null
     return meta?.is_preorder === true
   })
