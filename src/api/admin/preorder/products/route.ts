@@ -161,39 +161,49 @@ export const GET = async (
   const limit = Math.min(Number(req.query.limit ?? 100), 200)
   const offset = Math.max(Number(req.query.offset ?? 0), 0)
 
-  const { data } = await query.graph({
-    entity: "product",
+  // Filter products by sales-channel membership via the sales_channel entity.
+  // Going the other direction (entity: "product", filters: { sales_channels: ... })
+  // throws "Trying to query by not existing property Product.sales_channels" —
+  // sales_channels is a module link, not a direct relation on Product.
+  const { data: channels } = await query.graph({
+    entity: "sales_channel",
     fields: [
-      "id",
-      "title",
-      "handle",
-      "thumbnail",
-      "status",
-      "created_at",
-      "metadata",
-      "sales_channels.id",
-      "variants.id",
-      "variants.prices.amount",
-      "variants.prices.currency_code",
+      "products.id",
+      "products.title",
+      "products.handle",
+      "products.thumbnail",
+      "products.status",
+      "products.created_at",
+      "products.metadata",
+      "products.variants.id",
+      "products.variants.prices.amount",
+      "products.variants.prices.currency_code",
     ],
-    filters: {
-      sales_channels: { id: PREORDER_SALES_CHANNEL_ID },
-    } as any,
-    pagination: {
-      take: limit,
-      skip: offset,
-      order: { created_at: "DESC" },
-    },
+    filters: { id: PREORDER_SALES_CHANNEL_ID } as any,
   })
 
-  const products = (data as any[]).filter((p) => {
+  const allProducts: any[] = (channels[0] as any)?.products ?? []
+
+  // Defense-in-depth: also filter by metadata.is_preorder so a stray
+  // non-preorder product in the channel can't pollute the list.
+  const filtered = allProducts.filter((p) => {
     const meta = (p?.metadata ?? null) as Record<string, unknown> | null
     return meta?.is_preorder === true
   })
 
+  // Sort by created_at DESC, paginate client-side. The volume here is small
+  // (preorder catalog is curated), so in-memory pagination is fine.
+  filtered.sort((a, b) => {
+    const ad = new Date(a.created_at ?? 0).getTime()
+    const bd = new Date(b.created_at ?? 0).getTime()
+    return bd - ad
+  })
+
+  const paginated = filtered.slice(offset, offset + limit)
+
   res.json({
-    products,
-    count: products.length,
+    products: paginated,
+    count: filtered.length,
     limit,
     offset,
   })

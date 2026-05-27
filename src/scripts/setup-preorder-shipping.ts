@@ -200,6 +200,37 @@ export default async function setupPreorderShipping({ container }: ExecArgs) {
     },
   })
 
+  // 4b. Link the manual_manual fulfillment provider → Pre-Order stock location.
+  //     Without this link, createShippingOptionsWorkflow's validate-providers
+  //     step rejects with "Providers (manual_manual) are not enabled for the
+  //     service location". The apex stock location got this link as part of
+  //     initial Medusa setup; the new Pre-Order location does not.
+  //
+  //     Idempotent via try/catch — the link module throws on duplicate but the
+  //     duplicate is the desired end state.
+  const remoteLinkForProvider = container.resolve("remoteLink" as any) as any
+  try {
+    await remoteLinkForProvider.create({
+      [Modules.STOCK_LOCATION]: { stock_location_id: preorderLocation.id },
+      [Modules.FULFILLMENT]: { fulfillment_provider_id: "manual_manual" },
+    })
+    logger.info(
+      `Linked fulfillment provider "manual_manual" → stock location ${preorderLocation.id}`,
+    )
+  } catch (err: any) {
+    if (
+      err?.message?.includes("already exists") ||
+      err?.message?.includes("duplicate") ||
+      err?.code === "23505"
+    ) {
+      logger.info(
+        `Fulfillment provider "manual_manual" already linked to stock location ${preorderLocation.id}`,
+      )
+    } else {
+      throw err
+    }
+  }
+
   // 5. Shipping profile — find-or-create dedicated Pre-Order profile.
   let [preorderProfile] = await fulfillmentService.listShippingProfiles({
     name: PREORDER_SHIPPING_PROFILE_NAME,
