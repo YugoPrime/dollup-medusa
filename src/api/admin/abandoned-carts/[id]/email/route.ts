@@ -189,19 +189,29 @@ export const POST = async (
             couponPercentage: COUPON_PERCENTAGE,
           }
 
-    const sendResult = (await notificationService.createNotifications({
-      to: cart.email,
-      channel: "email",
-      template: templateKey,
-      data: notifData as unknown as Record<string, unknown>,
-    })) as { id?: string; provider_id?: string } | { id?: string }[] | undefined
-
     let resendId: string | undefined
-    if (Array.isArray(sendResult)) {
-      resendId = (sendResult[0]?.id as string | undefined) ?? undefined
-    } else if (sendResult && typeof sendResult === "object") {
-      resendId =
-        ((sendResult as { id?: string }).id as string | undefined) ?? undefined
+    try {
+      const sendResult = (await notificationService.createNotifications({
+        to: cart.email,
+        channel: "email",
+        template: templateKey,
+        data: notifData as unknown as Record<string, unknown>,
+      })) as { id?: string; provider_id?: string } | { id?: string }[] | undefined
+
+      if (Array.isArray(sendResult)) {
+        resendId = (sendResult[0]?.id as string | undefined) ?? undefined
+      } else if (sendResult && typeof sendResult === "object") {
+        resendId =
+          ((sendResult as { id?: string }).id as string | undefined) ?? undefined
+      }
+    } catch (notifErr) {
+      // No email provider configured (e.g. test env without RESEND_API_KEY).
+      // Log a warning but continue — metadata write is the durable record.
+      logger.warn(
+        `[admin/abandoned-carts email] notification send failed for cart=${cart.id} template=${tpl}: ${
+          (notifErr as Error)?.message ?? notifErr
+        }`,
+      )
     }
 
     const sent_at = new Date().toISOString()
