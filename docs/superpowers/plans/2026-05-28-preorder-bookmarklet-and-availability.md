@@ -3062,3 +3062,1181 @@ If smoke passes: full feature shipped. Update memory file with the rollout summa
 ## Execution
 
 Plan complete and saved to `Backend/dollup-medusa/docs/superpowers/plans/2026-05-28-preorder-bookmarklet-and-availability.md`.
+
+---
+
+# REVISION 2 — 2026-05-28 night
+
+**Reason for revision:** Initial Task 1 attempt failed because the parser was written against SHEIN's `window.gbProductSsrData` global, which no longer exists on current SHEIN PDPs (verified live). The canonical source is `<script id="goodsDetailSchema">` JSON-LD plus an inline `mainSaleAttribute.info[]` array. Multi-color extraction requires fetching each sibling color's URL from the browser session (anti-bot blocks server-side fetches but allows browser-context fetches).
+
+**Tasks affected:** 1, 2, 12, 15, 20. Other tasks (3-11, 13, 14, 16-19, 21, 22) are unchanged.
+
+**Probe data backing this revision:** [`docs/superpowers/plans/2026-05-28-shein-probes/`](2026-05-28-shein-probes/) — 8 numbered JSON files. Notably:
+- `07-aloruh-20-colors-parsed.json` — proof that 20 colors of the Aloruh dress can be extracted from one parent page's inline `<script>` `mainSaleAttribute.info[]`
+- `08-sibling-fetch-success.json` — proof that browser-context `fetch()` of a sibling URL works (1.5s, HTTP 200, full JSON-LD)
+
+Before executing Task 1, READ THIS REVISION SECTION FIRST. The original Task 1-2-12-15-20 text in this file is superseded.
+
+---
+
+## Task 1 (REVISED): JSON-LD parser + mainSaleAttribute color-list extractor
+
+**Files:**
+- Create: `Backend/dollup-medusa/src/lib/shein-extract.ts`
+- Create: `Backend/dollup-medusa/src/lib/__tests__/shein-extract.unit.spec.ts`
+- Create: `Backend/dollup-medusa/src/lib/__tests__/fixtures/shein/aloruh-multicolor-parent.html` (real SHEIN HTML, captured via Playwright at implementation time)
+- Create: `Backend/dollup-medusa/src/lib/__tests__/fixtures/shein/aloruh-light-yellow-sibling.html`
+- Create: `Backend/dollup-medusa/src/lib/__tests__/fixtures/shein/amorya-single-color.html`
+
+- [ ] **Step 1: Capture 3 real SHEIN HTML fixtures via Playwright MCP**
+
+The plan's original "open in your browser, save HTML" step doesn't work — SHEIN's anti-bot blocks anything that's not a real browser session, but Playwright MCP IS a real browser session. Use it:
+
+```
+mcp__plugin_playwright_playwright__browser_navigate → "https://www.shein.com/Aloruh-Women-s-Floral-Print-Ruched-Halter-Neck-Mini-Dress-Fashionable-For-Dates-Summer-Dresses-For-Women-p-415495791.html"
+mcp__plugin_playwright_playwright__browser_wait_for → time: 6   (let captcha auto-resolve)
+mcp__plugin_playwright_playwright__browser_evaluate → () => document.documentElement.outerHTML
+```
+
+Save the returned HTML to `src/lib/__tests__/fixtures/shein/aloruh-multicolor-parent.html`. Repeat for:
+- `https://www.shein.com/Aloruh-Women-s-Solid-Color-Casual-Halter-Mini-Bubble-Dress-p-373210897.html` → `aloruh-light-yellow-sibling.html` (the sibling page when you click "Light Yellow")
+- `https://www.shein.com/Amorya-Women-s-Elegant-Floral-Print-Metal-Decor-Multi-Layered-Ruffle-Hem-Short-Dress-p-396808630.html` → `amorya-single-color.html` (single-color product)
+
+These are large (each ~1.2MB) but they're the only way to test the parser realistically. Don't trim them — the inline `<script>` with `mainSaleAttribute` is buried at offset ~44000 inside a 188KB script tag, and the JSON-LD is in its own `<script id="goodsDetailSchema">`. We need the real structure.
+
+If Playwright MCP isn't available in the execution environment, fall back to: ask the user to capture (open browser → DevTools → Network → Doc → right-click "Copy response" on the page request → paste into fixture file). The fixtures need to be real to test the parser meaningfully.
+
+- [ ] **Step 2: Write the failing tests**
+
+Create `Backend/dollup-medusa/src/lib/__tests__/shein-extract.unit.spec.ts`:
+
+```typescript
+import { readFileSync } from "fs"
+import { join } from "path"
+import {
+  extractJsonLd,
+  extractSiblingColors,
+  buildSiblingUrl,
+} from "../shein-extract"
+
+const fixture = (name: string) =>
+  readFileSync(join(__dirname, "fixtures/shein", name), "utf8")
+
+describe("extractJsonLd", () => {
+  it("parses ProductGroup from multi-color Aloruh parent (color = Orange, 6+ images)", () => {
+    const html = fixture("aloruh-multicolor-parent.html")
+    const pg = extractJsonLd(html)
+    expect(pg).not.toBeNull()
+    expect(pg!.name).toMatch(/Aloruh/i)
+    expect(pg!.color).toBe("Orange")
+    expect(pg!.image.length).toBeGreaterThanOrEqual(4)
+    for (const url of pg!.image) {
+      expect(url).toMatch(/^https:\/\/img\.ltwebstatic\.com\//)
+    }
+    expect(pg!.hasVariant.length).toBeGreaterThanOrEqual(2)
+    const sizes = pg!.hasVariant.map((v) => v.size)
+    expect(sizes).toEqual(expect.arrayContaining(["S", "M"]))
+    const availabilities = new Set(
+      pg!.hasVariant.map((v) => v.offers.availability),
+    )
+    expect(availabilities.has("https://schema.org/InStock")).toBe(true)
+  })
+
+  it("parses a sibling color's JSON-LD (Light Yellow has 4+ images)", () => {
+    const html = fixture("aloruh-light-yellow-sibling.html")
+    const pg = extractJsonLd(html)
+    expect(pg).not.toBeNull()
+    expect(pg!.color).toBe("Light Yellow")
+    expect(pg!.image.length).toBeGreaterThanOrEqual(4)
+  })
+
+  it("parses a single-color product (Amorya)", () => {
+    const html = fixture("amorya-single-color.html")
+    const pg = extractJsonLd(html)
+    expect(pg).not.toBeNull()
+    expect(pg!.color.length).toBeGreaterThan(0)
+    expect(pg!.image.length).toBeGreaterThanOrEqual(4)
+  })
+
+  it("returns null when no goodsDetailSchema script is present", () => {
+    expect(extractJsonLd("<html><body>nothing</body></html>")).toBeNull()
+  })
+
+  it("parses available number from offers.price even when '0.00'", () => {
+    const html = fixture("aloruh-multicolor-parent.html")
+    const pg = extractJsonLd(html)!
+    // Real prices come back as strings like "16.70"; some products report "0.00"
+    // which the bookmarklet handles via DOM fallback. The parser just returns
+    // what JSON-LD says.
+    expect(typeof pg.hasVariant[0].offers.price).toBe("string")
+  })
+})
+
+describe("extractSiblingColors", () => {
+  it("extracts all 20 sibling colors from the Aloruh parent page", () => {
+    const html = fixture("aloruh-multicolor-parent.html")
+    const siblings = extractSiblingColors(html)
+    expect(siblings.length).toBeGreaterThanOrEqual(15)
+    for (const s of siblings) {
+      expect(s.color_name.length).toBeGreaterThan(0)
+      expect(s.goods_id).toMatch(/^\d+$/)
+      expect(s.goods_url_name.length).toBeGreaterThan(0)
+    }
+    // Spot-check known colors exist
+    const names = siblings.map((s) => s.color_name)
+    expect(names).toEqual(expect.arrayContaining(["Light Yellow", "Black"]))
+    // Spot-check the current page's goods_id is in the list
+    const current = siblings.find((s) => s.goods_id === "415495791")
+    expect(current?.color_name).toBe("Orange")
+  })
+
+  it("returns empty array on a page without mainSaleAttribute", () => {
+    expect(extractSiblingColors("<html><body>nothing</body></html>")).toEqual(
+      [],
+    )
+  })
+
+  it("Amorya single-color page returns 0 or 1 sibling (just itself)", () => {
+    const html = fixture("amorya-single-color.html")
+    const siblings = extractSiblingColors(html)
+    expect(siblings.length).toBeLessThanOrEqual(1)
+  })
+})
+
+describe("buildSiblingUrl", () => {
+  it("builds a SHEIN PDP URL from a sibling entry", () => {
+    expect(
+      buildSiblingUrl({
+        color_name: "Light Yellow",
+        goods_id: "373210897",
+        goods_url_name:
+          "Aloruh Women s Solid Color Casual Halter Mini Bubble Dress",
+        goods_color_image: "//x",
+        goods_image: "//y",
+      }),
+    ).toBe(
+      "https://www.shein.com/Aloruh-Women-s-Solid-Color-Casual-Halter-Mini-Bubble-Dress-p-373210897.html",
+    )
+  })
+})
+```
+
+- [ ] **Step 3: Run to verify failure**
+
+```bash
+cd Backend/dollup-medusa
+yarn test:unit src/lib/__tests__/shein-extract.unit.spec.ts
+```
+
+Expected: FAIL (module not found).
+
+- [ ] **Step 4: Implement the parser**
+
+Create `Backend/dollup-medusa/src/lib/shein-extract.ts`:
+
+```typescript
+/**
+ * Pure SHEIN PDP parser. Two responsibilities:
+ *
+ *  1. extractJsonLd(html) — pulls the <script id="goodsDetailSchema"> JSON-LD
+ *     ProductGroup. That gives us title, single-color name, full image list,
+ *     and per-variant size + price + availability. Source of truth for each
+ *     SHEIN URL we crawl (parent OR sibling).
+ *
+ *  2. extractSiblingColors(html) — scans inline <script> blocks for the
+ *     mainSaleAttribute.info[] entries. Each entry is a sibling color
+ *     (different goods_id) with a usable URL slug. Used to discover all
+ *     colors of a multi-color product from the page where the bookmarklet
+ *     was clicked.
+ *
+ * No DOM dependency. Pure string-in / object-out so it's testable in Node
+ * and reusable by the daily availability cron.
+ */
+
+export type SheinJsonLdVariant = {
+  sku: string
+  size: string
+  offers: {
+    price: string
+    priceCurrency: string
+    availability: string  // "https://schema.org/InStock" | "OutOfStock"
+  }
+}
+
+export type SheinJsonLd = {
+  name: string
+  color: string
+  productGroupID: string
+  image: string[]
+  hasVariant: SheinJsonLdVariant[]
+}
+
+export type SheinSiblingColor = {
+  color_name: string
+  goods_id: string
+  goods_url_name: string
+  goods_color_image: string
+  goods_image: string
+}
+
+const JSON_LD_REGEX =
+  /<script[^>]+id=["']goodsDetailSchema["'][^>]*>([\s\S]*?)<\/script>/
+
+const SHEIN_CDN = /^(https?:)?\/\/img\.ltwebstatic\.com\//
+const ATTR_ID_27_MARKER = '"attr_id":"27"'
+
+export function extractJsonLd(html: string): SheinJsonLd | null {
+  const match = html.match(JSON_LD_REGEX)
+  if (!match) return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(match[1].trim())
+  } catch {
+    return null
+  }
+  const pg = Array.isArray(parsed) ? parsed[0] : parsed
+  if (!isProductGroup(pg)) return null
+  return normalizeProductGroup(pg)
+}
+
+export function extractSiblingColors(html: string): SheinSiblingColor[] {
+  // mainSaleAttribute lives in an inline <script> (not the JSON-LD). We don't
+  // know the script's exact start, so we scan for each color object directly:
+  // each is identifiable by "attr_id":"27" (the Color attribute). For each
+  // hit, balance braces backward to find the object start and forward to find
+  // the object end, then JSON.parse it.
+  const out: SheinSiblingColor[] = []
+  const seen = new Set<string>()
+  let pos = 0
+  while (true) {
+    const idx = html.indexOf(ATTR_ID_27_MARKER, pos)
+    if (idx === -1) break
+    pos = idx + 1
+    const objBounds = findEnclosingObject(html, idx)
+    if (!objBounds) continue
+    let obj: any
+    try {
+      obj = JSON.parse(html.slice(objBounds.start, objBounds.end))
+    } catch {
+      continue
+    }
+    if (!isSiblingColor(obj)) continue
+    if (seen.has(obj.goods_id)) continue
+    seen.add(obj.goods_id)
+    out.push({
+      color_name: String(obj.attr_value),
+      goods_id: String(obj.goods_id),
+      goods_url_name: String(obj.goods_url_name),
+      goods_color_image: String(obj.goods_color_image ?? ""),
+      goods_image: String(obj.goods_image ?? ""),
+    })
+  }
+  return out
+}
+
+export function buildSiblingUrl(entry: SheinSiblingColor): string {
+  const slug = entry.goods_url_name.trim().replace(/\s+/g, "-")
+  return `https://www.shein.com/${slug}-p-${entry.goods_id}.html`
+}
+
+// -- helpers -------------------------------------------------------------
+
+function isProductGroup(v: unknown): v is Record<string, any> {
+  return (
+    !!v &&
+    typeof v === "object" &&
+    (v as any)["@type"] === "ProductGroup" &&
+    typeof (v as any).name === "string"
+  )
+}
+
+function normalizeProductGroup(pg: Record<string, any>): SheinJsonLd {
+  const images: string[] = Array.isArray(pg.image)
+    ? pg.image.filter(
+        (u: unknown): u is string => typeof u === "string" && SHEIN_CDN.test(u),
+      )
+    : typeof pg.image === "string" && SHEIN_CDN.test(pg.image)
+      ? [pg.image]
+      : []
+  const variants: SheinJsonLdVariant[] = Array.isArray(pg.hasVariant)
+    ? pg.hasVariant
+        .filter(
+          (v: any) =>
+            v &&
+            typeof v.size === "string" &&
+            v.offers &&
+            typeof v.offers.price === "string",
+        )
+        .map((v: any) => ({
+          sku: String(v.sku ?? ""),
+          size: String(v.size),
+          offers: {
+            price: String(v.offers.price),
+            priceCurrency: String(v.offers.priceCurrency ?? "USD"),
+            availability: String(
+              v.offers.availability ?? "https://schema.org/InStock",
+            ),
+          },
+        }))
+    : []
+  return {
+    name: String(pg.name),
+    color: typeof pg.color === "string" ? pg.color : "Default",
+    productGroupID: String(pg.productGroupID ?? ""),
+    image: images,
+    hasVariant: variants,
+  }
+}
+
+function isSiblingColor(v: unknown): v is Record<string, any> {
+  return (
+    !!v &&
+    typeof v === "object" &&
+    (v as any).attr_id === "27" &&
+    typeof (v as any).attr_value === "string" &&
+    typeof (v as any).goods_id === "string" &&
+    typeof (v as any).goods_url_name === "string"
+  )
+}
+
+function findEnclosingObject(
+  html: string,
+  innerIdx: number,
+): { start: number; end: number } | null {
+  // Walk backward to find the matching `{` for the object containing innerIdx.
+  let depth = 0
+  let start = -1
+  for (let i = innerIdx; i >= 0; i--) {
+    const c = html[i]
+    if (c === '"') {
+      // Skip a JSON string going backward — find the unescaped opening quote.
+      const opener = findStringStart(html, i)
+      if (opener === -1) return null
+      i = opener
+      continue
+    }
+    if (c === "}") depth++
+    else if (c === "{") {
+      if (depth === 0) {
+        start = i
+        break
+      }
+      depth--
+    }
+  }
+  if (start === -1) return null
+  // Walk forward to find the closing `}`.
+  depth = 0
+  let end = -1
+  for (let i = start; i < html.length; i++) {
+    const c = html[i]
+    if (c === '"') {
+      const closer = findStringEnd(html, i)
+      if (closer === -1) return null
+      i = closer
+      continue
+    }
+    if (c === "{") depth++
+    else if (c === "}") {
+      depth--
+      if (depth === 0) {
+        end = i + 1
+        break
+      }
+    }
+  }
+  if (end === -1) return null
+  return { start, end }
+}
+
+function findStringStart(html: string, closingQuoteIdx: number): number {
+  // Scan backward for the opening unescaped quote.
+  for (let i = closingQuoteIdx - 1; i >= 0; i--) {
+    if (html[i] === '"' && !isEscaped(html, i)) return i
+  }
+  return -1
+}
+
+function findStringEnd(html: string, openingQuoteIdx: number): number {
+  for (let i = openingQuoteIdx + 1; i < html.length; i++) {
+    if (html[i] === '"' && !isEscaped(html, i)) return i
+  }
+  return -1
+}
+
+function isEscaped(html: string, idx: number): boolean {
+  let backslashes = 0
+  for (let i = idx - 1; i >= 0 && html[i] === "\\"; i--) backslashes++
+  return backslashes % 2 === 1
+}
+```
+
+- [ ] **Step 5: Run tests until pass**
+
+```bash
+cd Backend/dollup-medusa
+yarn test:unit src/lib/__tests__/shein-extract.unit.spec.ts
+```
+
+Expected: PASS (all describe blocks). If `extractSiblingColors` returns 0 from a real fixture, the brace-balancer is mis-stepping over a string. Check fixture file is the actual captured HTML (not a stripped version) and debug the `findEnclosingObject` boundary walker.
+
+If `extractJsonLd` fails because the JSON-LD value is wrapped in a top-level array (it usually is — `[{...}]` not `{...}`), the existing `Array.isArray(parsed) ? parsed[0] : parsed` handles it. If a fixture has neither shape, see Step 6 fallback.
+
+- [ ] **Step 6: Commit**
+
+```bash
+cd Backend/dollup-medusa
+git add src/lib/shein-extract.ts src/lib/__tests__/shein-extract.unit.spec.ts src/lib/__tests__/fixtures/shein/
+git commit -m "feat(preorder): JSON-LD parser + sibling-color extractor for SHEIN"
+```
+
+---
+
+## Task 2 (REVISED): Shared createPreorderProduct helper — multi-color via sibling-fetch
+
+**Files:**
+- Create: `Backend/dollup-medusa/src/api/admin/preorder/lib/create-preorder-product.ts`
+- Create: `Backend/dollup-medusa/src/api/admin/preorder/lib/__tests__/create-preorder-product.unit.spec.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+Create `Backend/dollup-medusa/src/api/admin/preorder/lib/__tests__/create-preorder-product.unit.spec.ts`:
+
+```typescript
+import { validateBookmarkletInput } from "../create-preorder-product"
+
+describe("validateBookmarkletInput", () => {
+  const valid = {
+    title: "Aloruh Halter Dress",
+    sheinUrl: "https://shein.com/Aloruh-p-415495791.html",
+    sheinPriceUsd: 16.7,
+    sizes: ["XS", "S", "M", "L"],
+    colors: [
+      {
+        name: "Orange",
+        sheinUrl: "https://shein.com/Aloruh-p-415495791.html",
+        sheinGoodsId: "415495791",
+        images: [
+          "https://img.ltwebstatic.com/v4/orange-1.webp",
+          "https://img.ltwebstatic.com/v4/orange-2.webp",
+        ],
+      },
+      {
+        name: "Light Yellow",
+        sheinUrl: "https://shein.com/Aloruh-p-373210897.html",
+        sheinGoodsId: "373210897",
+        images: ["https://img.ltwebstatic.com/v4/yellow-1.webp"],
+      },
+    ],
+    bookmarkletVersion: "1.0.0",
+  }
+
+  it("passes a valid multi-color payload", () => {
+    expect(() => validateBookmarkletInput(valid)).not.toThrow()
+  })
+
+  it("rejects when colors is empty", () => {
+    expect(() => validateBookmarkletInput({ ...valid, colors: [] })).toThrow(
+      /at least one color/i,
+    )
+  })
+
+  it("rejects when a color has zero images", () => {
+    const bad = {
+      ...valid,
+      colors: [{ ...valid.colors[0], images: [] }],
+    }
+    expect(() => validateBookmarkletInput(bad)).toThrow(/at least one image/i)
+  })
+
+  it("rejects when a color image URL is not on the SHEIN CDN", () => {
+    const bad = {
+      ...valid,
+      colors: [
+        { ...valid.colors[0], images: ["https://evil.com/x.jpg"] },
+      ],
+    }
+    expect(() => validateBookmarkletInput(bad)).toThrow(/img\.ltwebstatic/i)
+  })
+
+  it("rejects when sheinPriceUsd is zero or negative", () => {
+    expect(() =>
+      validateBookmarkletInput({ ...valid, sheinPriceUsd: 0 }),
+    ).toThrow(/positive/i)
+    expect(() =>
+      validateBookmarkletInput({ ...valid, sheinPriceUsd: -5 }),
+    ).toThrow(/positive/i)
+  })
+
+  it("rejects when sizes is empty", () => {
+    expect(() => validateBookmarkletInput({ ...valid, sizes: [] })).toThrow(
+      /at least one size/i,
+    )
+  })
+})
+```
+
+- [ ] **Step 2: Run to verify failure**
+
+```bash
+cd Backend/dollup-medusa
+yarn test:unit src/api/admin/preorder/lib/__tests__/create-preorder-product.unit.spec.ts
+```
+
+Expected: FAIL.
+
+- [ ] **Step 3: Implement the helper**
+
+Create `Backend/dollup-medusa/src/api/admin/preorder/lib/create-preorder-product.ts`:
+
+```typescript
+import type { MedusaContainer } from "@medusajs/framework/types"
+import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils"
+import { createProductsWorkflow } from "@medusajs/medusa/core-flows"
+
+import { PREORDER_MODULE } from "../../../../modules/preorder"
+import type PreorderModuleService from "../../../../modules/preorder/service"
+
+const PREORDER_SHIPPING_PROFILE_NAME = "Pre-Order Shipping"
+const SHEIN_CDN_REGEX = /^https:\/\/img\.ltwebstatic\.com\//
+
+export type CreatePreorderColor = {
+  name: string
+  sheinUrl: string
+  sheinGoodsId: string
+  images: string[]
+}
+
+export type CreatePreorderProductInput = {
+  title: string
+  sheinUrl: string  // the URL where the bookmarklet was clicked
+  sheinPriceUsd: number
+  description?: string
+  sizes: string[]
+  colors: CreatePreorderColor[]
+  bookmarkletVersion?: string
+}
+
+export type CreatePreorderProductResult = {
+  product: { id: string; handle: string }
+  preview: {
+    sheinPriceMur: number
+    finalPriceMur: number
+    fxRateUsed: number
+  }
+  variantCount: number
+  colorCount: number
+}
+
+/**
+ * Pure input validator. Exported separately so it can be unit-tested without
+ * spinning up the container.
+ */
+export function validateBookmarkletInput(input: unknown): asserts input is CreatePreorderProductInput {
+  if (!input || typeof input !== "object") throw new Error("input must be an object")
+  const i = input as Record<string, any>
+  if (!i.title || typeof i.title !== "string") throw new Error("title required")
+  if (!i.sheinUrl || typeof i.sheinUrl !== "string") throw new Error("sheinUrl required")
+  if (!/(^https?:\/\/)(m\.)?shein\.com\//i.test(i.sheinUrl)) {
+    throw new Error("sheinUrl must be a shein.com URL")
+  }
+  if (typeof i.sheinPriceUsd !== "number" || !(i.sheinPriceUsd > 0)) {
+    throw new Error("sheinPriceUsd must be a positive number")
+  }
+  if (!Array.isArray(i.sizes) || i.sizes.length === 0) {
+    throw new Error("sizes: at least one size required")
+  }
+  for (const s of i.sizes) {
+    if (typeof s !== "string" || !s.trim()) throw new Error("sizes[] must be non-empty strings")
+  }
+  if (!Array.isArray(i.colors) || i.colors.length === 0) {
+    throw new Error("colors: at least one color required")
+  }
+  for (const c of i.colors) {
+    if (!c || typeof c !== "object") throw new Error("each color must be an object")
+    if (!c.name || typeof c.name !== "string") throw new Error("color.name required")
+    if (!c.sheinUrl || typeof c.sheinUrl !== "string") throw new Error("color.sheinUrl required")
+    if (!c.sheinGoodsId || typeof c.sheinGoodsId !== "string") throw new Error("color.sheinGoodsId required")
+    if (!Array.isArray(c.images) || c.images.length === 0) {
+      throw new Error(`color "${c.name}" must have at least one image`)
+    }
+    for (const url of c.images) {
+      if (typeof url !== "string" || !SHEIN_CDN_REGEX.test(url)) {
+        throw new Error(`color "${c.name}" image URLs must be on img.ltwebstatic.com`)
+      }
+    }
+  }
+}
+
+/**
+ * Runs the full create + sales-channel-link flow for a multi-color pre-order
+ * product. Each color contributes its own variant.metadata.image_urls so the
+ * storefront PDP gallery can swap on color change.
+ */
+export async function createPreorderProduct(
+  container: MedusaContainer,
+  rawInput: unknown,
+  preorderSalesChannelId: string,
+): Promise<CreatePreorderProductResult> {
+  validateBookmarkletInput(rawInput)
+  const input = rawInput as CreatePreorderProductInput
+
+  const svc = container.resolve<PreorderModuleService>(PREORDER_MODULE)
+  const preview = await svc.previewPrice({ sheinPriceUsd: input.sheinPriceUsd })
+  const settings = await svc.getSettings()
+
+  const fulfillmentService = container.resolve(Modules.FULFILLMENT)
+  const [preorderProfile] = await fulfillmentService.listShippingProfiles({
+    name: PREORDER_SHIPPING_PROFILE_NAME,
+  })
+  const logger = container.resolve(ContainerRegistrationKeys.LOGGER) as any
+  if (!preorderProfile) {
+    logger.warn?.(
+      `[create-preorder-product] Pre-Order shipping profile not found.`,
+    )
+  }
+
+  const variants = input.colors.flatMap((color) =>
+    input.sizes.map((size) => ({
+      title: `${color.name} / ${size}`,
+      sku: undefined,
+      options: { Color: color.name, Size: size },
+      prices: [{ currency_code: "mur", amount: preview.finalPriceMur * 100 }],
+      manage_inventory: false,
+      metadata: {
+        image_urls: color.images,
+        shein_url: color.sheinUrl,
+        shein_goods_id: color.sheinGoodsId,
+      },
+    })),
+  )
+
+  const handle =
+    input.title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "") +
+    "-preorder-" +
+    Date.now().toString(36)
+
+  const productImages = input.colors.flatMap((c) =>
+    c.images.map((url) => ({ url })),
+  )
+  const thumbnail = input.colors[0].images[0]
+
+  const result = await createProductsWorkflow(container).run({
+    input: {
+      products: [
+        {
+          title: input.title,
+          handle,
+          description: input.description ?? "",
+          status: "published",
+          images: productImages,
+          thumbnail,
+          options: [
+            { title: "Color", values: input.colors.map((c) => c.name) },
+            { title: "Size", values: input.sizes },
+          ],
+          variants,
+          metadata: {
+            is_preorder: true,
+            shein_url: input.sheinUrl,
+            shein_price_usd: input.sheinPriceUsd,
+            preorder_fx_rate: preview.fxRateUsed,
+            preorder_eta_min_days: settings.eta_min_days,
+            preorder_eta_max_days: settings.eta_max_days,
+            preorder_priced_at: new Date().toISOString(),
+            bookmarklet_version: input.bookmarkletVersion ?? null,
+          },
+          sales_channels: [{ id: preorderSalesChannelId }],
+          ...(preorderProfile ? { shipping_profile_id: preorderProfile.id } : {}),
+        },
+      ],
+    },
+  })
+
+  const created = (result.result as Array<{ id: string; handle: string }>)[0]
+
+  // Explicit channel link — see 2026-05-27 fix in memory for why the workflow
+  // input alone silently no-ops.
+  const remoteLink = container.resolve(ContainerRegistrationKeys.LINK) as any
+  try {
+    await remoteLink.create({
+      [Modules.PRODUCT]: { product_id: created.id },
+      [Modules.SALES_CHANNEL]: {
+        sales_channel_id: preorderSalesChannelId,
+      },
+    })
+  } catch (err: any) {
+    if (
+      !err?.message?.includes("already exists") &&
+      !err?.message?.includes("duplicate") &&
+      err?.code !== "23505"
+    ) {
+      logger.warn?.(
+        `[create-preorder-product] channel link failed for ${created.id}: ${err?.message ?? err}`,
+      )
+    }
+  }
+
+  return {
+    product: { id: created.id, handle: created.handle },
+    preview,
+    variantCount: variants.length,
+    colorCount: input.colors.length,
+  }
+}
+```
+
+- [ ] **Step 4: Run tests until pass**
+
+```bash
+cd Backend/dollup-medusa
+yarn test:unit src/api/admin/preorder/lib/__tests__/create-preorder-product.unit.spec.ts
+```
+
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+cd Backend/dollup-medusa
+git add src/api/admin/preorder/lib/
+git commit -m "feat(preorder): multi-color createPreorderProduct + bookmarklet input validator"
+```
+
+---
+
+## Task 12 (REVISED): Bookmarklet POST validates the multi-color shape
+
+Identical to original Task 12 structure, only the body shape changes. Update the `BookmarkletBody` type to the multi-color shape from `CreatePreorderProductInput`. The route body becomes:
+
+```typescript
+type BookmarkletBody = {
+  title?: string
+  sheinUrl?: string
+  sheinPriceUsd?: number
+  description?: string
+  sizes?: string[]
+  colors?: Array<{
+    name: string
+    sheinUrl: string
+    sheinGoodsId: string
+    images: string[]
+  }>
+  bookmarkletVersion?: string
+}
+```
+
+The shared helper's `validateBookmarkletInput` will throw on bad shapes — the route just catches that and returns 400. Original Task 12 already wraps the helper call in a try/catch, so this change is a body-shape rename.
+
+Everything else in original Task 12 (auth, middleware, storefrontUrl response) stays the same.
+
+---
+
+## Task 15 (REVISED): Bookmarklet JS — JSON-LD + sibling fetch
+
+Replace the entire bookmarklet source from the original Task 15 with:
+
+```javascript
+/**
+ * Doll Up — SHEIN to Pre-Order bookmarklet (multi-color via sibling fetch).
+ *
+ * Strategy:
+ *  1. Read JSON-LD ProductGroup from this page (current color's data).
+ *  2. Read mainSaleAttribute.info[] from inline <script> (sibling color list).
+ *  3. In parallel (max 8 concurrent): fetch() each sibling URL in this browser
+ *     session, parse its JSON-LD, collect images.
+ *  4. POST everything to /admin/preorder/bookmarklet as one product.
+ *
+ * The token gets injected into __BOOKMARKLET_TOKEN__ at build time by
+ * dollup-admin/src/lib/build-bookmarklet.ts.
+ */
+(function () {
+  var TOKEN = "__BOOKMARKLET_TOKEN__";
+  var API = "https://api.dollupboutique.com/admin/preorder/bookmarklet";
+  var VERSION = "2.0.0";
+  var CONCURRENCY = 6;
+
+  function toast(message, kind) {
+    var existing = document.getElementById("dub-bookmarklet-toast");
+    if (existing) existing.remove();
+    var el = document.createElement("div");
+    el.id = "dub-bookmarklet-toast";
+    el.style.cssText =
+      "position:fixed;top:24px;right:24px;z-index:2147483647;" +
+      "padding:14px 18px;border-radius:8px;font:14px system-ui,sans-serif;" +
+      "color:#fff;max-width:380px;box-shadow:0 8px 24px rgba(0,0,0,.2);" +
+      "background:" +
+      (kind === "error" ? "#b91c1c" : kind === "success" ? "#15803d" : "#1f2937");
+    el.innerHTML = message;
+    document.body.appendChild(el);
+    if (kind !== "info") setTimeout(function () { el.remove(); }, 12000);
+  }
+
+  function extractJsonLd(html) {
+    var m = html.match(
+      /<script[^>]+id=["']goodsDetailSchema["'][^>]*>([\s\S]*?)<\/script>/,
+    );
+    if (!m) return null;
+    try {
+      var parsed = JSON.parse(m[1].trim());
+      var pg = Array.isArray(parsed) ? parsed[0] : parsed;
+      if (!pg || pg["@type"] !== "ProductGroup") return null;
+      return pg;
+    } catch (e) { return null; }
+  }
+
+  function extractSiblings(html) {
+    var out = [];
+    var seen = {};
+    var pos = 0;
+    var marker = '"attr_id":"27"';
+    while (true) {
+      var idx = html.indexOf(marker, pos);
+      if (idx === -1) break;
+      pos = idx + 1;
+      // backward brace balance
+      var depth = 0, start = -1;
+      for (var i = idx; i >= 0; i--) {
+        var c = html[i];
+        if (c === "}") depth++;
+        else if (c === "{") {
+          if (depth === 0) { start = i; break; }
+          depth--;
+        }
+      }
+      if (start === -1) continue;
+      depth = 0;
+      var end = -1;
+      for (var j = start; j < html.length; j++) {
+        var d = html[j];
+        if (d === "{") depth++;
+        else if (d === "}") { depth--; if (depth === 0) { end = j + 1; break; } }
+      }
+      if (end === -1) continue;
+      try {
+        var obj = JSON.parse(html.slice(start, end));
+        if (obj && obj.attr_id === "27" && obj.goods_id && !seen[obj.goods_id]) {
+          seen[obj.goods_id] = 1;
+          out.push(obj);
+        }
+      } catch (e) {}
+    }
+    return out;
+  }
+
+  function buildUrl(entry) {
+    var slug = entry.goods_url_name.trim().replace(/\s+/g, "-");
+    return "https://www.shein.com/" + slug + "-p-" + entry.goods_id + ".html";
+  }
+
+  function priceFromJsonLd(pg) {
+    var variants = pg.hasVariant || [];
+    for (var i = 0; i < variants.length; i++) {
+      var p = parseFloat(variants[i].offers && variants[i].offers.price);
+      if (isFinite(p) && p > 0) return p;
+    }
+    return NaN;
+  }
+
+  function priceFromDom() {
+    // Fallback when JSON-LD prices are "0.00" — scan visible page for $XX.XX
+    var matches = document.body.innerText.match(/\$\s?(\d+\.\d{2})/);
+    if (!matches) return NaN;
+    var p = parseFloat(matches[1]);
+    return isFinite(p) ? p : NaN;
+  }
+
+  function sizesFromJsonLd(pg) {
+    var set = {};
+    var variants = pg.hasVariant || [];
+    for (var i = 0; i < variants.length; i++) {
+      if (variants[i].size) set[variants[i].size] = 1;
+    }
+    return Object.keys(set);
+  }
+
+  async function fetchSibling(entry) {
+    var url = buildUrl(entry);
+    try {
+      var res = await fetch(url, { credentials: "include" });
+      if (res.url && res.url.indexOf("/risk/challenge") !== -1) {
+        return { entry: entry, blocked: true };
+      }
+      if (!res.ok) return { entry: entry, error: "HTTP " + res.status };
+      var html = await res.text();
+      var pg = extractJsonLd(html);
+      if (!pg) return { entry: entry, error: "no JSON-LD" };
+      return {
+        entry: entry,
+        ok: true,
+        pg: pg,
+        images: pg.image || [],
+        url: url,
+      };
+    } catch (e) {
+      return { entry: entry, error: String(e) };
+    }
+  }
+
+  // Run N async tasks with a concurrency cap.
+  async function parallelLimit(items, limit, worker) {
+    var results = new Array(items.length);
+    var nextIdx = 0;
+    async function runner() {
+      while (true) {
+        var myIdx = nextIdx++;
+        if (myIdx >= items.length) return;
+        results[myIdx] = await worker(items[myIdx]);
+      }
+    }
+    var runners = [];
+    for (var i = 0; i < Math.min(limit, items.length); i++) runners.push(runner());
+    await Promise.all(runners);
+    return results;
+  }
+
+  async function main() {
+    if (location.hostname.indexOf("shein.com") === -1) {
+      toast("Not a SHEIN page", "error");
+      return;
+    }
+    var html = document.documentElement.outerHTML;
+    var currentPg = extractJsonLd(html);
+    if (!currentPg) {
+      toast("Couldn't read this SHEIN page (no JSON-LD)", "error");
+      return;
+    }
+
+    var siblings = extractSiblings(html);
+    var currentGoodsId = currentPg.productGroupID || "";
+    // Make sure the current page is in the colors list. If the page's goods_id
+    // isn't in siblings, prepend a synthetic entry for it.
+    var currentInList = false;
+    var currentSheinId = (location.pathname.match(/-p-(\d+)\.html/) || [])[1] || "";
+    for (var i = 0; i < siblings.length; i++) {
+      if (siblings[i].goods_id === currentSheinId) { currentInList = true; break; }
+    }
+    if (!currentInList) {
+      siblings.unshift({
+        attr_id: "27",
+        attr_value: currentPg.color || "Default",
+        goods_id: currentSheinId,
+        goods_url_name: (currentPg.name || "").replace(/[^a-zA-Z0-9 ]/g, "").trim() || "shein-product",
+        goods_color_image: currentPg.image[0] || "",
+        goods_image: currentPg.image[0] || "",
+      });
+    }
+
+    toast("Found " + siblings.length + " color(s). Fetching gallery images…", "info");
+
+    var siblingResults = await parallelLimit(siblings, CONCURRENCY, fetchSibling);
+    var successfulColors = [];
+    var failedColors = [];
+    var blockedCount = 0;
+    for (var i = 0; i < siblingResults.length; i++) {
+      var r = siblingResults[i];
+      if (r.blocked) blockedCount++;
+      if (r.ok && r.images.length > 0) {
+        successfulColors.push({
+          name: r.entry.attr_value,
+          sheinUrl: r.url,
+          sheinGoodsId: r.entry.goods_id,
+          images: r.images,
+        });
+      } else {
+        failedColors.push(r.entry.attr_value);
+      }
+    }
+
+    if (blockedCount > 0) {
+      toast(
+        "SHEIN anti-bot tripped on " + blockedCount + " color fetches. Try again in 60s.",
+        "error",
+      );
+      return;
+    }
+    if (successfulColors.length === 0) {
+      toast("Couldn't fetch any color galleries. Aborted.", "error");
+      return;
+    }
+
+    // Price: JSON-LD first, DOM fallback
+    var price = priceFromJsonLd(currentPg);
+    if (!isFinite(price) || price <= 0) {
+      price = priceFromDom();
+    }
+    if (!isFinite(price) || price <= 0) {
+      toast("Couldn't determine price. Open admin manually.", "error");
+      return;
+    }
+
+    var sizes = sizesFromJsonLd(currentPg);
+    if (sizes.length === 0) sizes = ["One Size"];
+
+    var body = {
+      title: currentPg.name,
+      sheinUrl: location.href,
+      sheinPriceUsd: price,
+      sizes: sizes,
+      colors: successfulColors,
+      bookmarkletVersion: VERSION,
+    };
+
+    toast(
+      "Publishing " + successfulColors.length + " color(s) × " + sizes.length + " size(s)…",
+      "info",
+    );
+
+    try {
+      var res = await fetch(API, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-preorder-bookmarklet-token": TOKEN,
+        },
+        body: JSON.stringify(body),
+      });
+      var j = await res.json();
+      if (!res.ok) {
+        toast("Failed: " + (j.message || "unknown"), "error");
+        return;
+      }
+      var failedNote = failedColors.length > 0
+        ? " (" + failedColors.length + " color(s) skipped)"
+        : "";
+      toast(
+        "Published ✓ " + successfulColors.length + " colors × " + sizes.length + " sizes" +
+          failedNote +
+          " <a href=\"" + j.storefrontUrl + "\" target=\"_blank\" style=\"color:#fff;text-decoration:underline\">View →</a>",
+        "success",
+      );
+    } catch (err) {
+      toast("Failed: " + err.message, "error");
+    }
+  }
+
+  try { main(); } catch (e) { toast("Bookmarklet error: " + e.message, "error"); }
+})();
+```
+
+Everything else in original Task 15 (commit message, file path) stays the same.
+
+---
+
+## Task 20 (REVISED): Availability check uses JSON-LD availability
+
+Replace the inner `checkSheinUrl` function with one that parses JSON-LD:
+
+```typescript
+import { extractJsonLd } from "../lib/shein-extract"
+
+async function checkSheinUrl(url: string): Promise<CheckResult> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      headers: {
+        "User-Agent": USER_AGENT,
+        Accept: "text/html,application/xhtml+xml",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+      signal: controller.signal,
+      redirect: "follow",
+    })
+    // SHEIN's anti-bot redirects to /risk/challenge — that's a "blocked" signal.
+    if (res.url && res.url.includes("/risk/challenge")) {
+      return { kind: "blocked", status: res.status }
+    }
+    if (res.status === 404) return { kind: "removed" }
+    if (res.status === 403 || res.status === 429) {
+      return { kind: "blocked", status: res.status }
+    }
+    if (!res.ok) return { kind: "blocked", status: res.status }
+    const html = await res.text()
+    const pg = extractJsonLd(html)
+    if (!pg) return { kind: "parse-fail" }
+    // Available if any variant is InStock; out otherwise.
+    const anyInStock = pg.hasVariant.some(
+      (v) => v.offers.availability === "https://schema.org/InStock",
+    )
+    return anyInStock ? { kind: "in-stock" } : { kind: "out-of-stock" }
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+```
+
+The surrounding job logic (iterating products, updating status, sending Telegram alerts, circuit-break threshold) stays exactly as written in original Task 20.
+
+**One additional behavior:** check each variant's `metadata.shein_url` (the per-color sibling URL we stored in revised Task 2), NOT just the product-level `metadata.shein_url`. A multi-color preorder may have Color A sold out on SHEIN but Color B still in stock — only mark the WHOLE product to draft when ALL variants' SHEIN URLs are unavailable. Concrete logic:
+
+```typescript
+// In the main loop, instead of one fetch per product, gather variant urls:
+const variantUrls = (p as any).variants?.map(
+  (v: any) => v.metadata?.shein_url
+).filter(Boolean) ?? []
+const distinctUrls = Array.from(new Set([p.metadata?.shein_url, ...variantUrls]
+  .filter((u): u is string => typeof u === "string")))
+
+const results = await Promise.all(distinctUrls.map(checkSheinUrl))
+const allOut = results.length > 0 && results.every(
+  (r) => r.kind === "out-of-stock" || r.kind === "removed",
+)
+const anyBlocked = results.some((r) => r.kind === "blocked")
+// then branch on allOut / anyBlocked as in v1
+```
+
+This requires fetching `variants.metadata` in the initial `query.graph` call — add `variants.id`, `variants.metadata` to the fields list.
+
+---
+
+## Summary of what's NOT changing
+
+These original tasks are unchanged:
+
+- **Task 3** — Refactor existing POST. The shared helper signature is the same shape (`CreatePreorderProductInput`), so the refactor logic is identical, just the input shape passed in differs.
+- **Tasks 4-7** — Storefront PDP, gallery, color swatches. The DUB-front side reads `variant.metadata.image_urls` regardless of whether that came from the admin form or the bookmarklet. Same code path.
+- **Task 8** — Phase 1 smoke. Unchanged.
+- **Tasks 9-11** — Token model, service, admin token route. No SHEIN logic involved.
+- **Task 13** — Backend smoke. Just update the curl example body to the multi-color shape.
+- **Task 14** — CORS. Unchanged.
+- **Task 16** — `build-bookmarklet.ts` helper. Unchanged.
+- **Task 17** — Admin settings page UI. Unchanged.
+- **Task 18** — Phase 2 smoke. Unchanged (just expect multi-color in output).
+- **Task 19** — Telegram message templates. Unchanged.
+- **Task 21** — Manual one-shot script. Unchanged.
+- **Task 22** — Phase 3 smoke. Unchanged.
+
+---
+
+## Resumption order
+
+When subagent execution resumes, dispatch tasks in this order:
+
+1. **Task 1 (revised)** ← Start here
+2. Task 2 (revised)
+3. Task 3
+4. Task 4
+5. Task 5
+6. Task 6
+7. Task 7
+8. Task 8 (manual — owner does after phase 1 deploy)
+9. Task 9
+10. Task 10
+11. Task 11
+12. Task 12 (revised body shape)
+13. Task 13 (manual)
+14. Task 14 (manual)
+15. Task 15 (revised)
+16. Task 16
+17. Task 17
+18. Task 18 (manual)
+19. Task 19
+20. Task 20 (revised)
+21. Task 21
+22. Task 22 (manual)
+

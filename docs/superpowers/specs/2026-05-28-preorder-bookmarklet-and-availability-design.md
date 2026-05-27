@@ -1,6 +1,7 @@
 # Pre-order SHEIN bookmarklet + daily availability check — design
 
-**Status:** Approved 2026-05-28, ready for implementation plan.
+**Status:** **REVISED 2026-05-28 night**. Initial design assumed SHEIN ships a `window.gbProductSsrData` global; that's stale. Live probes against 3 real SHEIN URLs confirmed: (a) `gbProductSsrData` doesn't exist anywhere, (b) the canonical product data is `<script id="goodsDetailSchema" type="application/ld+json">` (JSON-LD `ProductGroup`), (c) sibling colors are discoverable via an inline `mainSaleAttribute.info[]` array embedded in another `<script>` block, (d) browser-context `fetch()` of sibling URLs works fine (anti-bot only blocks datacenter IPs). **See [Revision 2](#revision-2--2026-05-28-night) at the bottom of this doc — it supersedes the relevant sections of the original design.**
+
 **Owner:** RahviB (solo).
 **Repos touched:** `dollup-medusa` (backend), `dollup-admin` (admin UI), `DUB-front` (storefront).
 
@@ -302,3 +303,165 @@ Each phase is its own commit + Coolify deploy, smoke-tested in isolation. Failur
 - modified: `src/lib/preorder.ts` (type extension)
 - modified: `src/app/(preorder)/preorder/products/[handle]/page.tsx` (color swatch row)
 - new: `src/components/preorder/PreorderGallery.tsx`
+
+---
+
+## Revision 2 — 2026-05-28 night
+
+### What changed
+
+The original design was built around `window.gbProductSsrData` — a SHEIN global that no longer exists. A live Playwright session on the 3 URLs the user supplied (Soleia tie-dye dress, Aloruh halter dress with 20 colors, Amorya ruffle dress) confirmed:
+
+- **`window.gbProductSsrData`** — not present on any current SHEIN PDP. Only related global is `gbRawData`, which only contains `{googleSEO, modules, canonicalInfo}` — nothing about products.
+- **JSON-LD `<script id="goodsDetailSchema">`** is present and stable. It's a `ProductGroup` containing `name`, `color` (single per page), `image[]` (6-8 high-res URLs), `hasVariant[]` with `size`, `offers.price`, and `offers.availability` per variant.
+- **Each SHEIN URL represents ONE color.** Sibling colors live at different `goods_id`-numbered URLs. The list of siblings lives in an inline `<script>` containing a `mainSaleAttribute.info[]` array — each entry has `attr_value` (color name), `goods_id`, `goods_url_name`, `goods_color_image`, `goods_image`. URL pattern: `https://www.shein.com/<goods_url_name with spaces→hyphens>-p-<goods_id>.html`.
+- **Browser-context `fetch()` of sibling URLs works fine** (1.5s, HTTP 200, full HTML returned). Anti-bot only blocks datacenter IPs (e.g. the Coolify backend container).
+- **Server-side fetch from the backend container is blocked by SHEIN's risk/challenge** (302 to `/risk/challenge?captcha_type=903`). The daily availability cron strategy needs to assume blocking and fall back to a local-laptop daemon.
+
+All verification artifacts saved at [`docs/superpowers/plans/2026-05-28-shein-probes/`](../plans/2026-05-28-shein-probes/) — probe JSON files numbered 01-08 trace the discovery path.
+
+### Revised architecture
+
+```
+SHEIN PDP (your browser tab)
+  ↓ click bookmarklet
+  ↓ extracts JSON-LD ProductGroup from <script id="goodsDetailSchema">
+  ↓   → title, color (current page's), image[], sizes, price, availability
+  ↓ extracts mainSaleAttribute.info[] from inline <script>
+  ↓   → list of all sibling color goods_id + goods_url_name
+  ↓ in PARALLEL: fetch() each sibling URL in the same browser session
+  ↓   → for each: parse its JSON-LD, get that color's image[]
+  ↓ bundles current page + all siblings into one shape:
+  ↓   { title, sheinUrl, sheinPriceUsd, sizes[], colors: [{name, sheinUrl, images[]}], bookmarkletVersion }
+  ↓ POST https://api.dollupboutique.com/admin/preorder/bookmarklet
+  ↓
+Backend creates one Medusa product:
+  ↓ variants = colors × sizes (e.g. 4 colors × 4 sizes = 16 variants)
+  ↓ variant.metadata.image_urls = images for that color
+  ↓ explicit remoteLink.create() for Pre-Order sales channel
+  ↓
+Bookmarklet toast: "Published ✓ Imported 4 colors, 16 variants → View"
+```
+
+### Revised data shapes
+
+**`mainSaleAttribute.info[]` entry (extracted from inline `<script>`):**
+```ts
+type SheinColorEntry = {
+  attr_id: "27"          // always 27 = Color attribute
+  attr_value: string     // "Light Yellow"
+  goods_id: string       // "373210897"
+  goods_url_name: string // "Aloruh Women s Solid Color Casual Halter Mini Bubble Dress"
+  goods_color_image: string  // swatch thumb
+  goods_image: string        // main listing image (one only at this level)
+}
+```
+
+**Sibling URL construction:**
+```ts
+function buildSheinUrl(entry: SheinColorEntry): string {
+  const slug = entry.goods_url_name.trim().replace(/\s+/g, "-")
+  return `https://www.shein.com/${slug}-p-${entry.goods_id}.html`
+}
+```
+
+**JSON-LD ProductGroup (extracted from `<script id="goodsDetailSchema">`):**
+```ts
+type SheinJsonLd = {
+  "@type": "ProductGroup"
+  name: string
+  color: string  // single color for THIS page
+  productGroupID: string
+  image: string[]  // 6-8 high-res URLs at .ltwebstatic.com
+  hasVariant: Array<{
+    "@type": "Product"
+    sku: string
+    size: string
+    offers: {
+      price: string  // USD, sometimes "0.00" if suppressed — bookmarklet falls back to DOM
+      priceCurrency: "USD"
+      availability: "https://schema.org/InStock" | "https://schema.org/OutOfStock"
+    }
+  }>
+}
+```
+
+**Bookmarklet → backend payload (replaces the v1 shape):**
+```ts
+type BookmarkletImportBody = {
+  title: string          // from the page where bookmarklet was clicked
+  sheinUrl: string       // the page where bookmarklet was clicked
+  sheinPriceUsd: number  // from JSON-LD or DOM fallback
+  sizes: string[]        // union of sizes across all colors
+  colors: Array<{
+    name: string           // "Light Yellow"
+    sheinUrl: string       // sibling URL for THIS color
+    sheinGoodsId: string   // "373210897"
+    images: string[]       // 6-8 URLs from THIS color's JSON-LD image[]
+  }>
+  bookmarkletVersion: string
+}
+```
+
+### Multi-color sibling-fetch strategy
+
+The bookmarklet's heaviest step is `Promise.all(colors.map(c => fetch(c.url).then(parseJsonLd)))`. Verified: 1 sibling takes 1.5s. With `Promise.all`, all N siblings finish in roughly the same time as the slowest one (≈2-3s typical for 4-5 colors).
+
+**Limit:** Cap concurrent fetches at 8 (SHEIN may rate-limit too-aggressive parallel requests from one session). For products with >8 colors, queue the rest sequentially after the first batch.
+
+**Failure modes:**
+- One sibling 404s → skip that color, log it, keep others.
+- One sibling's JSON-LD missing → skip that color, log it.
+- All siblings fail → bookmarklet falls back to "current page only" → toast: "Imported 1 color only — N siblings failed to load".
+- Captcha challenge fires mid-fetch → bookmarklet detects redirect-to-`/risk/challenge` in any response → aborts whole import, toast: "SHEIN anti-bot tripped. Wait 1 minute and try again."
+
+### Daily availability check — strategy update
+
+Server-side fetch from the backend container will hit the same `/risk/challenge` block. So the cron strategy becomes:
+
+1. **Try server-side first** (cheap). Same 4xx detection logic as designed in v1.
+2. **If >30% of products in one run get blocked** → fire the existing circuit-break Telegram alert AND tag those products with `metadata.shein_needs_manual_check = true` (not auto-drafted).
+3. **Long-term: local-laptop daemon** — already documented as v2 fallback. Same pattern as the stories-render daemon. The daemon polls backend for `metadata.shein_needs_manual_check === true` products, visits them in a real browser session, posts availability back.
+
+For v1, the daily cron ships server-side-only with Telegram alerts. The user accepts that anti-bot may make this useless and the laptop daemon is the realistic working solution — but that's deferred until we see the cron actually fail.
+
+### Files affected by revision
+
+The following plan tasks need code-level updates (file list unchanged from original, but contents change):
+
+| Task | What changes |
+|---|---|
+| Task 1 (`shein-extract.ts`) | Drop `gbProductSsrData` paths entirely. Two new exports: `extractFromShein(html)` — parses `<script id="goodsDetailSchema">` JSON-LD only — and `extractMainSaleAttributeColors(html)` — parses the inline `mainSaleAttribute.info[]` array for sibling discovery. Both used by bookmarklet route validation + daily availability check. |
+| Task 2 (`create-preorder-product.ts`) | Input shape `colors: Array<{name, sheinUrl, sheinGoodsId, images[]}>`. Each color stored on its variants' `metadata.image_urls`; `metadata.shein_url` on each variant tracks the sibling URL for color-specific availability checks. Product-level `metadata.shein_url` = the original page where the bookmarklet was clicked. |
+| Task 12 (`/admin/preorder/bookmarklet` POST) | Validates new payload shape. Same auth, same workflow call, same channel-link logic. |
+| Task 15 (bookmarklet JS) | Major rewrite. ~200 lines (was ~150). New extraction logic + `Promise.all` sibling fetch. |
+| Task 20 (availability check job) | Reads JSON-LD `hasVariant[].offers.availability` instead of `gbProductSsrData.is_sold_out`. Checks each variant's sibling URL (via `metadata.shein_url`). If a SHEIN sibling 404s, mark just that color as unavailable on the Medusa product (set variant `manage_inventory: true, inventory_quantity: 0` for backend-side OOS — though actual policy is `manage_inventory=false` so we use a variant-level metadata flag instead). |
+
+Tasks 3-11 and 13-19 + 21-22 are unchanged in shape (they cover token model, admin UI, telegram messages, etc.).
+
+### Fixtures for tests
+
+Tests use real captured data:
+- [`docs/superpowers/plans/2026-05-28-shein-probes/07-aloruh-20-colors-parsed.json`](../plans/2026-05-28-shein-probes/07-aloruh-20-colors-parsed.json) — multi-color extraction (20 colors)
+- [`docs/superpowers/plans/2026-05-28-shein-probes/02-aloruh-full-probe.json`](../plans/2026-05-28-shein-probes/02-aloruh-full-probe.json) — single-color JSON-LD (Aloruh = "Orange" only at the product-group level)
+- [`docs/superpowers/plans/2026-05-28-shein-probes/03-amorya-full-probe.json`](../plans/2026-05-28-shein-probes/03-amorya-full-probe.json) — single-color JSON-LD
+- [`docs/superpowers/plans/2026-05-28-shein-probes/08-sibling-fetch-success.json`](../plans/2026-05-28-shein-probes/08-sibling-fetch-success.json) — proof of cross-color browser-context fetch success
+
+For the test fixtures the parser consumes (HTML strings), we'll save 2-3 representative HTML files captured live via Playwright when the implementation task runs (Task 1 first step).
+
+### Security note
+
+Multi-color import means the bookmarklet creates more product variants per click (e.g. 20 colors × 4 sizes = 80 variants). If the token is leaked, the abuser can spam-create much faster than before. Mitigations:
+- Rate limit on the bookmarklet route: max 10 imports per token per hour (sliding window).
+- Telegram alert on every bookmarklet POST (already designed) — abnormal volume becomes visible immediately.
+- Token TTL stays at 90 days, single active token, revokable from admin.
+
+### Things that stayed the same
+
+- 3-phase rollout (per-color PDP → bookmarklet → daily cron)
+- Token model + service + admin settings UI
+- CORS allow-list for shein.com origins
+- Hot-link SHEIN CDN images (no R2 mirror)
+- Auto-publish (no review step before going live)
+- Telegram message templates
+- Daily 06:00 MU cron schedule
