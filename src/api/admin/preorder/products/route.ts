@@ -127,6 +127,35 @@ export const POST = async (
   })
 
   const created = (result.result as { id: string }[])[0]
+
+  // Belt-and-suspenders: createProductsWorkflow's `sales_channels` input was
+  // observed to silently no-op in this Medusa version — products came out as
+  // "Available in 0 of 2 sales channels" despite the workflow input including
+  // sales_channels. So we explicitly create the link here via the remote link
+  // module. Idempotent — duplicate-link errors are swallowed since the duplicate
+  // is the desired end state.
+  const remoteLink = req.scope.resolve(ContainerRegistrationKeys.LINK) as any
+  try {
+    await remoteLink.create({
+      [Modules.PRODUCT]: { product_id: created.id },
+      [Modules.SALES_CHANNEL]: {
+        sales_channel_id: PREORDER_SALES_CHANNEL_ID,
+      },
+    })
+  } catch (err: any) {
+    if (
+      err?.message?.includes("already exists") ||
+      err?.message?.includes("duplicate") ||
+      err?.code === "23505"
+    ) {
+      // already linked — that's the goal
+    } else {
+      logger.warn?.(
+        `[preorder/products POST] Failed to link product ${created.id} to Pre-Order channel: ${err?.message ?? err}`,
+      )
+    }
+  }
+
   res.json({ product: created, preview })
 }
 
