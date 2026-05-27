@@ -54,6 +54,22 @@ describe("extractJsonLd", () => {
     const pg = extractJsonLd(html)!
     expect(typeof pg.hasVariant[0].offers.price).toBe("string")
   })
+
+  it("returns null when goodsDetailSchema contains invalid JSON", () => {
+    expect(
+      extractJsonLd(
+        '<script type="application/ld+json" id="goodsDetailSchema">{not valid json</script>',
+      ),
+    ).toBeNull()
+  })
+
+  it("returns null when the parsed value is not a ProductGroup", () => {
+    expect(
+      extractJsonLd(
+        '<script type="application/ld+json" id="goodsDetailSchema">{"@type":"BreadcrumbList","name":"x"}</script>',
+      ),
+    ).toBeNull()
+  })
 })
 
 describe("extractSiblingColors", () => {
@@ -78,14 +94,12 @@ describe("extractSiblingColors", () => {
     )
   })
 
-  it("Amorya page returns 0-3 siblings (may include self)", () => {
-    // Amorya has 2 attr_id:"27" entries — may be the current page + 1 sibling,
-    // or 2 siblings without self. Either is fine; just check it doesn't throw
-    // and yields non-negative count.
+  it("Amorya page returns 0-2 siblings (may include self)", () => {
+    // Amorya has 2 attr_id:"27" entries, deduped by goods_id, so ≤2.
     const html = fixture("amorya-single-color.html")
     const siblings = extractSiblingColors(html)
     expect(siblings.length).toBeGreaterThanOrEqual(0)
-    expect(siblings.length).toBeLessThanOrEqual(3)
+    expect(siblings.length).toBeLessThanOrEqual(2)
   })
 })
 

@@ -47,6 +47,11 @@ const JSON_LD_REGEX =
 
 const SHEIN_CDN = /^(https?:)?\/\/img\.ltwebstatic\.com\//
 const ATTR_ID_27_MARKER = '"attr_id":"27"'
+// SHEIN color objects are <2KB so 8KB gives ample headroom while bounding
+// worst-case complexity on adversarial / truncated HTML (Task 20 daily cron
+// feeds this real 1-2MB pages). Without this, findEnclosingObject is
+// O(N × M × K) on pathological input.
+const MAX_BACKWARD_WALK = 8192
 
 export function extractJsonLd(html: string): SheinJsonLd | null {
   const match = html.match(JSON_LD_REGEX)
@@ -93,6 +98,9 @@ export function extractSiblingColors(html: string): SheinSiblingColor[] {
       goods_color_image: String(obj.goods_color_image ?? ""),
       goods_image: String(obj.goods_image ?? ""),
     })
+    // Skip past the just-parsed object so a marker appearing elsewhere inside
+    // it (e.g. nested fields) doesn't trigger redundant re-walks.
+    pos = objBounds.end
   }
   return out
 }
@@ -173,7 +181,10 @@ function findEnclosingObject(
   // candidate whose balanced-object range contains innerIdx is the enclosing
   // object. Forward parsing handles strings correctly because we always start
   // outside a string at the `{`.
-  for (let i = innerIdx; i >= 0; i--) {
+  // Bounded by MAX_BACKWARD_WALK so adversarial / truncated HTML can't cause
+  // a runaway scan.
+  const lowerBound = Math.max(0, innerIdx - MAX_BACKWARD_WALK)
+  for (let i = innerIdx; i >= lowerBound; i--) {
     if (html[i] !== "{") continue
     const bounds = parseObjectForward(html, i)
     if (!bounds) continue
