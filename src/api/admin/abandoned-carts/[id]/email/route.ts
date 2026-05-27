@@ -114,7 +114,11 @@ export const POST = async (
     const storefrontUrl = (
       process.env.NEXT_PUBLIC_STOREFRONT_URL ?? "https://dollupboutique.com"
     ).replace(/\/$/, "")
-    const cartResumeUrl = `${storefrontUrl}/cart?cart_id=${cart.id}`
+    // DUB-front has no /cart page route — the cart lives in a drawer on the
+    // root layout. Land the customer on the homepage with `?cart_id=...` so
+    // CartProvider adopts the cart, and `?open_cart=1` so the drawer opens
+    // immediately. CartProvider strips both params from the URL after.
+    const cartResumeUrl = `${storefrontUrl}/?cart_id=${cart.id}&open_cart=1`
 
     const items = (cart.items ?? []).map((it) => ({
       title: it.product_title ?? it.title ?? "Item",
