@@ -2,23 +2,9 @@ import type {
   AuthenticatedMedusaRequest,
   MedusaResponse,
 } from "@medusajs/framework/http"
-import { Modules, ContainerRegistrationKeys } from "@medusajs/framework/utils"
-import { createProductsWorkflow } from "@medusajs/medusa/core-flows"
+import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
 
-import { PREORDER_MODULE } from "../../../../modules/preorder"
-import type PreorderModuleService from "../../../../modules/preorder/service"
-
-const PREORDER_SHIPPING_PROFILE_NAME = "Pre-Order Shipping"
-
-type CreatePreorderProductBody = {
-  title: string
-  sheinUrl: string
-  sheinPriceUsd: number
-  imageUrl: string
-  description?: string
-  colors?: string[]
-  sizes?: string[]
-}
+import { createPreorderProduct } from "../lib/create-preorder-product"
 
 export const POST = async (
   req: AuthenticatedMedusaRequest,
@@ -33,130 +19,108 @@ export const POST = async (
     return
   }
 
-  const body = (req.body ?? {}) as Partial<CreatePreorderProductBody>
+  // The admin form sends the legacy shape:
+  //   { title, sheinUrl, sheinPriceUsd, imageUrl, colors: string[], sizes? }
+  // The bookmarklet route sends the new shape:
+  //   { title, sheinUrl, sheinPriceUsd, colors: [{name, sheinUrl, sheinGoodsId, images[]}], sizes }
+  // Both flow through the same shared helper. Upgrade the legacy shape here so
+  // the helper only has to handle one schema.
+  const body = (req.body ?? {}) as Partial<{
+    title: string
+    sheinUrl: string
+    sheinPriceUsd: number
+    description?: string
+    sizes?: string[]
+    imageUrl?: string
+    colors?:
+      | string[]
+      | Array<{
+          name: string
+          sheinUrl?: string
+          sheinGoodsId?: string
+          images: string[]
+        }>
+  }>
 
-  const errors: string[] = []
-  if (!body.title || typeof body.title !== "string") errors.push("title required")
-  if (!body.sheinUrl || typeof body.sheinUrl !== "string") errors.push("sheinUrl required")
-  if (typeof body.sheinPriceUsd !== "number" || !(body.sheinPriceUsd > 0)) {
-    errors.push("sheinPriceUsd must be a positive number")
+  const hasNewColorsShape =
+    Array.isArray(body.colors) &&
+    body.colors.length > 0 &&
+    typeof body.colors[0] === "object" &&
+    Array.isArray((body.colors[0] as { images?: unknown }).images)
+
+  // Upgrade legacy shape to the new shape so the helper only ever sees one schema.
+  let normalizedColors: Array<{
+    name: string
+    sheinUrl: string
+    sheinGoodsId?: string
+    images: string[]
+  }>
+  if (hasNewColorsShape) {
+    // Already in new shape — fill sheinUrl per color when the bookmarklet
+    // didn't supply one (it always does, but be defensive).
+    normalizedColors = (
+      body.colors as Array<{
+        name: string
+        sheinUrl?: string
+        sheinGoodsId?: string
+        images: string[]
+      }>
+    ).map((c) => ({
+      name: c.name,
+      sheinUrl: c.sheinUrl ?? body.sheinUrl ?? "",
+      sheinGoodsId: c.sheinGoodsId,
+      images: c.images,
+    }))
+  } else {
+    // Legacy shape: { colors: string[], imageUrl }
+    if (!body.imageUrl || typeof body.imageUrl !== "string") {
+      res.status(400).json({
+        message:
+          "imageUrl required when colors is a string[] or not provided",
+      })
+      return
+    }
+    const colorNames =
+      Array.isArray(body.colors) && body.colors.length > 0
+        ? (body.colors as string[])
+        : ["Default"]
+    normalizedColors = colorNames.map((name) => ({
+      name,
+      sheinUrl: body.sheinUrl ?? "",
+      images: [body.imageUrl!],
+    }))
   }
-  if (!body.imageUrl || typeof body.imageUrl !== "string") errors.push("imageUrl required")
 
-  if (errors.length > 0) {
-    res.status(400).json({ message: errors.join("; ") })
-    return
-  }
-
-  if (!/(^https?:\/\/)(m\.)?shein\.com\//i.test(body.sheinUrl!)) {
-    res.status(400).json({ message: "sheinUrl must be a https://shein.com or https://m.shein.com URL" })
-    return
-  }
-
-  const svc = req.scope.resolve<PreorderModuleService>(PREORDER_MODULE)
-  const preview = await svc.previewPrice({ sheinPriceUsd: body.sheinPriceUsd! })
-  const settings = await svc.getSettings()
-
-  // Look up the Pre-Order shipping profile so the product's variants get the
-  // correct fulfillment routing. Falls back to creating the product without an
-  // explicit profile if setup-preorder-shipping.ts hasn't been run yet, in
-  // which case the variant will land on the default profile and shipping at
-  // checkout will silently use apex options. We log loudly so this is caught.
-  const fulfillmentService = req.scope.resolve(Modules.FULFILLMENT)
-  const [preorderProfile] = await fulfillmentService.listShippingProfiles({
-    name: PREORDER_SHIPPING_PROFILE_NAME,
-  })
-  const logger = req.scope.resolve(ContainerRegistrationKeys.LOGGER) as any
-  if (!preorderProfile) {
-    logger.warn?.(
-      `[preorder/products POST] Pre-Order shipping profile "${PREORDER_SHIPPING_PROFILE_NAME}" not found. Run yarn medusa exec ./src/scripts/setup-preorder-shipping.ts. Product will be created on the default shipping profile.`,
-    )
-  }
-
-  const colors = body.colors?.length ? body.colors : ["Default"]
   const sizes = body.sizes?.length ? body.sizes : ["One Size"]
 
-  const variants = colors.flatMap((color) =>
-    sizes.map((size) => ({
-      title: `${color} / ${size}`,
-      sku: undefined,
-      options: { Color: color, Size: size },
-      prices: [{ currency_code: "mur", amount: preview.finalPriceMur * 100 }],
-      manage_inventory: false,
-    })),
-  )
-
-  const handle = body.title!
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "") +
-    "-preorder-" +
-    Date.now().toString(36)
-
-  const result = await createProductsWorkflow(req.scope).run({
-    input: {
-      products: [
-        {
-          title: body.title!,
-          handle,
-          description: body.description ?? "",
-          status: "published",
-          images: [{ url: body.imageUrl! }],
-          thumbnail: body.imageUrl!,
-          options: [
-            { title: "Color", values: colors },
-            { title: "Size", values: sizes },
-          ],
-          variants,
-          metadata: {
-            is_preorder: true,
-            shein_url: body.sheinUrl!,
-            shein_price_usd: body.sheinPriceUsd!,
-            preorder_fx_rate: preview.fxRateUsed,
-            preorder_eta_min_days: settings.eta_min_days,
-            preorder_eta_max_days: settings.eta_max_days,
-            preorder_priced_at: new Date().toISOString(),
-          },
-          sales_channels: [{ id: PREORDER_SALES_CHANNEL_ID }],
-          ...(preorderProfile
-            ? { shipping_profile_id: preorderProfile.id }
-            : {}),
-        },
-      ],
-    },
-  })
-
-  const created = (result.result as { id: string }[])[0]
-
-  // Belt-and-suspenders: createProductsWorkflow's `sales_channels` input was
-  // observed to silently no-op in this Medusa version — products came out as
-  // "Available in 0 of 2 sales channels" despite the workflow input including
-  // sales_channels. So we explicitly create the link here via the remote link
-  // module. Idempotent — duplicate-link errors are swallowed since the duplicate
-  // is the desired end state.
-  const remoteLink = req.scope.resolve(ContainerRegistrationKeys.LINK) as any
   try {
-    await remoteLink.create({
-      [Modules.PRODUCT]: { product_id: created.id },
-      [Modules.SALES_CHANNEL]: {
-        sales_channel_id: PREORDER_SALES_CHANNEL_ID,
+    const result = await createPreorderProduct(
+      req.scope,
+      {
+        title: body.title ?? "",
+        sheinUrl: body.sheinUrl ?? "",
+        sheinPriceUsd:
+          typeof body.sheinPriceUsd === "number" ? body.sheinPriceUsd : 0,
+        description: body.description,
+        sizes,
+        colors: normalizedColors,
       },
-    })
+      PREORDER_SALES_CHANNEL_ID,
+    )
+    res.json(result)
   } catch (err: any) {
-    if (
-      err?.message?.includes("already exists") ||
-      err?.message?.includes("duplicate") ||
-      err?.code === "23505"
-    ) {
-      // already linked — that's the goal
-    } else {
-      logger.warn?.(
-        `[preorder/products POST] Failed to link product ${created.id} to Pre-Order channel: ${err?.message ?? err}`,
-      )
-    }
+    const logger = req.scope.resolve(ContainerRegistrationKeys.LOGGER) as any
+    logger.warn?.(
+      `[admin/preorder POST] create failed: ${err?.message ?? err}`,
+    )
+    // Validation failures from the helper are 400; channel-link orphan errors
+    // are 500. The helper throws a generic Error in both cases — distinguish
+    // by message text.
+    const isOrphan = err?.message?.includes("failed to link to Pre-Order")
+    res
+      .status(isOrphan ? 500 : 400)
+      .json({ message: err?.message ?? "create failed" })
   }
-
-  res.json({ product: created, preview })
 }
 
 /**
