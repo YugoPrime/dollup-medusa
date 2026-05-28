@@ -36,6 +36,7 @@ export const GET = async (
         "item_total",
         "shipping_total",
         "discount_total",
+        "metadata",
         "items.*",
         "shipping_methods.*",
         "shipping_address.*",
