@@ -30,7 +30,7 @@ export const PUSH_VALIDATION_REASONS = [
   "missing_selling_price",
   "missing_image",
   "missing_category",
-  "no_received_qty",
+  "no_qty",
   "invalid_variant_override_price",
 ] as const
 
@@ -904,14 +904,14 @@ class SourcingModuleService extends MedusaService({
       const variants = (await svc.listDraftVariants({
         draft_item_id: item.id,
       })) as Array<{
-        received_qty: string | number | null
+        qty: string | number | null
         override_price_mur: string | number | null
       }>
-      const totalReceived = variants.reduce(
-        (acc, v) => acc + Number(v.received_qty ?? 0),
+      const totalQty = variants.reduce(
+        (acc, v) => acc + Number(v.qty ?? 0),
         0,
       )
-      if (totalReceived <= 0) reasons.push("no_received_qty")
+      if (totalQty <= 0) reasons.push("no_qty")
       const hasInvalidOverride = variants.some((v) => {
         if (v.override_price_mur === null) return false
         const n = Number(v.override_price_mur)
@@ -939,12 +939,10 @@ class SourcingModuleService extends MedusaService({
    */
   async pushDraftToMedusa(draftOrderId: string): Promise<PushDraftResult> {
     const draft = await this.retrieveDraft(draftOrderId)
-    if (draft.status !== "received") {
-      throw new MedusaError(
-        MedusaError.Types.NOT_ALLOWED,
-        "Draft must be in 'received' status to push",
-      )
-    }
+    // Status gate intentionally dropped: pushing creates products in `draft`
+    // status, invisible to the storefront. Operator flips to `published` per
+    // item via the goLive action after real photos are uploaded.
+    void draft
     const validation = await this.validateForPush(draftOrderId)
     if (!validation.ok) {
       const failing = validation.items.filter((i) => i.reasons.length)
@@ -1026,11 +1024,9 @@ class SourcingModuleService extends MedusaService({
           received_qty: number | null
           override_price_mur: string | number | null
         }>
-        const usable = variants.filter(
-          (v) => Number(v.received_qty ?? 0) > 0,
-        )
+        const usable = variants.filter((v) => Number(v.qty ?? 0) > 0)
         if (usable.length === 0) {
-          throw new Error("no_received_qty")
+          throw new Error("no_qty")
         }
 
         const hasColors = usable.some(
@@ -1130,7 +1126,7 @@ class SourcingModuleService extends MedusaService({
         const skuToQty = new Map<string, number>()
         for (const v of usable) {
           const sku = `${assignedRef}-${v.size}${v.color ? "-" + v.color : ""}`
-          skuToQty.set(sku, Number(v.received_qty ?? 0))
+          skuToQty.set(sku, Number(v.qty ?? 0))
         }
 
         const remoteQuery = container.resolve(
@@ -1176,12 +1172,10 @@ class SourcingModuleService extends MedusaService({
           input: { inventory_levels: levelInputs },
         })
 
-        // Flip product to published only after inventory levels are seeded.
-        // Until this succeeds the product is invisible to the storefront.
-        await updateProductsWorkflow(container as never).run({
-          input: { products: [{ id: productId, status: "published" }] },
-        })
-
+        // Product stays in status="draft" until the operator clicks "Go Live"
+        // in the admin (after real photos are uploaded via the script). This
+        // lets us push immediately on order placement without exposing
+        // half-photographed products on the storefront.
         await this.markItemPublished(item.id, productId)
         pushed.push({
           draft_item_id: item.id,
@@ -1220,6 +1214,40 @@ class SourcingModuleService extends MedusaService({
     }
 
     return { pushed, failed }
+  }
+
+  /**
+   * Flip a pushed draft item's Medusa product from `draft` to `published`.
+   * Idempotent: re-running on an already-published product is a no-op.
+   * Throws if the item has no published_product_id (i.e. not pushed yet).
+   */
+  async goLive(itemId: string): Promise<{ product_id: string }> {
+    const svc = this as unknown as {
+      retrieveDraftItem: (id: string) => Promise<{
+        id: string
+        published_product_id: string | null
+      } | null>
+    }
+    const item = await svc.retrieveDraftItem(itemId)
+    if (!item) {
+      throw new MedusaError(MedusaError.Types.NOT_FOUND, "draft item not found")
+    }
+    if (!item.published_product_id) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        "item has not been pushed yet",
+      )
+    }
+    const container = (this as unknown as { __container__: unknown })
+      .__container__ as { resolve: (key: string) => unknown }
+    await updateProductsWorkflow(container as never).run({
+      input: {
+        products: [
+          { id: item.published_product_id, status: "published" as const },
+        ],
+      },
+    })
+    return { product_id: item.published_product_id }
   }
 
   async setReceivedQtyDefaults(draftOrderId: string) {

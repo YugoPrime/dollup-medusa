@@ -26,21 +26,17 @@ medusaIntegrationTestRunner({
         service = getContainer().resolve(SOURCING_MODULE)
       })
 
-      it("flags missing price + missing image + zero received_qty", async () => {
+      it("flags missing price + missing image + zero qty", async () => {
         const { draftId } = await setup()
         const item = await service.createItem({
           draft_order_id: draftId,
           working_name: "Item",
           cost_usd: 10,
         })
+        // Zero ordered qty — push gate is now on qty, not received_qty
         await service.replaceVariants(item.id, [
-          { color: null, size: "M", qty: 5 },
+          { color: null, size: "M", qty: 0 },
         ])
-        // Transition to received (this auto-defaults received_qty=qty=5)
-        await transitionToReceived(draftId)
-        // Override the auto-default to recreate the "no_received_qty" condition
-        const variants = await service.listVariants(item.id)
-        await service.setReceivedQty(variants[0].id, 0)
         // selling_price_mur is null; no image
         const result = await service.validateForPush(draftId)
         const itemReport = result.items.find((i) => i.id === item.id)
@@ -48,7 +44,7 @@ medusaIntegrationTestRunner({
           expect.arrayContaining([
             "missing_selling_price",
             "missing_image",
-            "no_received_qty",
+            "no_qty",
           ]),
         )
         expect(result.ok).toBe(false)

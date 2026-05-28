@@ -93,12 +93,18 @@ medusaIntegrationTestRunner({
         expect(second.failed).toEqual([])
       })
 
-      it("rejects when draft is not in 'received' status", async () => {
-        const supplier = await service.createSupplier({ name: "S" })
-        const draft = await service.createDraft({ supplier_id: supplier.id })
-        await expect(service.pushDraftToMedusa(draft.id)).rejects.toThrow(
-          /received/i,
-        )
+      it("creates products in 'draft' status; operator flips via goLive", async () => {
+        const { draftId, itemAId } = await fullySetUpDraft()
+        const result = await service.pushDraftToMedusa(draftId)
+        const aProductId = result.pushed.find(
+          (p) => p.draft_item_id === itemAId,
+        )?.product_id
+        expect(aProductId).toBeDefined()
+        const before = await api.get(`/admin/products/${aProductId}`)
+        expect(before.data.product.status).toBe("draft")
+        await service.goLive(itemAId)
+        const after = await api.get(`/admin/products/${aProductId}`)
+        expect(after.data.product.status).toBe("published")
       })
 
       it("creates products with Color/Size when colors present, Size only when not", async () => {
@@ -115,7 +121,7 @@ medusaIntegrationTestRunner({
         expect(aOptionTitles).toEqual(["Color", "Size"])
         expect(bOptionTitles).toEqual(["Size"])
         expect(aRes.data.product.handle).toMatch(/^is\d+$/)
-        expect(aRes.data.product.status).toBe("published")
+        expect(aRes.data.product.status).toBe("draft")
       })
     })
   },
