@@ -45,7 +45,10 @@ function deriveGoodsIdFromUrl(url: string): string {
  * Pure input validator. Exported separately so it can be unit-tested without
  * spinning up the container.
  */
-export function validateBookmarkletInput(input: unknown): asserts input is CreatePreorderProductInput {
+export function validateBookmarkletInput(
+  input: unknown,
+  options: { allowAnyImageHost?: boolean } = {},
+): asserts input is CreatePreorderProductInput {
   if (!input || typeof input !== "object") throw new Error("input must be an object")
   const i = input as Record<string, any>
   if (typeof i.title !== "string" || !i.title.trim()) throw new Error("title required")
@@ -79,7 +82,13 @@ export function validateBookmarkletInput(input: unknown): asserts input is Creat
       throw new Error(`color "${c.name}" must have at least one image`)
     }
     for (const url of c.images) {
-      if (typeof url !== "string" || !SHEIN_CDN_REGEX.test(url)) {
+      if (typeof url !== "string" || !url) {
+        throw new Error(`color "${c.name}" image URLs must be non-empty strings`)
+      }
+      if (!/^https:\/\//i.test(url)) {
+        throw new Error(`color "${c.name}" image URLs must use https://`)
+      }
+      if (!options.allowAnyImageHost && !SHEIN_CDN_REGEX.test(url)) {
         throw new Error(`color "${c.name}" image URLs must be on img.ltwebstatic.com`)
       }
     }
@@ -108,8 +117,9 @@ export async function createPreorderProduct(
   container: MedusaContainer,
   rawInput: unknown,
   preorderSalesChannelId: string,
+  options: { allowAnyImageHost?: boolean } = {},
 ): Promise<CreatePreorderProductResult> {
-  validateBookmarkletInput(rawInput)
+  validateBookmarkletInput(rawInput, options)
   const input = rawInput as CreatePreorderProductInput
 
   const svc = container.resolve<PreorderModuleService>(PREORDER_MODULE)

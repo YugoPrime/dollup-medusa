@@ -101,6 +101,48 @@ describe("validateBookmarkletInput", () => {
       validateBookmarkletInput({ ...valid, sheinPriceUsd: 100000 }),
     ).toThrow(/<= 10000/)
   })
+
+  it("rejects non-https image URL even when allowAnyImageHost is true", () => {
+    const bad = {
+      ...valid,
+      colors: [
+        {
+          name: "Orange",
+          sheinUrl: "https://shein.com/x-p-1.html",
+          images: ["http://insecure.example.com/x.jpg"],
+        },
+      ],
+    }
+    expect(() => validateBookmarkletInput(bad, { allowAnyImageHost: true })).toThrow(/https:/)
+  })
+
+  it("accepts non-SHEIN https image URL when allowAnyImageHost is true", () => {
+    const ok = {
+      ...valid,
+      colors: [
+        {
+          name: "Orange",
+          sheinUrl: "https://shein.com/x-p-1.html",
+          images: ["https://r2.example.com/x.jpg"],
+        },
+      ],
+    }
+    expect(() => validateBookmarkletInput(ok, { allowAnyImageHost: true })).not.toThrow()
+  })
+
+  it("rejects non-SHEIN image URL when allowAnyImageHost is unset (strict default)", () => {
+    const bad = {
+      ...valid,
+      colors: [
+        {
+          name: "Orange",
+          sheinUrl: "https://shein.com/x-p-1.html",
+          images: ["https://r2.example.com/x.jpg"],
+        },
+      ],
+    }
+    expect(() => validateBookmarkletInput(bad)).toThrow(/img\.ltwebstatic\.com/)
+  })
 })
 
 // TODO(preorder): add shape-level tests for the workflow input

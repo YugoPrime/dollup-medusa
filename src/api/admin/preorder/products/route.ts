@@ -106,6 +106,7 @@ export const POST = async (
         colors: normalizedColors,
       },
       PREORDER_SALES_CHANNEL_ID,
+      { allowAnyImageHost: true },
     )
     res.json(result)
   } catch (err: any) {
