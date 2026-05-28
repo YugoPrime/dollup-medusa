@@ -62,6 +62,16 @@ export default defineMiddlewares({
       bodyParser: false,
     },
     {
+      // Sourcing draft-image upload posts the file as base64 inside a JSON body.
+      // Medusa's default JSON body limit is 1MB; an image up to the route's
+      // own 2MB cap base64-encodes to ~2.7MB. Without this override the parser
+      // rejects the body before the route runs and the default error handler
+      // returns "An unknown error occurred." with no usable trace.
+      matcher: "/admin/sourcing/uploads",
+      methods: ["POST"],
+      bodyParser: { sizeLimit: "4mb" },
+    },
+    {
       // Bookmarklet route lives under /hooks/* because /admin/* and /store/*
       // both have global per-namespace middleware (admin-auth + publishable-
       // key check) registered by Medusa that can't be opted out per-route.
