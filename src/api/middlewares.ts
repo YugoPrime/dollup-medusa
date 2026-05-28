@@ -30,7 +30,7 @@ export default defineMiddlewares({
       // admin session middleware so unauthenticated CORS POSTs from shein.com
       // reach the handler.
       matcher: "/admin/preorder/bookmarklet",
-      method: ["POST", "OPTIONS"],
+      methods: ["POST", "OPTIONS"],
       middlewares: [],
     },
   ],
