@@ -26,11 +26,15 @@ export default defineMiddlewares({
       bodyParser: false,
     },
     {
-      // The bookmarklet route uses its own header-based token auth — skip the
-      // admin session middleware so unauthenticated CORS POSTs from shein.com
-      // reach the handler.
-      matcher: "/admin/preorder/bookmarklet",
+      // The bookmarklet route uses its own header-based token auth — skip
+      // Medusa's built-in middlewares so cross-origin POSTs from shein.com
+      // reach the handler. Lives under /store/* (not /admin/*) because the
+      // admin-auth middleware is global and can't be disabled per-route.
+      // authenticate: false also skips the publishable-key check that
+      // normally guards /store/* routes.
+      matcher: "/store/preorder/bookmarklet",
       methods: ["POST", "OPTIONS"],
+      authenticate: false,
       middlewares: [],
     },
   ],

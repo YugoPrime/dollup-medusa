@@ -4,19 +4,21 @@ import type {
 } from "@medusajs/framework/http"
 import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
 
-import { createPreorderProduct } from "../lib/create-preorder-product"
+import { createPreorderProduct } from "../../../admin/preorder/lib/create-preorder-product"
 import { PREORDER_MODULE } from "../../../../modules/preorder"
 import type PreorderModuleService from "../../../../modules/preorder/service"
 
 /**
- * POST /admin/preorder/bookmarklet
+ * POST /store/preorder/bookmarklet
  *
  * Token-authed endpoint that accepts the multi-color SHEIN payload scraped
  * by the bookmarklet from a product page and creates a Medusa pre-order
- * product. Auth here is custom (header-based shared token verified against
- * the preorder_token table), NOT the admin session cookie — the admin
- * session middleware is disabled for this path in src/api/middlewares.ts
- * so the bookmarklet can POST from any origin (shein.com).
+ * product. Lives under /store/* (not /admin/*) because Medusa's built-in
+ * admin auth middleware blocks all /admin/* paths globally and cannot be
+ * disabled per-route. Auth here is custom (header-based shared token
+ * verified against the preorder_token table). The publishable-key check
+ * normally enforced on /store/* paths is disabled for this exact path in
+ * src/api/middlewares.ts.
  */
 type BookmarkletBody = {
   title?: string
@@ -157,7 +159,7 @@ export const POST = async (req: MedusaRequest, res: MedusaResponse) => {
   } catch (err: any) {
     const logger = req.scope.resolve(ContainerRegistrationKeys.LOGGER) as any
     logger.warn?.(
-      `[admin/preorder/bookmarklet POST] create failed: ${err?.message ?? err}`,
+      `[store/preorder/bookmarklet POST] create failed: ${err?.message ?? err}`,
     )
     // Validation failures from the helper are 400; channel-link orphan errors
     // are 500. Same mapping as src/api/admin/preorder/products/route.ts.
