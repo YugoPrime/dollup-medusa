@@ -1,3 +1,5 @@
+import { createHash, randomBytes } from "crypto"
+
 import { MedusaError, MedusaService } from "@medusajs/framework/utils"
 
 import PreorderSettings from "./models/preorder-settings"
@@ -159,6 +161,146 @@ class PreorderModuleService extends MedusaService({
     const result = computePreorderPrice(input, settings)
     return { ...result, settingsId: settings.id }
   }
+
+  async generateBookmarkletToken(
+    options: { expiresInDays?: number } = {},
+  ): Promise<{ token: string; expiresAt: Date | null }> {
+    const expiresInDays = options.expiresInDays ?? 90
+    const expiresAt =
+      expiresInDays > 0
+        ? new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000)
+        : null
+
+    // Revoke previous active tokens — single-active-token policy.
+    const service = this as unknown as {
+      listPreorderTokens: (
+        filters: Record<string, unknown>,
+      ) => Promise<Array<{ id: string }>>
+      updatePreorderTokens: (
+        input: Record<string, unknown> & { id: string },
+      ) => Promise<unknown>
+      createPreorderTokens: (
+        input: Record<string, unknown>,
+      ) => Promise<{ id: string }>
+    }
+    const previous = await service.listPreorderTokens({
+      revoked_at: null,
+    })
+    for (const row of previous) {
+      await service.updatePreorderTokens({
+        id: row.id,
+        revoked_at: new Date(),
+      })
+    }
+
+    const plaintext = randomBytes(32).toString("hex")
+    const tokenHash = hashToken(plaintext)
+    await service.createPreorderTokens({
+      token_hash: tokenHash,
+      expires_at: expiresAt,
+    })
+
+    return { token: plaintext, expiresAt }
+  }
+
+  async verifyBookmarkletToken(
+    plaintext: string,
+  ): Promise<
+    | { valid: true; tokenId: string }
+    | { valid: false; reason: "unknown" | "revoked" | "expired" }
+  > {
+    if (!plaintext || typeof plaintext !== "string") {
+      return { valid: false, reason: "unknown" }
+    }
+    const tokenHash = hashToken(plaintext)
+    const service = this as unknown as {
+      listPreorderTokens: (
+        filters: Record<string, unknown>,
+      ) => Promise<
+        Array<{
+          id: string
+          revoked_at: Date | null
+          expires_at: Date | null
+        }>
+      >
+      updatePreorderTokens: (
+        input: Record<string, unknown> & { id: string },
+      ) => Promise<unknown>
+    }
+    const rows = await service.listPreorderTokens({ token_hash: tokenHash })
+    if (rows.length === 0) return { valid: false, reason: "unknown" }
+    const row = rows[0]
+    if (row.revoked_at) return { valid: false, reason: "revoked" }
+    if (row.expires_at && row.expires_at < new Date()) {
+      return { valid: false, reason: "expired" }
+    }
+    await service.updatePreorderTokens({
+      id: row.id,
+      last_used_at: new Date(),
+    })
+    return { valid: true, tokenId: row.id }
+  }
+
+  async revokeBookmarkletToken(): Promise<void> {
+    const service = this as unknown as {
+      listPreorderTokens: (
+        filters: Record<string, unknown>,
+      ) => Promise<Array<{ id: string }>>
+      updatePreorderTokens: (
+        input: Record<string, unknown> & { id: string },
+      ) => Promise<unknown>
+    }
+    const active = await service.listPreorderTokens({ revoked_at: null })
+    for (const row of active) {
+      await service.updatePreorderTokens({
+        id: row.id,
+        revoked_at: new Date(),
+      })
+    }
+  }
+
+  async getActiveTokenInfo(): Promise<
+    | { active: false }
+    | {
+        active: true
+        expiresAt: Date | null
+        lastUsedAt: Date | null
+        createdAt: Date
+      }
+  > {
+    const service = this as unknown as {
+      listPreorderTokens: (
+        filters: Record<string, unknown>,
+        config?: Record<string, unknown>,
+      ) => Promise<
+        Array<{
+          expires_at: Date | null
+          last_used_at: Date | null
+          created_at: Date
+          revoked_at: Date | null
+        }>
+      >
+    }
+    const rows = await service.listPreorderTokens(
+      { revoked_at: null },
+      { take: 1, order: { created_at: "DESC" } },
+    )
+    if (rows.length === 0) return { active: false }
+    const row = rows[0]
+    return {
+      active: true,
+      expiresAt: row.expires_at,
+      lastUsedAt: row.last_used_at,
+      createdAt: row.created_at,
+    }
+  }
 }
+
+function hashToken(plaintext: string): string {
+  return createHash("sha256").update(plaintext, "utf8").digest("hex")
+}
+
+// Re-export for unit tests only — not part of the public service API.
+export { hashToken as hashTokenForTest }
 
 export default PreorderModuleService
