@@ -4,21 +4,21 @@ import type {
 } from "@medusajs/framework/http"
 import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
 
-import { createPreorderProduct } from "../../../admin/preorder/lib/create-preorder-product"
-import { PREORDER_MODULE } from "../../../../modules/preorder"
-import type PreorderModuleService from "../../../../modules/preorder/service"
+import { createPreorderProduct } from "../../admin/preorder/lib/create-preorder-product"
+import { PREORDER_MODULE } from "../../../modules/preorder"
+import type PreorderModuleService from "../../../modules/preorder/service"
 
 /**
- * POST /store/preorder/bookmarklet
+ * POST /hooks/preorder-bookmarklet
  *
  * Token-authed endpoint that accepts the multi-color SHEIN payload scraped
  * by the bookmarklet from a product page and creates a Medusa pre-order
- * product. Lives under /store/* (not /admin/*) because Medusa's built-in
- * admin auth middleware blocks all /admin/* paths globally and cannot be
- * disabled per-route. Auth here is custom (header-based shared token
- * verified against the preorder_token table). The publishable-key check
- * normally enforced on /store/* paths is disabled for this exact path in
- * src/api/middlewares.ts.
+ * product. Lives under /hooks/* (not /admin/* or /store/*) because Medusa
+ * registers global per-namespace auth/publishable-key middleware on those
+ * two namespaces that can't be opted out per-route. /hooks/* has no
+ * built-in auth, no built-in CORS — our middleware adds the CORS headers
+ * explicitly. Auth here is the custom header-based shared token verified
+ * against the preorder_token table.
  */
 type BookmarkletBody = {
   title?: string
@@ -159,7 +159,7 @@ export const POST = async (req: MedusaRequest, res: MedusaResponse) => {
   } catch (err: any) {
     const logger = req.scope.resolve(ContainerRegistrationKeys.LOGGER) as any
     logger.warn?.(
-      `[store/preorder/bookmarklet POST] create failed: ${err?.message ?? err}`,
+      `[hooks/preorder-bookmarklet POST] create failed: ${err?.message ?? err}`,
     )
     // Validation failures from the helper are 400; channel-link orphan errors
     // are 500. Same mapping as src/api/admin/preorder/products/route.ts.

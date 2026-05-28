@@ -1,5 +1,41 @@
 import { defineMiddlewares } from "@medusajs/framework/http"
+import type { MedusaNextFunction, MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import { raw } from "express"
+
+// Bookmarklet runs in the user's tab on any shein.com host. Browser sends a
+// CORS preflight OPTIONS before the POST. /hooks/* gets no auto-CORS from
+// Medusa, so we add the headers manually here.
+const ALLOWED_BOOKMARKLET_ORIGINS = new Set([
+  "https://shein.com",
+  "https://www.shein.com",
+  "https://m.shein.com",
+  "https://us.shein.com",
+  "https://uk.shein.com",
+  "https://fr.shein.com",
+])
+
+function bookmarkletCors(
+  req: MedusaRequest,
+  res: MedusaResponse,
+  next: MedusaNextFunction,
+) {
+  const origin = req.headers.origin
+  if (typeof origin === "string" && ALLOWED_BOOKMARKLET_ORIGINS.has(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin)
+    res.setHeader("Vary", "Origin")
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      "Content-Type, x-preorder-bookmarklet-token",
+    )
+    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS")
+    res.setHeader("Access-Control-Max-Age", "86400")
+  }
+  if (req.method === "OPTIONS") {
+    res.status(204).end()
+    return
+  }
+  next()
+}
 
 export default defineMiddlewares({
   routes: [
@@ -26,16 +62,14 @@ export default defineMiddlewares({
       bodyParser: false,
     },
     {
-      // The bookmarklet route uses its own header-based token auth — skip
-      // Medusa's built-in middlewares so cross-origin POSTs from shein.com
-      // reach the handler. Lives under /store/* (not /admin/*) because the
-      // admin-auth middleware is global and can't be disabled per-route.
-      // authenticate: false also skips the publishable-key check that
-      // normally guards /store/* routes.
-      matcher: "/store/preorder/bookmarklet",
+      // Bookmarklet route lives under /hooks/* because /admin/* and /store/*
+      // both have global per-namespace middleware (admin-auth + publishable-
+      // key check) registered by Medusa that can't be opted out per-route.
+      // /hooks/* has no built-in auth and no built-in CORS — we add CORS
+      // manually here and the route handler enforces the token check.
+      matcher: "/hooks/preorder-bookmarklet",
       methods: ["POST", "OPTIONS"],
-      authenticate: false,
-      middlewares: [],
+      middlewares: [bookmarkletCors],
     },
   ],
 })
