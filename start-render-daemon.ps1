@@ -62,9 +62,10 @@ try {
   # won't be ready. Catch this here instead.
   $tunnelOk = Test-NetConnection 127.0.0.1 -Port 5432 -InformationLevel Quiet -WarningAction SilentlyContinue
   if (-not $tunnelOk) {
-    $msg = "[start-render-daemon] $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') SSH tunnel down (127.0.0.1:5432 not listening) — aborting before knex timeout"
+    $msg = "[start-render-daemon] $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') SSH tunnel down (127.0.0.1:5432 not listening) - aborting before knex timeout"
     Write-Host $msg
-    Send-TelegramAlert "&#9888;&#65039; <b>Stories render aborted</b>`n`nSSH tunnel to Coolify is down (127.0.0.1:5432 not listening).`n`nFix: <code>pm2 resurrect</code> then re-run <code>start-render-daemon.ps1</code>."
+    $alertMsg = [char]0x26A0 + [char]0xFE0F + " <b>Stories render aborted</b>`n`nSSH tunnel to Coolify is down (127.0.0.1:5432 not listening).`n`nFix: <code>pm2 resurrect</code> then re-run <code>start-render-daemon.ps1</code>."
+    Send-TelegramAlert $alertMsg
     exit 2
   }
 
@@ -76,7 +77,8 @@ try {
   Write-Host "[start-render-daemon] $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') finished with exit code $exitCode"
 
   if ($exitCode -ne 0) {
-    Send-TelegramAlert "&#10060; <b>Stories render failed</b>`n`n<code>yarn medusa exec local-render-stories</code> exited with code $exitCode.`n`nCheck <code>logs/stories-render-task.log</code> on the laptop."
+    $failMsg = [char]0x274C + " <b>Stories render failed</b>`n`n<code>yarn medusa exec local-render-stories</code> exited with code $exitCode.`n`nCheck <code>logs/stories-render-task.log</code> on the laptop."
+    Send-TelegramAlert $failMsg
   }
 
   exit $exitCode

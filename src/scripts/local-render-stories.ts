@@ -313,7 +313,16 @@ async function runOneSlot(
 
 function normalizeDate(value: unknown): string {
   if (typeof value === "string") return value.slice(0, 10)
-  if (value instanceof Date) return value.toISOString().slice(0, 10)
+  if (value instanceof Date) {
+    // Postgres `date` columns come back as midnight in the server's local TZ;
+    // calling .toISOString() shifts the moment into UTC which can land on
+    // the previous calendar day for UTC+N timezones (e.g. Mauritius UTC+4 -> -4h).
+    // Use the local components instead so the calendar day is preserved.
+    const y = value.getFullYear()
+    const m = String(value.getMonth() + 1).padStart(2, "0")
+    const d = String(value.getDate()).padStart(2, "0")
+    return `${y}-${m}-${d}`
+  }
   return String(value).slice(0, 10)
 }
 
