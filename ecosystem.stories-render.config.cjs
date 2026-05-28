@@ -58,25 +58,18 @@ module.exports = {
       merge_logs: true,
       time: true,
     },
-    {
-      name: "stories-render-daemon",
-      cwd: "C:\\Users\\rahvi\\projects\\DOLL UP BOUTIQUE\\Backend\\dollup-medusa",
-      // Windows can't spawn() a .bat directly (EINVAL) — needs cmd.exe /c.
-      // And PM2 7.x mangles args arrays passed to powershell.exe directly
-      // (Node DEP0190 shell:true bug). So: cmd.exe runs the .bat, which
-      // runs the .ps1. Args as a single string survives PM2's shell mode.
-      script: "C:\\Windows\\System32\\cmd.exe",
-      args: "/c run-render-daemon.bat",
-      interpreter: "none",
-      windowsHide: true,
-      // Cron mode: fire at 18:30 MU every day. PM2 launches the script,
-      // it runs once, exits, and PM2 waits for the next cron tick.
-      cron_restart: "30 18 * * *",
-      autorestart: false,
-      out_file: "./logs/stories-render-out.log",
-      error_file: "./logs/stories-render-err.log",
-      merge_logs: true,
-      time: true,
-    },
+    // NOTE: there used to be a `stories-render-daemon` PM2 entry here that
+    // fired once a day via cron_restart. It was deleted 2026-05-28 because:
+    //   - Windows Task Scheduler's `\DollUp\DollUp-Stories-Render-Daemon`
+    //     already fires `start-render-daemon.ps1` at 18:30 MU daily (the
+    //     primary batch path).
+    //   - The on-demand "Re-render" button is now served by a SECOND
+    //     Windows Task Scheduler entry (`\DollUp\DollUp-Stories-Render-Poller`)
+    //     that fires `start-render-poller.ps1` every 5 minutes from
+    //     09:00 to 17:00 MU. Task Scheduler is the proven-reliable
+    //     supervisor on this Windows box; PM2 + cmd.exe spawning has
+    //     repeatedly fought back hard (Node DEP0190, PATH lookup,
+    //     ghost PIDs).
+    // PM2 here is reduced to a single job: keeping the SSH tunnel up.
   ],
 }
