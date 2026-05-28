@@ -287,6 +287,12 @@ class PreorderModuleService extends MedusaService({
     )
     if (rows.length === 0) return { active: false }
     const row = rows[0]
+    // Treat expired tokens as inactive — same effective state as revoked. The
+    // verify path already rejects with reason="expired", so the GET shape should
+    // match.
+    if (row.expires_at && row.expires_at < new Date()) {
+      return { active: false }
+    }
     return {
       active: true,
       expiresAt: row.expires_at,
