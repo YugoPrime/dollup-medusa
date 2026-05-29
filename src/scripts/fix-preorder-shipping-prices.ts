@@ -11,6 +11,7 @@
  */
 import type { ExecArgs } from "@medusajs/framework/types"
 import { Modules } from "@medusajs/framework/utils"
+import { updateShippingOptionsWorkflow } from "@medusajs/medusa/core-flows"
 
 const FIXES: { id: string; name: string; amount: number }[] = [
   { id: "so_01KSMQMT8FJVNVK640TGJ8NYSB", name: "Home delivery (Pre-Order)", amount: 150 },
@@ -34,8 +35,20 @@ export default async function fixPreorderShippingPrices({ container }: ExecArgs)
       logger.warn(`[fix-shipping] ${fix.name}: no MUR price found, skipping`)
       continue
     }
-    await fulfillment.updateShippingOptions(fix.id, {
-      prices: murPrices.map((p) => ({ id: p.id, amount: fix.amount })),
+    // Price updates go through the update-shipping-options workflow (same path
+    // the admin API uses); the module service's updateShippingOptions() does
+    // NOT accept a `prices` field.
+    await updateShippingOptionsWorkflow(container).run({
+      input: [
+        {
+          id: fix.id,
+          prices: murPrices.map((p) => ({
+            id: p.id,
+            amount: fix.amount,
+            currency_code: "mur",
+          })),
+        },
+      ],
     })
     logger.info(
       `[fix-shipping] ${fix.name} → MUR ${fix.amount} (${murPrices.length} price row(s))`,
