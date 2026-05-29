@@ -3,8 +3,11 @@ import type {
   SubscriberConfig,
 } from "@medusajs/framework/subscribers"
 import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils"
+import type { INotificationModuleService } from "@medusajs/framework/types"
 
 import { computeDeposit } from "../lib/preorder-deposit"
+import { EmailTemplate, isSendableEmail } from "../modules/notification-resend/service"
+import { PAYMENT_INFO } from "../lib/payment-info"
 
 const DEPOSIT_WINDOW_MS = 24 * 60 * 60 * 1000
 
@@ -35,12 +38,24 @@ export default async function preorderStampOnOrderPlaced({
   try {
     const orderModule = container.resolve(Modules.ORDER)
     const order = (await orderModule.retrieveOrder(orderId, {
-      select: ["id", "item_total", "subtotal", "shipping_total", "metadata"],
+      select: [
+        "id",
+        "email",
+        "display_id",
+        "item_total",
+        "subtotal",
+        "shipping_total",
+        "metadata",
+      ],
+      relations: ["shipping_address"],
     })) as unknown as {
+      email?: string | null
+      display_id?: number | null
       item_total?: number | null
       subtotal?: number | null
       shipping_total?: number | null
       metadata?: Record<string, unknown> | null
+      shipping_address?: { first_name?: string | null } | null
     }
 
     const meta = (order.metadata ?? {}) as Record<string, unknown>
@@ -76,6 +91,50 @@ export default async function preorderStampOnOrderPlaced({
     logger.info(
       `[preorder-stamp] order ${orderId} → awaiting_deposit, deposit ${deposit}`,
     )
+
+    // Send the deposit-instructions email (customer + owner copy). Reuse the
+    // deposit values already computed above. Email failures must never break
+    // order placement, so everything stays inside this try/catch.
+    const customerEmail = (order.email as string | null) ?? null
+    const firstName = order.shipping_address?.first_name ?? ""
+    const displayId = order.display_id ?? orderId
+    const deadlineLabel = new Date(deadline).toLocaleString("en-MU", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    })
+    const data = {
+      customerFirstName: firstName,
+      displayId,
+      depositAmount: deposit,
+      balanceAmount: balance,
+      totalAmount: total,
+      deadlineLabel,
+      bank: PAYMENT_INFO.bank,
+      accountName: PAYMENT_INFO.account_name,
+      accountNumber: PAYMENT_INFO.account_number,
+      whatsapp: PAYMENT_INFO.whatsapp,
+    }
+
+    const notify = container.resolve<INotificationModuleService>(
+      Modules.NOTIFICATION,
+    )
+    if (customerEmail && isSendableEmail(customerEmail)) {
+      await notify.createNotifications({
+        to: customerEmail,
+        channel: "email",
+        template: EmailTemplate.PREORDER_DEPOSIT_INSTRUCTIONS,
+        data: data as unknown as Record<string, unknown>,
+      })
+    }
+    // Owner copy (the Resend wrapper has no cc — send a second notification).
+    await notify
+      .createNotifications({
+        to: "eabmarkets@gmail.com",
+        channel: "email",
+        template: EmailTemplate.PREORDER_DEPOSIT_INSTRUCTIONS,
+        data: data as unknown as Record<string, unknown>,
+      })
+      .catch(() => {})
   } catch (err) {
     logger.error(
       `[preorder-stamp] failed for ${orderId}: ${(err as Error).message}`,

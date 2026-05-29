@@ -26,6 +26,15 @@ import CartRecoveryCheckinEmail, {
 import CartRecoveryCouponEmail, {
   type CartRecoveryCouponData,
 } from "./templates/cart-recovery-coupon"
+import PreorderDepositInstructionsEmail, {
+  type PreorderDepositInstructionsData,
+} from "./templates/preorder-deposit-instructions"
+import PreorderDepositConfirmedEmail, {
+  type PreorderDepositConfirmedData,
+} from "./templates/preorder-deposit-confirmed"
+import PreorderReservationExpiredEmail, {
+  type PreorderReservationExpiredData,
+} from "./templates/preorder-reservation-expired"
 
 export enum EmailTemplate {
   ORDER_PLACED = "order-placed",
@@ -34,6 +43,9 @@ export enum EmailTemplate {
   PASSWORD_RESET = "password-reset",
   CART_RECOVERY_CHECKIN = "cart-recovery-checkin",
   CART_RECOVERY_COUPON = "cart-recovery-coupon",
+  PREORDER_DEPOSIT_INSTRUCTIONS = "preorder-deposit-instructions",
+  PREORDER_DEPOSIT_CONFIRMED = "preorder-deposit-confirmed",
+  PREORDER_RESERVATION_EXPIRED = "preorder-reservation-expired",
 }
 
 // RFC 2606 reserved TLDs that will never resolve on the public internet.
@@ -78,6 +90,21 @@ const renderers: Record<EmailTemplate, TemplateRenderer> = {
       CartRecoveryCouponEmail,
       data as CartRecoveryCouponData,
     ),
+  [EmailTemplate.PREORDER_DEPOSIT_INSTRUCTIONS]: (data) =>
+    React.createElement(
+      PreorderDepositInstructionsEmail,
+      data as PreorderDepositInstructionsData,
+    ),
+  [EmailTemplate.PREORDER_DEPOSIT_CONFIRMED]: (data) =>
+    React.createElement(
+      PreorderDepositConfirmedEmail,
+      data as PreorderDepositConfirmedData,
+    ),
+  [EmailTemplate.PREORDER_RESERVATION_EXPIRED]: (data) =>
+    React.createElement(
+      PreorderReservationExpiredEmail,
+      data as PreorderReservationExpiredData,
+    ),
 }
 
 const defaultSubjects: Record<EmailTemplate, (data: unknown) => string> = {
@@ -105,6 +132,18 @@ const defaultSubjects: Record<EmailTemplate, (data: unknown) => string> = {
   [EmailTemplate.CART_RECOVERY_COUPON]: (data) => {
     const pct = (data as CartRecoveryCouponData).couponPercentage
     return `Here's ${pct}% off to come back 🎁`
+  },
+  [EmailTemplate.PREORDER_DEPOSIT_INSTRUCTIONS]: (data) => {
+    const id = (data as PreorderDepositInstructionsData).displayId
+    return `Reserve your pre-order #${id} — deposit due`
+  },
+  [EmailTemplate.PREORDER_DEPOSIT_CONFIRMED]: (data) => {
+    const id = (data as PreorderDepositConfirmedData).displayId
+    return `Deposit received — your pre-order #${id} is confirmed`
+  },
+  [EmailTemplate.PREORDER_RESERVATION_EXPIRED]: (data) => {
+    const id = (data as PreorderReservationExpiredData).displayId
+    return `Your pre-order #${id} reservation expired`
   },
 }
 

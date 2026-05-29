@@ -91,6 +91,10 @@ export default async function emailOnOrderPlaced({
     }
 
     const metadata = (order.metadata ?? {}) as Record<string, unknown>
+    if ((metadata.cart_type as string) === "preorder") {
+      // Preorder deposit email is sent by preorder-stamp-on-order-placed.
+      return
+    }
     const data: OrderPlacedEmailData = {
       storefrontUrl: STOREFRONT_URL,
       customerFirstName:
