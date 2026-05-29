@@ -1217,6 +1217,41 @@ class SourcingModuleService extends MedusaService({
   }
 
   /**
+   * Preview the next IS ref that will be allocated on push. Uses the same
+   * SQL path as the real allocator but doesn't write anything. Returns null
+   * if container/manager isn't accessible (in which case the admin just
+   * hides the preview pill — push itself is unaffected).
+   *
+   * Lives on the service rather than in the route because routes can't
+   * resolve "manager" from req.scope on this Medusa version; the service's
+   * MedusaService base class gives us __container__ which can.
+   */
+  async previewNextRef(): Promise<string | null> {
+    try {
+      const container = (this as unknown as { __container__: unknown })
+        .__container__ as {
+        resolve: (key: string) => unknown
+      }
+      const manager = container.resolve(
+        ContainerRegistrationKeys.MANAGER,
+      ) as {
+        execute: (
+          sql: string,
+        ) => Promise<{ rows?: unknown[] } | unknown[]>
+      }
+      return await getNextRef({
+        execute: async (sql: string) => {
+          const r = await manager.execute(sql)
+          const rows = (r as { rows?: unknown[] }).rows ?? (r as unknown[])
+          return { rows: rows as Array<{ max: number | string | null }> }
+        },
+      })
+    } catch {
+      return null
+    }
+  }
+
+  /**
    * Flip a pushed draft item's Medusa product from `draft` to `published`.
    * Idempotent: re-running on an already-published product is a no-op.
    * Throws if the item has no published_product_id (i.e. not pushed yet).
