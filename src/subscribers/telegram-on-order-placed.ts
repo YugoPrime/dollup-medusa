@@ -6,6 +6,7 @@ import {
   ContainerRegistrationKeys,
   Modules,
 } from "@medusajs/framework/utils"
+import { computeDeposit } from "../lib/preorder-deposit"
 
 const ADMIN_URL =
   process.env.ADMIN_URL ?? "https://api.dollupboutique.com/app"
@@ -103,6 +104,69 @@ export default async function telegramOnOrderPlaced({
     const subtotal = Number(order.subtotal ?? 0)
     const shipping = Number(order.shipping_total ?? 0)
     const total = Number(order.total ?? 0)
+
+    // Pre-order branch: a deposit-model order reads very differently from a
+    // COD order. The stamp subscriber (preorder-stamp-on-order-placed) also
+    // fires on order.placed and writes deposit_amount onto metadata, but
+    // subscriber ordering is not guaranteed — so fall back to recomputing the
+    // deposit inline if it hasn't landed yet.
+    if (metadata.cart_type === "preorder") {
+      const deposit =
+        metadata.deposit_amount != null
+          ? Number(metadata.deposit_amount)
+          : computeDeposit(subtotal, shipping).deposit
+      const balance =
+        metadata.balance_amount != null
+          ? Number(metadata.balance_amount)
+          : Math.max(0, total - deposit)
+      const preorderLines: string[] = []
+      preorderLines.push(
+        `🟣 <b>NEW PRE-ORDER #${order.display_id ?? order.id}</b>`,
+      )
+      preorderLines.push("")
+      preorderLines.push(`👤 ${escapeHtml(customer)}`)
+      if (order.email) preorderLines.push(`✉️ ${escapeHtml(order.email)}`)
+      if (addr.phone) preorderLines.push(`📞 ${escapeHtml(addr.phone)}`)
+      const preLocation = [
+        normalizeDeliveryMethod(metadata.delivery_method),
+        addr.city,
+      ].filter(Boolean) as string[]
+      if (preLocation.length) {
+        preorderLines.push(`📍 ${escapeHtml(preLocation.join(" — "))}`)
+      }
+      preorderLines.push("")
+      preorderLines.push(`💰 Total: ${formatMUR(total)}`)
+      preorderLines.push(`🔸 Deposit due now (75%): <b>${formatMUR(deposit)}</b>`)
+      preorderLines.push(`🔹 Balance on arrival: ${formatMUR(balance)}`)
+      preorderLines.push(`⏳ Deposit deadline: 24h`)
+      preorderLines.push("")
+      preorderLines.push(
+        `🔗 <a href="${ADMIN_URL}/orders/${order.id}">Open in admin</a>`,
+      )
+      const preBody = {
+        chat_id: chatId,
+        text: preorderLines.join("\n"),
+        parse_mode: "HTML",
+        disable_web_page_preview: true,
+      }
+      const preRes = await fetch(
+        `https://api.telegram.org/bot${token}/sendMessage`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(preBody),
+        },
+      )
+      if (!preRes.ok) {
+        const text = await preRes.text().catch(() => "")
+        logger.error(
+          `[telegram] preorder order.placed → HTTP ${preRes.status} for ${orderId}: ${text}`,
+        )
+        return
+      }
+      logger.info(`[telegram] preorder order.placed → sent (order ${orderId})`)
+      return
+    }
 
     const lines: string[] = []
     lines.push(`🛍️ <b>NEW ORDER #${order.display_id ?? order.id}</b>`)
