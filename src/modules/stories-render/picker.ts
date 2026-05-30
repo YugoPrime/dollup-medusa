@@ -348,6 +348,15 @@ function buildTextOverrides(
       if (sku) out.sku = sku
       return out
     }
+    case "split-thirds-editorial":
+    case "receipt-tag-1color":
+    case "framed-gallery-1color": {
+      out.price = price
+      out.size = collectSizes(snapshot, 28)
+      out.headline = productNameLabel(snapshot, 22)
+      if (sku) out.sku = sku
+      return out
+    }
     case "color-mood-rail": {
       out.price = price
       // Per-color size pills — variants_in_stock[0..2] map to color_a/b/c slots

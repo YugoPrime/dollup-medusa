@@ -1248,6 +1248,24 @@ describe("pickTemplate", () => {
     expect(result!.text_overrides.size).toContain("L")
   })
 
+  it("split-thirds-editorial gets headline=name + price + size", () => {
+    const s = snapshot({
+      name: "Ribbed Knit Top",
+      price_mur: 850,
+      variants_in_stock: [color("ecru", ["front"], { sku: "IS1900-M-E", sizes: ["S", "M"] })],
+      variant_in_stock_count: 1,
+    })
+    const picked = new Map<string, number>([
+      ["in-stock-hero", 2], ["in-stock-hero-blush", 2], ["lifestyle-overlay", 2],
+      ["in-stock-hero-cream", 2], ["just-arrived-editorial", 2],
+      ["editorial-cover-hero", 2], ["receipt-tag-1color", 2], ["framed-gallery-1color", 2],
+    ])
+    const result = pickTemplate(s, 0, picked)
+    expect(result!.template_slug).toBe("split-thirds-editorial")
+    expect(result!.text_overrides.headline).toBe("Ribbed Knit Top")
+    expect(result!.text_overrides.price).toBe("Rs.850")
+  })
+
   describe("2026-05-21: color-mood-rail (3-color, front-only)", () => {
     it("picks color-mood-rail when 3 colors exist but NO back shot anywhere", () => {
       // The pink/blue/white variants only have front shots — product-3colors
