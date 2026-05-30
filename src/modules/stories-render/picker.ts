@@ -348,6 +348,13 @@ function buildTextOverrides(
       if (sku) out.sku = sku
       return out
     }
+    case "bigprice-cutout-hero": {
+      out.price = price
+      out.size = collectSizes(snapshot, 28)
+      out.headline = productNameLabel(snapshot, 24)
+      if (sku) out.sku = sku
+      return out
+    }
     case "just-arrived-editorial": {
       out.price = price
       out.size = collectSizes(snapshot, 28)
@@ -521,13 +528,13 @@ export function pickTemplate(
   // cutouts. Tradeoff accepted 2026-05-26.
   const cutoutUrlEarly = pickCutout(colors)
   if (pickedSoFar && cutoutUrlEarly && colors.length === 1) {
+    const CUTOUT_ROTATION = ["cutout-spotlight", "cutout-spotlight-v2", "bigprice-cutout-hero"] as const
     const cutoutCount =
       countOf(pickedSoFar, "cutout-spotlight") +
-      countOf(pickedSoFar, "cutout-spotlight-v2")
+      countOf(pickedSoFar, "cutout-spotlight-v2") +
+      countOf(pickedSoFar, "bigprice-cutout-hero")
     if (cutoutCount === 0) {
-      const cutoutSlug = isSaturated(pickedSoFar, "cutout-spotlight")
-        ? "cutout-spotlight-v2"
-        : "cutout-spotlight"
+      const cutoutSlug = leastUsed(CUTOUT_ROTATION, pickedSoFar)
       return {
         template_slug: cutoutSlug,
         slot_inputs: { product_cutout: cutoutUrlEarly },
@@ -690,7 +697,7 @@ export function pickTemplate(
   // contract and same text_overrides — picker rotates between them on
   // separate slot indexes so the daily feed alternates the two looks.
   const pool: readonly string[] = cutoutEligible
-    ? [...SINGLE_IMAGE_ROTATION, "cutout-spotlight", "cutout-spotlight-v2"]
+    ? [...SINGLE_IMAGE_ROTATION, "cutout-spotlight", "cutout-spotlight-v2", "bigprice-cutout-hero"]
     : SINGLE_IMAGE_ROTATION
 
   // (The daily cutout guarantee runs at the top of pickTemplate now — see
@@ -705,7 +712,7 @@ export function pickTemplate(
   const slug = pickedSoFar
     ? leastUsed(pool, pickedSoFar)
     : pool[slotIndex % pool.length]
-  if ((slug === "cutout-spotlight" || slug === "cutout-spotlight-v2") && cutoutUrl) {
+  if ((slug === "cutout-spotlight" || slug === "cutout-spotlight-v2" || slug === "bigprice-cutout-hero") && cutoutUrl) {
     return {
       template_slug: slug,
       slot_inputs: { product_cutout: cutoutUrl },

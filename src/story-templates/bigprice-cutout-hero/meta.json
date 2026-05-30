@@ -1,0 +1,16 @@
+{
+  "slug": "bigprice-cutout-hero",
+  "name": "Cutout · Big Price Hero",
+  "category": "single-product",
+  "duration_seconds": 6,
+  "wave": 1,
+  "slots": [
+    { "id": "product_cutout", "hint": "cutout", "label": "Transparent cutout PNG", "required": true }
+  ],
+  "text_overrides": [
+    { "id": "headline", "default": "THE PIECE", "max_chars": 24 },
+    { "id": "price", "default": "Rs.0", "max_chars": 12 },
+    { "id": "sku", "default": "IS0000", "max_chars": 10 },
+    { "id": "size", "default": "Size: S · M · L", "max_chars": 28 }
+  ]
+}

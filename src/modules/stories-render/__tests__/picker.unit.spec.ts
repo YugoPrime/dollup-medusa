@@ -987,6 +987,43 @@ describe("pickTemplate", () => {
       const picked = pickTemplate(s, 0, dayCounts)!
       expect(picked.template_slug).toBe("cutout-spotlight")
     })
+
+    it("bigprice-cutout-hero can fire for a single-color cutout product", () => {
+      const s = snapshot({
+        name: "Mesh Bodysuit",
+        price_mur: 790,
+        variants_in_stock: [color("black", ["front", "cutout"], { sku: "IS5000-M-B", sizes: ["S", "M"] })],
+        variant_in_stock_count: 1,
+      })
+      const picked = new Map<string, number>([
+        ["in-stock-hero", 2], ["in-stock-hero-blush", 2], ["lifestyle-overlay", 2],
+        ["in-stock-hero-cream", 2], ["just-arrived-editorial", 2],
+        ["editorial-cover-hero", 2], ["split-thirds-editorial", 2],
+        ["receipt-tag-1color", 2], ["framed-gallery-1color", 2],
+        ["cutout-spotlight", 2], ["cutout-spotlight-v2", 2],
+      ])
+      const result = pickTemplate(s, 0, picked)
+      expect(result!.template_slug).toBe("bigprice-cutout-hero")
+      expect(result!.slot_inputs.product_cutout).toBe("https://r2/black-cutout.png")
+      expect(result!.text_overrides.price).toBe("Rs.790")
+    })
+
+    it("bigprice-cutout-hero never fires without a cutout PNG", () => {
+      const s = snapshot({
+        name: "Plain Front",
+        price_mur: 500,
+        variants_in_stock: [color("white", ["front"], { sku: "IS5100-M-W", sizes: ["M"] })],
+        variant_in_stock_count: 1,
+      })
+      const picked = new Map<string, number>([
+        ["in-stock-hero", 2], ["in-stock-hero-blush", 2], ["lifestyle-overlay", 2],
+        ["in-stock-hero-cream", 2], ["just-arrived-editorial", 2],
+        ["editorial-cover-hero", 2], ["split-thirds-editorial", 2],
+        ["receipt-tag-1color", 2], ["framed-gallery-1color", 2],
+      ])
+      const result = pickTemplate(s, 0, picked)
+      expect(result!.template_slug).not.toBe("bigprice-cutout-hero")
+    })
   })
 
   describe("REGRESSION: 2-color template never picks the same front for both colors", () => {

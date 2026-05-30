@@ -37,6 +37,7 @@ describe("template-loader", () => {
     // swipe-through-2color), and back template cardflip-front-back added.
     const slugs = (await listTemplates(TEMPLATES_ROOT)).map((template) => template.slug)
     expect(slugs).toEqual([
+      "bigprice-cutout-hero",
       "cardflip-front-back",
       "color-mood-rail",
       "customer-review",
