@@ -95,6 +95,28 @@ describe("pickTemplate", () => {
     expect(result!.slot_inputs.back).toBe("https://r2/teal-b.jpg")
   })
 
+  it("filmstrip-multiframe fills front + back as reel frames", () => {
+    const s = snapshot({
+      name: "Belted Coat",
+      price_mur: 2490,
+      variants_in_stock: [color("camel", ["front", "back"], { sku: "IS4300-M-C", sizes: ["M", "L"] })],
+      variant_in_stock_count: 1,
+    })
+    const picked = new Map<string, number>([
+      ["product-1color", 2], ["product-1color-blush", 2], ["product-1color-cream", 2],
+      ["product-1color-sage", 2], ["product-1color-coral", 2], ["product-1color-featured", 2],
+      ["product-1color-featured-blush", 2], ["product-1color-featured-cream", 2],
+      ["product-1color-featured-sage", 2], ["product-1color-featured-coral", 2],
+      ["new-drop-arch", 2], ["new-drop-arch-blush", 2], ["new-drop-arch-cream", 2],
+      ["new-drop-arch-sage", 2], ["new-drop-arch-coral", 2],
+      ["cardflip-front-back", 2], ["lookbook-spread-back", 2],
+    ])
+    const result = pickTemplate(s, 0, picked)
+    expect(result!.template_slug).toBe("filmstrip-multiframe")
+    expect(result!.slot_inputs.front).toBe("https://r2/camel.jpg")
+    expect(result!.slot_inputs.back).toBe("https://r2/camel-b.jpg")
+  })
+
   it("back templates never fire on a front-only product", () => {
     const s = snapshot({
       name: "Front Only Tee",

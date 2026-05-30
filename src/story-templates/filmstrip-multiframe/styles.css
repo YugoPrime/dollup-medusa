@@ -1,0 +1,28 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: var(--story-w); height: var(--story-h); overflow: hidden; }
+.canvas { width: var(--story-w); height: var(--story-h); background: var(--dub-cream); }
+.scene { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; }
+
+.strip { position: relative; width: 66%; margin-top: 40px; height: 1440px; background: #141414;
+  display: flex; align-items: stretch; padding: 0 46px; border-radius: 6px;
+  animation: advance 1s ease-out both, drift 3s ease-in-out 1.2s infinite alternate; }
+@keyframes advance { from { transform: translateY(40%); } to { transform: translateY(0); } }
+@keyframes drift { from { transform: translateY(0); } to { transform: translateY(-4px); } }
+
+.sprockets { width: 30px; background-image: repeating-radial-gradient(circle at 50% 22px, var(--dub-cream) 0 9px, transparent 10px 44px); }
+.frames { flex: 1; display: flex; flex-direction: column; gap: 16px; padding: 22px 0; }
+.frame { position: relative; flex: 1; overflow: hidden; border: 3px solid #000; background: #000; }
+.frame img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.exposure { position: absolute; bottom: 8px; left: 10px; font-family: var(--dub-font-body); font-weight: 600;
+  font-size: 18px; letter-spacing: 3px; color: #f3d27a; opacity: 0; animation: fade .5s ease 1.0s both; }
+@keyframes fade { to { opacity: .9; } }
+.side-label { position: absolute; top: 50%; right: -2px; transform: translateY(-50%) rotate(180deg);
+  writing-mode: vertical-rl; font-family: var(--dub-font-body); font-weight: 700; font-size: 18px;
+  letter-spacing: 6px; color: var(--dub-cream); opacity: .7; }
+
+.base { margin-top: auto; padding-bottom: 50px; text-align: center; display: flex; flex-direction: column; gap: 8px;
+  animation: rise .5s ease-out 1.4s both; }
+.price { font-family: var(--dub-font-display); font-weight: 700; font-size: 84px; color: var(--dub-ink); line-height: 1; }
+.size { font-family: var(--dub-font-body); font-weight: 700; font-size: 28px; letter-spacing: 2px; color: var(--dub-ink); }
+.cta { font-family: var(--dub-font-body); font-weight: 700; font-size: 26px; letter-spacing: 2px; color: var(--dub-ink); }
+@keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }

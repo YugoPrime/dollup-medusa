@@ -44,6 +44,7 @@ describe("template-loader", () => {
       "cutout-spotlight-v2",
       "diagonal-2color-wipe",
       "editorial-cover-hero",
+      "filmstrip-multiframe",
       "framed-gallery-1color",
       "how-to-order",
       "in-stock-hero",
