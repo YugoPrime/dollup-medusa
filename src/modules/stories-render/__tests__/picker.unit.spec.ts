@@ -1769,4 +1769,26 @@ describe("pickTemplate", () => {
     )
 
   })
+
+  it("a simulated day of 12 single-color front-only products never repeats a template 3x", () => {
+    // Guards the enlarged SINGLE_IMAGE_ROTATION (9 entries as of 2026-05-30)
+    // against the "same template 3x in a day" regression. The MAX_TEMPLATE_PER_DAY
+    // cap (2) + least-used rotation must keep every single-image template <= 2
+    // across a 12-product day.
+    const counts = new Map<string, number>()
+    for (let i = 0; i < 12; i++) {
+      const s = snapshot({
+        name: `Item ${i}`,
+        price_mur: 900 + i,
+        variants_in_stock: [color(`c${i}`, ["front"], { sku: `IS90${i}0-M-X`, sizes: ["S", "M"] })],
+        variant_in_stock_count: 1,
+      })
+      const r = pickTemplate(s, i, counts)
+      expect(r).not.toBeNull()
+      counts.set(r!.template_slug, (counts.get(r!.template_slug) ?? 0) + 1)
+    }
+    for (const [, n] of counts) {
+      expect(n).toBeLessThanOrEqual(2)
+    }
+  })
 })
