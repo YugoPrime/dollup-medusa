@@ -1266,6 +1266,25 @@ describe("pickTemplate", () => {
     expect(result!.text_overrides.price).toBe("Rs.850")
   })
 
+  it("receipt-tag-1color renders with hero slot + real overrides", () => {
+    const s = snapshot({
+      name: "Satin Slip",
+      price_mur: 1100,
+      variants_in_stock: [color("noir", ["front"], { sku: "IS2200-M-N", sizes: ["S", "M", "L"] })],
+      variant_in_stock_count: 1,
+    })
+    const picked = new Map<string, number>([
+      ["in-stock-hero", 2], ["in-stock-hero-blush", 2], ["lifestyle-overlay", 2],
+      ["in-stock-hero-cream", 2], ["just-arrived-editorial", 2],
+      ["editorial-cover-hero", 2], ["split-thirds-editorial", 2], ["framed-gallery-1color", 2],
+    ])
+    const result = pickTemplate(s, 0, picked)
+    expect(result!.template_slug).toBe("receipt-tag-1color")
+    expect(result!.slot_inputs.hero).toBe("https://r2/noir.jpg")
+    expect(result!.text_overrides.headline).toBe("Satin Slip")
+    expect(result!.text_overrides.price).toBe("Rs.1100")
+  })
+
   describe("2026-05-21: color-mood-rail (3-color, front-only)", () => {
     it("picks color-mood-rail when 3 colors exist but NO back shot anywhere", () => {
       // The pink/blue/white variants only have front shots — product-3colors

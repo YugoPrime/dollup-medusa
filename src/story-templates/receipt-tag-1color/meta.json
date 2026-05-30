@@ -1,0 +1,16 @@
+{
+  "slug": "receipt-tag-1color",
+  "name": "Swing Tag · Receipt",
+  "category": "single-product",
+  "duration_seconds": 6,
+  "wave": 1,
+  "slots": [
+    { "id": "hero", "hint": "front", "label": "Product photo", "required": true }
+  ],
+  "text_overrides": [
+    { "id": "headline", "default": "THE PIECE", "max_chars": 22 },
+    { "id": "price", "default": "Rs.0", "max_chars": 12 },
+    { "id": "sku", "default": "IS0000", "max_chars": 10 },
+    { "id": "size", "default": "S · M · L", "max_chars": 28 }
+  ]
+}
