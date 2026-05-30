@@ -1285,6 +1285,24 @@ describe("pickTemplate", () => {
     expect(result!.text_overrides.price).toBe("Rs.1100")
   })
 
+  it("framed-gallery-1color is reachable with name + price", () => {
+    const s = snapshot({
+      name: "Cotton Midi",
+      price_mur: 990,
+      variants_in_stock: [color("sage", ["front"], { sku: "IS2050-M-S", sizes: ["M", "L"] })],
+      variant_in_stock_count: 1,
+    })
+    const picked = new Map<string, number>([
+      ["in-stock-hero", 2], ["in-stock-hero-blush", 2], ["lifestyle-overlay", 2],
+      ["in-stock-hero-cream", 2], ["just-arrived-editorial", 2],
+      ["editorial-cover-hero", 2], ["split-thirds-editorial", 2], ["receipt-tag-1color", 2],
+    ])
+    const result = pickTemplate(s, 0, picked)
+    expect(result!.template_slug).toBe("framed-gallery-1color")
+    expect(result!.text_overrides.headline).toBe("Cotton Midi")
+    expect(result!.text_overrides.size).toContain("L")
+  })
+
   describe("2026-05-21: color-mood-rail (3-color, front-only)", () => {
     it("picks color-mood-rail when 3 colors exist but NO back shot anywhere", () => {
       // The pink/blue/white variants only have front shots — product-3colors

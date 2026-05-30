@@ -1,0 +1,35 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: var(--story-w); height: var(--story-h); overflow: hidden; }
+.canvas { width: var(--story-w); height: var(--story-h); background: var(--dub-ink); }
+.scene { position: absolute; inset: 0; }
+.wall { position: absolute; inset: 0;
+  background: radial-gradient(circle at 50% 38%, #3a3a3a 0%, var(--dub-ink) 70%); }
+
+.frame { position: absolute; top: 130px; left: 110px; right: 110px; height: 1180px;
+  background: var(--dub-cream); padding: 90px;
+  box-shadow: 0 40px 80px rgba(0,0,0,.5);
+  outline: 2px solid var(--dub-gold); outline-offset: -78px;
+  clip-path: inset(50% 50% 50% 50%); animation: frameDraw .7s ease-out .2s both; }
+@keyframes frameDraw { to { clip-path: inset(0 0 0 0); } }
+.mat { width: 100%; height: 100%; }
+.window { width: 100%; height: 100%; overflow: hidden; }
+.art { width: 100%; height: 100%; object-fit: cover; display: block;
+  animation: focusPull .85s ease-out both; }
+@keyframes focusPull { from { filter: blur(18px); transform: scale(1.04); } to { filter: blur(0); transform: scale(1); } }
+
+.placard { position: absolute; left: 0; right: 0; top: 1380px; text-align: center;
+  animation: rise .6s ease-out 1.0s both; }
+.placard-name { font-family: var(--dub-font-display); font-style: italic; font-weight: 700; font-size: 64px;
+  color: var(--dub-soft); white-space: nowrap; letter-spacing: -.01em;
+  animation: track .6s ease-out 1.0s both; }
+@keyframes track { from { letter-spacing: -.15em; opacity: 0; } to { letter-spacing: .01em; opacity: 1; } }
+.placard-line { margin-top: 18px; display: flex; align-items: baseline; justify-content: center; gap: 16px;
+  font-family: var(--dub-font-body); }
+.price { font-size: 44px; font-weight: 700; color: var(--dub-gold); font-family: var(--dub-font-display); }
+.dot { color: var(--dub-soft); opacity: .5; }
+.size { font-size: 30px; font-weight: 600; color: var(--dub-soft); letter-spacing: 2px; }
+.placard-sku { margin-top: 12px; font-family: var(--dub-font-body); font-size: 22px; letter-spacing: 5px;
+  color: var(--dub-soft); opacity: .6; }
+.placard-cta { margin-top: 26px; font-family: var(--dub-font-body); font-weight: 700; font-size: 28px;
+  letter-spacing: 2px; color: var(--dub-soft); }
+@keyframes rise { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
