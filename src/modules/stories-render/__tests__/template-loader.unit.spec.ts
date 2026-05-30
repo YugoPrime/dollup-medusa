@@ -38,6 +38,7 @@ describe("template-loader", () => {
       "customer-review",
       "cutout-spotlight",
       "cutout-spotlight-v2",
+      "editorial-cover-hero",
       "how-to-order",
       "in-stock-hero",
       "in-stock-hero-blush",

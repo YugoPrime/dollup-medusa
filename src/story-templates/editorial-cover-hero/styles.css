@@ -1,0 +1,80 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: var(--story-w); height: var(--story-h); overflow: hidden; }
+.canvas { width: var(--story-w); height: var(--story-h); background: var(--dub-ink); }
+.scene { position: absolute; inset: 0; overflow: hidden; }
+
+.hero { position: absolute; inset: 0; }
+.hero-img {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+  transform-origin: 50% 38%;
+  animation: kenburns 6s linear both;
+}
+@keyframes kenburns {
+  from { transform: scale(1.08) translate(2%, -1%); }
+  to   { transform: scale(1.16) translate(-2%, 1%); }
+}
+
+.masthead-scrim {
+  position: absolute; top: 0; left: 0; right: 0; height: 38%;
+  background: linear-gradient(to bottom, rgba(43,43,43,.5), rgba(43,43,43,0));
+}
+
+.masthead {
+  position: absolute; top: 48px; left: 0; right: 0;
+  text-align: center;
+  font-family: var(--dub-font-display);
+  font-weight: 800;
+  font-size: 150px;
+  letter-spacing: -2px;
+  line-height: .92;
+  color: var(--dub-soft);
+  text-shadow: 0 6px 24px rgba(43,43,43,.45);
+  animation: mastheadDrop .9s cubic-bezier(.16,1,.3,1) both;
+}
+@keyframes mastheadDrop {
+  from { transform: translateY(-120%); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
+}
+
+.lower { position: absolute; left: 50px; right: 50px; bottom: 70px; }
+.hairline {
+  height: 2px; background: var(--dub-gold); margin-bottom: 26px;
+  clip-path: inset(0 100% 0 0);
+  animation: drawLine .6s ease-out 1.0s both;
+}
+@keyframes drawLine { to { clip-path: inset(0 0 0 0); } }
+
+.lower-row { display: flex; align-items: baseline; justify-content: space-between; }
+.size {
+  font-family: var(--dub-font-body); font-weight: 700; font-size: 30px;
+  letter-spacing: 2px; color: var(--dub-soft);
+  animation: rise .5s ease-out 1.8s both;
+}
+.price {
+  font-family: var(--dub-font-display); font-weight: 700; font-size: 96px;
+  color: var(--dub-soft); line-height: 1;
+  animation: rise .5s ease-out 1.8s both;
+}
+.cta-row { display: flex; align-items: center; justify-content: space-between; margin-top: 18px; }
+.sku {
+  font-family: var(--dub-font-body); font-weight: 600; font-size: 22px;
+  letter-spacing: 3px; color: var(--dub-soft); opacity: .85;
+  animation: rise .5s ease-out 2.0s both;
+}
+.shop-chip {
+  display: inline-flex; align-items: baseline; gap: 14px;
+  font-family: var(--dub-font-display); font-style: italic; font-weight: 600;
+  font-size: 34px; color: var(--dub-soft);
+  animation: rise .5s ease-out 2.0s both;
+}
+.shop-chip-arrow {
+  font-family: var(--dub-font-body); font-size: 38px;
+  animation: arrowSlide 1.8s ease-in-out 2.4s infinite;
+}
+.shop-chip-url {
+  font-family: var(--dub-font-body); font-style: normal; font-weight: 500;
+  font-size: 24px; letter-spacing: 2px; opacity: .8;
+}
+
+@keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes arrowSlide { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(12px); } }

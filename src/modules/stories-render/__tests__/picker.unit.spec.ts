@@ -389,23 +389,31 @@ describe("pickTemplate", () => {
     )
   })
 
-  it("rotates [in-stock-hero, in-stock-hero-blush, lifestyle-overlay, in-stock-hero-cream, just-arrived-editorial] by slot_index", () => {
-    // 5-template rotation (2026-05-21: added just-arrived-editorial — editorial
-    // cutout-hero treatment, beige palette, Shop the look CTA). All 5 templates
-    // accept the same `hero` (or `lifestyle`) slot from a single front shot.
-    // Order is: ink → blush → lifestyle → cream → editorial → repeat.
+  it("rotates the single-image pool by slot_index", () => {
+    // 9-template rotation (2026-05-30: added the four 1-color editorial slugs —
+    // editorial-cover-hero + split-thirds-editorial + receipt-tag-1color +
+    // framed-gallery-1color). All accept the same `hero` (or `lifestyle`) slot
+    // from a single front shot. Order: ink → blush → lifestyle → cream →
+    // just-arrived → editorial-cover → split-thirds → receipt-tag → framed →
+    // repeat.
     const s = snapshot({
       variants_in_stock: [color("pink", ["front"])],
       variant_in_stock_count: 1,
       is_new_arrival: false,
     })
-    const slugs = [0, 1, 2, 3, 4, 5, 6].map((i) => pickTemplate(s, i)!.template_slug)
+    const slugs = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(
+      (i) => pickTemplate(s, i)!.template_slug,
+    )
     expect(slugs).toEqual([
       "in-stock-hero",
       "in-stock-hero-blush",
       "lifestyle-overlay",
       "in-stock-hero-cream",
       "just-arrived-editorial",
+      "editorial-cover-hero",
+      "split-thirds-editorial",
+      "receipt-tag-1color",
+      "framed-gallery-1color",
       "in-stock-hero",
       "in-stock-hero-blush",
     ])
@@ -571,39 +579,47 @@ describe("pickTemplate", () => {
       expect(slugsOver10Slots).toContain("lifestyle-overlay")
     })
 
-    it("cutout-spotlight + cutout-spotlight-v2 are two entries in the 7-template single-image rotation when a cutout exists", () => {
+    it("cutout-spotlight + cutout-spotlight-v2 are the last two entries in the 11-template single-image rotation when a cutout exists", () => {
       // 2026-05-19: cutout-spotlight stopped winning unconditionally and joined
       // the rotation alongside the hero variants.
-      // 2026-05-21: just-arrived-editorial added to the rotation, so the
-      // cutout-enabled pool is now 6 entries: 5 base + cutout-spotlight as
-      // the final entry. Order: ink → blush → lifestyle → cream → editorial → cutout.
+      // 2026-05-21: just-arrived-editorial added to the rotation.
       // 2026-05-22: cutout-spotlight-v2 added (bold blush circle + italic-script
-      // typography variant). Pool is now 7: base 5 + cutout v1 + cutout v2.
+      // typography variant).
+      // 2026-05-30: four 1-color editorial slugs added to the base rotation
+      // (editorial-cover-hero, split-thirds-editorial, receipt-tag-1color,
+      // framed-gallery-1color). Cutout-enabled pool is now 11: base 9 + cutout
+      // v1 + cutout v2, with the two cutouts still the final two entries.
       const s = snapshot({
         variants_in_stock: [color("pink", ["front", "cutout"])],
         variant_in_stock_count: 1,
       })
-      const slugs = [0, 1, 2, 3, 4, 5, 6].map((i) => pickTemplate(s, i)!.template_slug)
+      const slugs = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(
+        (i) => pickTemplate(s, i)!.template_slug,
+      )
       expect(slugs).toEqual([
         "in-stock-hero",
         "in-stock-hero-blush",
         "lifestyle-overlay",
         "in-stock-hero-cream",
         "just-arrived-editorial",
+        "editorial-cover-hero",
+        "split-thirds-editorial",
+        "receipt-tag-1color",
+        "framed-gallery-1color",
         "cutout-spotlight",
         "cutout-spotlight-v2",
       ])
     })
 
-    it("cutout-spotlight-v2 lands at slot index 6 with the cutout PNG in product_cutout", () => {
-      // Slot 6 is the 7th item in the cutout-enabled rotation pool — that's
-      // the v2 layout (bold blush circle + script typography). Same slot
+    it("cutout-spotlight-v2 lands at slot index 10 with the cutout PNG in product_cutout", () => {
+      // Slot 10 is the 11th (last) item in the cutout-enabled rotation pool —
+      // that's the v2 layout (bold blush circle + script typography). Same slot
       // contract as v1 so the picker can route either way.
       const s = snapshot({
         variants_in_stock: [color("pink", ["front", "cutout"])],
         variant_in_stock_count: 1,
       })
-      const picked = pickTemplate(s, 6)!
+      const picked = pickTemplate(s, 10)!
       expect(picked.template_slug).toBe("cutout-spotlight-v2")
       expect(picked.slot_inputs.product_cutout).toBe("https://r2/pink-cutout.png")
     })
@@ -613,8 +629,8 @@ describe("pickTemplate", () => {
         variants_in_stock: [color("pink", ["front", "cutout"])],
         variant_in_stock_count: 1,
       })
-      // slotIndex 5 lands on cutout-spotlight per the 6-template rotation above.
-      const picked = pickTemplate(s, 5)!
+      // slotIndex 9 lands on cutout-spotlight per the 11-template rotation above.
+      const picked = pickTemplate(s, 9)!
       expect(picked.template_slug).toBe("cutout-spotlight")
       expect(picked.slot_inputs.product_cutout).toBe("https://r2/pink-cutout.png")
     })
@@ -702,7 +718,9 @@ describe("pickTemplate", () => {
         variants_in_stock: [color("pink", ["front", "real", "cutout"])],
         variant_in_stock_count: 1,
       })
-      const slugs = [0, 1, 2, 3, 4, 5, 6].map((i) => pickTemplate(s, i)!.template_slug)
+      const slugs = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(
+        (i) => pickTemplate(s, i)!.template_slug,
+      )
       expect(slugs).toContain("cutout-spotlight")
       expect(slugs).toContain("cutout-spotlight-v2")
     })
@@ -723,12 +741,15 @@ describe("pickTemplate", () => {
 
     it("cutout-spotlight still appears in the rotation when product has cutout but NO real shot", () => {
       // 2026-05-21: rotation grew from 5 to 6 entries with just-arrived-editorial.
-      // Sample 6 slots to catch cutout-spotlight at the final rotation position.
+      // 2026-05-30: base rotation grew to 9, so the cutout-enabled pool is 11.
+      // Sample 11 slots to catch cutout-spotlight at index 9.
       const s = snapshot({
         variants_in_stock: [color("pink", ["front", "cutout"])],
         variant_in_stock_count: 1,
       })
-      const slugs = [0, 1, 2, 3, 4, 5].map((i) => pickTemplate(s, i)!.template_slug)
+      const slugs = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(
+        (i) => pickTemplate(s, i)!.template_slug,
+      )
       expect(slugs).toContain("cutout-spotlight")
     })
 
@@ -1199,6 +1220,32 @@ describe("pickTemplate", () => {
       })
       expect(pickTemplate(s, 4)!.template_slug).toBe("new-arrival")
     })
+  })
+
+  it("editorial-cover-hero is reachable and gets real overrides", () => {
+    const s = snapshot({
+      name: "Linen Wrap Dress",
+      price_mur: 1290,
+      variants_in_stock: [color("pink", ["front"], { sku: "IS2364-M-P", sizes: ["S", "M", "L"] })],
+      variant_in_stock_count: 1,
+    })
+    const picked = new Map<string, number>([
+      ["in-stock-hero", 2],
+      ["in-stock-hero-blush", 2],
+      ["lifestyle-overlay", 2],
+      ["in-stock-hero-cream", 2],
+      ["just-arrived-editorial", 2],
+      ["split-thirds-editorial", 2],
+      ["receipt-tag-1color", 2],
+      ["framed-gallery-1color", 2],
+    ])
+    const result = pickTemplate(s, 0, picked)
+    expect(result).not.toBeNull()
+    expect(result!.template_slug).toBe("editorial-cover-hero")
+    expect(result!.slot_inputs.hero).toBe("https://r2/pink.jpg")
+    expect(result!.text_overrides.price).toBe("Rs.1290")
+    expect(result!.text_overrides.sku).toBe("IS2364")
+    expect(result!.text_overrides.size).toContain("L")
   })
 
   describe("2026-05-21: color-mood-rail (3-color, front-only)", () => {

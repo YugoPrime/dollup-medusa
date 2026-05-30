@@ -25,6 +25,10 @@ const SINGLE_IMAGE_ROTATION = [
   "lifestyle-overlay",
   "in-stock-hero-cream",
   "just-arrived-editorial",
+  "editorial-cover-hero",
+  "split-thirds-editorial",
+  "receipt-tag-1color",
+  "framed-gallery-1color",
 ] as const
 
 // 1-color, front + back available: rotate between three layouts × four
@@ -306,7 +310,8 @@ function buildTextOverrides(
     }
     case "in-stock-hero":
     case "in-stock-hero-blush":
-    case "in-stock-hero-cream": {
+    case "in-stock-hero-cream":
+    case "editorial-cover-hero": {
       out.price = price
       out.size = collectSizes(snapshot, 28)
       if (sku) out.sku = sku
