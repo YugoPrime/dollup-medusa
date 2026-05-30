@@ -72,7 +72,7 @@ export default async function preorderDepositCleanup(
       // preorder awaiting deposit won't, but guard anyway and still expire.
       try {
         await cancelOrderWorkflow(container as never).run({
-          input: { id: o.id },
+          input: { order_id: o.id, no_notification: true },
         })
       } catch (e) {
         logger.warn(
