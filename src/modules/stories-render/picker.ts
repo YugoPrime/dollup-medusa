@@ -69,6 +69,16 @@ const TWO_COLOR_BACK_ROTATION = [
   "product-2colors-coral",
 ] as const
 
+// 2-color, FRONT-ONLY (no usable back). Was a single hardcoded
+// product-2colors-front return; 2026-05-30 made a 3-way rotation so
+// consecutive 2-color-no-back products read distinct. Same { front_a,
+// front_b } slot contract across all three.
+const TWO_COLOR_FRONT_ROTATION = [
+  "product-2colors-front",
+  "diagonal-2color-wipe",
+  "swipe-through-2color",
+] as const
+
 // 3+ colors. product-3colors needs a clean back; color-mood-rail (added
 // 2026-05-21) is the side-rail layout that shows 3 color thumbs WITHOUT
 // needing a back shot. Picker uses color-mood-rail as a fallback when no back
@@ -380,7 +390,9 @@ function buildTextOverrides(
     case "product-2colors-cream":
     case "product-2colors-sage":
     case "product-2colors-coral":
-    case "product-2colors-front": {
+    case "product-2colors-front":
+    case "diagonal-2color-wipe":
+    case "swipe-through-2color": {
       // Per-color size pills — variants_in_stock[0..1] match the front_a/front_b
       // slots that pickTemplate fills below, so the size badge on each card
       // reflects ONLY that color's in-stock sizes.
@@ -601,11 +613,14 @@ export function pickTemplate(
         text_overrides: buildTextOverrides(slug, snapshot),
       }
     }
-    if (a && b && !isSaturated(pickedSoFar, "product-2colors-front")) {
+    if (a && b && TWO_COLOR_FRONT_ROTATION.some((sg) => !isSaturated(pickedSoFar, sg))) {
+      const slug = pickedSoFar
+        ? leastUsed(TWO_COLOR_FRONT_ROTATION, pickedSoFar)
+        : TWO_COLOR_FRONT_ROTATION[slotIndex % TWO_COLOR_FRONT_ROTATION.length]
       return {
-        template_slug: "product-2colors-front",
+        template_slug: slug,
         slot_inputs: { front_a: a, front_b: b },
-        text_overrides: buildTextOverrides("product-2colors-front", snapshot),
+        text_overrides: buildTextOverrides(slug, snapshot),
       }
     }
     // All 2-color templates saturated OR no distinct second front available

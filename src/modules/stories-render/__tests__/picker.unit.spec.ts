@@ -258,6 +258,28 @@ describe("pickTemplate", () => {
     expect(picked.text_overrides.size).toBeUndefined()
   })
 
+  it("2-color-no-back rotates the front pool incl diagonal-2color-wipe", () => {
+    const s = snapshot({
+      name: "Wrap Blouse",
+      price_mur: 1190,
+      variants_in_stock: [
+        color("rose", ["front"], { sku: "IS3000-M-R", sizes: ["S", "M"], color: "Rose" }),
+        color("noir", ["front"], { sku: "IS3000-M-N", sizes: ["M", "L"], color: "Noir" }),
+      ],
+      variant_in_stock_count: 2,
+    })
+    const picked = new Map<string, number>([
+      ["product-2colors-front", 2],
+      ["swipe-through-2color", 2],
+    ])
+    const result = pickTemplate(s, 0, picked)
+    expect(result!.template_slug).toBe("diagonal-2color-wipe")
+    expect(result!.slot_inputs.front_a).toBe("https://r2/rose.jpg")
+    expect(result!.slot_inputs.front_b).toBe("https://r2/noir.jpg")
+    expect(result!.text_overrides.size_a).toContain("S")
+    expect(result!.text_overrides.price).toBe("Rs.1190")
+  })
+
   it("product-3colors populates per-color size_a / size_b / size_c on the 2x2 grid", () => {
     const s = snapshot({
       variants_in_stock: [
