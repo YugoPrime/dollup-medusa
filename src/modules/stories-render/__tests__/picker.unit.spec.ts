@@ -280,6 +280,27 @@ describe("pickTemplate", () => {
     expect(result!.text_overrides.price).toBe("Rs.1190")
   })
 
+  it("swipe-through-2color is reachable with both fronts + per-color sizes", () => {
+    const s = snapshot({
+      name: "Pleated Skirt",
+      price_mur: 1090,
+      variants_in_stock: [
+        color("ivory", ["front"], { sku: "IS3100-M-I", sizes: ["S", "M"], color: "Ivory" }),
+        color("olive", ["front"], { sku: "IS3100-M-O", sizes: ["L"], color: "Olive" }),
+      ],
+      variant_in_stock_count: 2,
+    })
+    const picked = new Map<string, number>([
+      ["product-2colors-front", 2],
+      ["diagonal-2color-wipe", 2],
+    ])
+    const result = pickTemplate(s, 0, picked)
+    expect(result!.template_slug).toBe("swipe-through-2color")
+    expect(result!.slot_inputs.front_a).toBe("https://r2/ivory.jpg")
+    expect(result!.slot_inputs.front_b).toBe("https://r2/olive.jpg")
+    expect(result!.text_overrides.size_b).toContain("L")
+  })
+
   it("product-3colors populates per-color size_a / size_b / size_c on the 2x2 grid", () => {
     const s = snapshot({
       variants_in_stock: [

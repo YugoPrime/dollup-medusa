@@ -1,0 +1,30 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: var(--story-w); height: var(--story-h); overflow: hidden; }
+.canvas { width: var(--story-w); height: var(--story-h); background: var(--dub-ink); }
+.scene { position: absolute; inset: 0; overflow: hidden; }
+
+.stage { position: absolute; inset: 0; }
+.layer { position: absolute; inset: 0; }
+.layer img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.layer-a { z-index: 1; animation: parallaxA 1s cubic-bezier(.34,1.4,.64,1) 1.7s both; }
+@keyframes parallaxA { from { transform: translateX(0); } to { transform: translateX(-7%); } }
+.layer-b { z-index: 2; transform: translateX(100%); box-shadow: -24px 0 40px rgba(43,43,43,.28);
+  animation: swipeB .75s cubic-bezier(.34,1.4,.64,1) 1.7s both; }
+@keyframes swipeB { 0% { transform: translateX(100%); } 60% { transform: translateX(-2%); } 100% { transform: translateX(0); } }
+
+.bars { position: absolute; top: 40px; right: 40px; display: flex; gap: 10px; z-index: 4; }
+.bar { height: 8px; border-radius: 99px; background: var(--dub-soft); }
+.bar-a { width: 70px; animation: barA .5s ease 2.4s both; }
+.bar-b { width: 24px; opacity: .5; animation: barB .5s ease 2.4s both; }
+@keyframes barA { to { width: 24px; opacity: .5; } }
+@keyframes barB { to { width: 70px; opacity: 1; } }
+
+.scrim { position: absolute; left: 0; right: 0; bottom: 0; padding: 60px 50px 64px; z-index: 3;
+  background: linear-gradient(to top, rgba(43,43,43,.92), rgba(43,43,43,.55) 60%, transparent); }
+.kicker { font-family: var(--dub-font-body); font-weight: 700; font-size: 24px; letter-spacing: 4px; color: var(--dub-soft); opacity: .85; }
+.row { display: flex; align-items: baseline; justify-content: space-between; margin-top: 10px; }
+.price { font-family: var(--dub-font-display); font-weight: 700; font-size: 92px; color: var(--dub-soft); line-height: 1; }
+.sku { font-family: var(--dub-font-body); font-size: 22px; letter-spacing: 3px; color: var(--dub-soft); opacity: .75; }
+.sizes { margin-top: 8px; font-family: var(--dub-font-body); font-weight: 700; font-size: 30px; letter-spacing: 2px; color: var(--dub-soft); display: flex; gap: 14px; }
+.sizes .sep { opacity: .5; }
+.footer { margin-top: 14px; font-family: var(--dub-font-body); font-weight: 800; font-size: 30px; letter-spacing: 4px; color: var(--dub-soft); }
