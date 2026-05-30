@@ -51,6 +51,7 @@ describe("template-loader", () => {
       "in-stock-hero-cream",
       "just-arrived-editorial",
       "lifestyle-overlay",
+      "lookbook-spread-back",
       "many-photos",
       "new-arrival",
       "new-drop-arch",

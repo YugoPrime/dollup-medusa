@@ -73,6 +73,28 @@ describe("pickTemplate", () => {
     expect(result!.text_overrides.price).toBe("Rs.1490")
   })
 
+  it("lookbook-spread-back fills front + back slots", () => {
+    const s = snapshot({
+      name: "Halter Maxi",
+      price_mur: 1690,
+      variants_in_stock: [color("teal", ["front", "back"], { sku: "IS4200-M-T", sizes: ["S", "M"] })],
+      variant_in_stock_count: 1,
+    })
+    const picked = new Map<string, number>([
+      ["product-1color", 2], ["product-1color-blush", 2], ["product-1color-cream", 2],
+      ["product-1color-sage", 2], ["product-1color-coral", 2], ["product-1color-featured", 2],
+      ["product-1color-featured-blush", 2], ["product-1color-featured-cream", 2],
+      ["product-1color-featured-sage", 2], ["product-1color-featured-coral", 2],
+      ["new-drop-arch", 2], ["new-drop-arch-blush", 2], ["new-drop-arch-cream", 2],
+      ["new-drop-arch-sage", 2], ["new-drop-arch-coral", 2],
+      ["cardflip-front-back", 2], ["filmstrip-multiframe", 2],
+    ])
+    const result = pickTemplate(s, 0, picked)
+    expect(result!.template_slug).toBe("lookbook-spread-back")
+    expect(result!.slot_inputs.front).toBe("https://r2/teal.jpg")
+    expect(result!.slot_inputs.back).toBe("https://r2/teal-b.jpg")
+  })
+
   it("back templates never fire on a front-only product", () => {
     const s = snapshot({
       name: "Front Only Tee",
