@@ -32,13 +32,19 @@ describe("template-loader", () => {
     // 2026-05-25: round-1 palette variants added — product-1color,
     // product-1color-featured, new-drop-arch, product-2colors each cloned
     // into -blush / -cream / -sage / -coral siblings (16 new folders).
+    // 2026-05-30: editorial 1-color (split-thirds-editorial, receipt-tag-1color,
+    // framed-gallery-1color), 2-color-front wipe siblings (diagonal-2color-wipe,
+    // swipe-through-2color), and back template cardflip-front-back added.
     const slugs = (await listTemplates(TEMPLATES_ROOT)).map((template) => template.slug)
     expect(slugs).toEqual([
+      "cardflip-front-back",
       "color-mood-rail",
       "customer-review",
       "cutout-spotlight",
       "cutout-spotlight-v2",
+      "diagonal-2color-wipe",
       "editorial-cover-hero",
+      "framed-gallery-1color",
       "how-to-order",
       "in-stock-hero",
       "in-stock-hero-blush",
@@ -70,6 +76,9 @@ describe("template-loader", () => {
       "product-2colors-front",
       "product-2colors-sage",
       "product-3colors",
+      "receipt-tag-1color",
+      "split-thirds-editorial",
+      "swipe-through-2color",
     ])
   })
 })

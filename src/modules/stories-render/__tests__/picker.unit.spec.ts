@@ -50,6 +50,41 @@ function color(
 }
 
 describe("pickTemplate", () => {
+  it("cardflip-front-back fires only when a back shot exists", () => {
+    const s = snapshot({
+      name: "Tie Back Dress",
+      price_mur: 1490,
+      variants_in_stock: [color("blush", ["front", "back"], { sku: "IS4000-M-B", sizes: ["S", "M", "L"] })],
+      variant_in_stock_count: 1,
+    })
+    const picked = new Map<string, number>([
+      ["product-1color", 2], ["product-1color-blush", 2], ["product-1color-cream", 2],
+      ["product-1color-sage", 2], ["product-1color-coral", 2],
+      ["product-1color-featured", 2], ["product-1color-featured-blush", 2],
+      ["product-1color-featured-cream", 2], ["product-1color-featured-sage", 2],
+      ["product-1color-featured-coral", 2], ["new-drop-arch", 2], ["new-drop-arch-blush", 2],
+      ["new-drop-arch-cream", 2], ["new-drop-arch-sage", 2], ["new-drop-arch-coral", 2],
+      ["lookbook-spread-back", 2], ["filmstrip-multiframe", 2],
+    ])
+    const result = pickTemplate(s, 0, picked)
+    expect(result!.template_slug).toBe("cardflip-front-back")
+    expect(result!.slot_inputs.front).toBe("https://r2/blush.jpg")
+    expect(result!.slot_inputs.back).toBe("https://r2/blush-b.jpg")
+    expect(result!.text_overrides.price).toBe("Rs.1490")
+  })
+
+  it("back templates never fire on a front-only product", () => {
+    const s = snapshot({
+      name: "Front Only Tee",
+      price_mur: 600,
+      variants_in_stock: [color("white", ["front"], { sku: "IS4100-M-W", sizes: ["M"] })],
+      variant_in_stock_count: 1,
+    })
+    const result = pickTemplate(s, 0)
+    expect(["cardflip-front-back", "lookbook-spread-back", "filmstrip-multiframe"])
+      .not.toContain(result!.template_slug)
+  })
+
   it("returns null when snapshot is null", () => {
     expect(pickTemplate(null, 0)).toBeNull()
   })
@@ -400,11 +435,12 @@ describe("pickTemplate", () => {
     expect(picked.text_overrides.size).toBe("One size")
   })
 
-  it("rotates the 15-template 1-color pool by slot_index for 1-color front+back", () => {
-    // 15-template pool (2026-05-25: original 3 layouts × 4 palette siblings
-    // each, plus the 3 originals). Without a count map, picker rotates by
-    // slotIndex mod 15 for deterministic test behavior. Order follows
-    // ONE_COLOR_FRONT_BACK_ROTATION exactly.
+  it("rotates the 18-template 1-color pool by slot_index for 1-color front+back", () => {
+    // 18-template pool (2026-05-25: original 3 layouts × 4 palette siblings
+    // each, plus the 3 originals = 15; 2026-05-30: + cardflip-front-back,
+    // lookbook-spread-back, filmstrip-multiframe back templates = 18). Without
+    // a count map, picker rotates by slotIndex mod 18 for deterministic test
+    // behavior. Order follows ONE_COLOR_FRONT_BACK_ROTATION exactly.
     const s = snapshot({
       variants_in_stock: [color("pink", ["front", "back"])],
       variant_in_stock_count: 1,
@@ -413,8 +449,12 @@ describe("pickTemplate", () => {
     expect(pickTemplate(s, 1)!.template_slug).toBe("product-1color-blush")
     expect(pickTemplate(s, 5)!.template_slug).toBe("product-1color-featured")
     expect(pickTemplate(s, 10)!.template_slug).toBe("new-drop-arch")
-    // Wrap-around: slot 15 == slot 0.
-    expect(pickTemplate(s, 15)!.template_slug).toBe("product-1color")
+    // The three back templates appended 2026-05-30 land at indices 15/16/17.
+    expect(pickTemplate(s, 15)!.template_slug).toBe("cardflip-front-back")
+    expect(pickTemplate(s, 16)!.template_slug).toBe("lookbook-spread-back")
+    expect(pickTemplate(s, 17)!.template_slug).toBe("filmstrip-multiframe")
+    // Wrap-around: slot 18 == slot 0.
+    expect(pickTemplate(s, 18)!.template_slug).toBe("product-1color")
   })
 
   it("REGRESSION: product-1color is NOT used when the only second image is a detail/real/size_chart shot", () => {
@@ -1016,14 +1056,16 @@ describe("pickTemplate", () => {
       })
     }
 
-    it("first 15 single-color-with-back picks round-robin the 1-color pool (each once before any repeat)", () => {
+    it("first 18 single-color-with-back picks round-robin the 1-color pool (each once before any repeat)", () => {
       // 2026-05-25: pool grew from 3 to 15 templates (3 layouts × 4 palettes
-      // + originals). True least-used round-robin produces each slug exactly
-      // once across 15 slots; only on slot 16 does the first slug repeat.
+      // + originals). 2026-05-30: + 3 back templates (cardflip-front-back,
+      // lookbook-spread-back, filmstrip-multiframe) = 18. True least-used
+      // round-robin produces each slug exactly once across 18 slots; only on
+      // slot 19 does the first slug repeat.
       const s = oneColorWithBack()
       const counts = new Map<string, number>()
       const picks: string[] = []
-      for (let i = 0; i < 15; i++) {
+      for (let i = 0; i < 18; i++) {
         const p = pickTemplate(s, i, counts)!
         picks.push(p.template_slug)
         counts.set(p.template_slug, (counts.get(p.template_slug) ?? 0) + 1)
@@ -1031,16 +1073,18 @@ describe("pickTemplate", () => {
       // Every slug should appear exactly once — leastUsed prefers count=0
       // candidates, and ties resolve by pool order.
       const unique = new Set(picks)
-      expect(unique.size).toBe(15)
+      expect(unique.size).toBe(18)
       expect(picks[0]).toBe("product-1color")
-      // Slot 16: the head of the pool comes around for its second hit.
-      const p16 = pickTemplate(s, 15, counts)!
-      expect(p16.template_slug).toBe("product-1color")
+      // Slot 19: the head of the pool comes around for its second hit.
+      const p19 = pickTemplate(s, 18, counts)!
+      expect(p19.template_slug).toBe("product-1color")
     })
 
-    it("16th single-color-with-back falls through to the single-image rotation when all 1-color templates are capped", () => {
+    it("19th single-color-with-back falls through to the single-image rotation when all 1-color templates are capped", () => {
       // 2026-05-25: was 7th with a 3-template pool. With 15 templates, all
       // need to be at MAX_TEMPLATE_PER_DAY=2 before the fallthrough fires.
+      // 2026-05-30: pool grew to 18 (+ cardflip-front-back, lookbook-spread-back,
+      // filmstrip-multiframe) — all 18 must be capped before fall-through.
       const s = oneColorWithBack()
       const counts = new Map<string, number>([
         ["product-1color", 2],
@@ -1058,6 +1102,9 @@ describe("pickTemplate", () => {
         ["new-drop-arch-cream", 2],
         ["new-drop-arch-sage", 2],
         ["new-drop-arch-coral", 2],
+        ["cardflip-front-back", 2],
+        ["lookbook-spread-back", 2],
+        ["filmstrip-multiframe", 2],
       ])
       const p = pickTemplate(s, 30, counts)!
       expect([

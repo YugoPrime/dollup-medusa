@@ -55,6 +55,14 @@ const ONE_COLOR_FRONT_BACK_ROTATION = [
   "new-drop-arch-cream",
   "new-drop-arch-sage",
   "new-drop-arch-coral",
+  // 2026-05-30: three front+back templates added to the rotation. They require
+  // a real "-b" back shot like every other slug here, so they are HARD-GATED:
+  // the 1-color-front-back branch only runs when pickBack returns a back. A
+  // front-only product never reaches this rotation, so these three are
+  // inherently unreachable without a back shot — the branch IS the gate.
+  "cardflip-front-back",
+  "lookbook-spread-back",
+  "filmstrip-multiframe",
 ] as const
 
 // 2-color templates with a back image. Was a single template
@@ -364,6 +372,15 @@ function buildTextOverrides(
       out.price = price
       out.size = collectSizes(snapshot, 28)
       out.headline = productNameLabel(snapshot, 22)
+      if (sku) out.sku = sku
+      return out
+    }
+    case "cardflip-front-back":
+    case "lookbook-spread-back":
+    case "filmstrip-multiframe": {
+      out.price = price
+      out.size = collectSizes(snapshot, 28)
+      out.headline = productNameLabel(snapshot, 24)
       if (sku) out.sku = sku
       return out
     }
