@@ -25,6 +25,10 @@ const SINGLE_IMAGE_ROTATION = [
   "lifestyle-overlay",
   "in-stock-hero-cream",
   "just-arrived-editorial",
+  "editorial-cover-hero",
+  "split-thirds-editorial",
+  "receipt-tag-1color",
+  "framed-gallery-1color",
 ] as const
 
 // 1-color, front + back available: rotate between three layouts × four
@@ -51,6 +55,14 @@ const ONE_COLOR_FRONT_BACK_ROTATION = [
   "new-drop-arch-cream",
   "new-drop-arch-sage",
   "new-drop-arch-coral",
+  // 2026-05-30: three front+back templates added to the rotation. They require
+  // a real "-b" back shot like every other slug here, so they are HARD-GATED:
+  // the 1-color-front-back branch only runs when pickBack returns a back. A
+  // front-only product never reaches this rotation, so these three are
+  // inherently unreachable without a back shot — the branch IS the gate.
+  "cardflip-front-back",
+  "lookbook-spread-back",
+  "filmstrip-multiframe",
 ] as const
 
 // 2-color templates with a back image. Was a single template
@@ -63,6 +75,16 @@ const TWO_COLOR_BACK_ROTATION = [
   "product-2colors-cream",
   "product-2colors-sage",
   "product-2colors-coral",
+] as const
+
+// 2-color, FRONT-ONLY (no usable back). Was a single hardcoded
+// product-2colors-front return; 2026-05-30 made a 3-way rotation so
+// consecutive 2-color-no-back products read distinct. Same { front_a,
+// front_b } slot contract across all three.
+const TWO_COLOR_FRONT_ROTATION = [
+  "product-2colors-front",
+  "diagonal-2color-wipe",
+  "swipe-through-2color",
 ] as const
 
 // 3+ colors. product-3colors needs a clean back; color-mood-rail (added
@@ -306,7 +328,8 @@ function buildTextOverrides(
     }
     case "in-stock-hero":
     case "in-stock-hero-blush":
-    case "in-stock-hero-cream": {
+    case "in-stock-hero-cream":
+    case "editorial-cover-hero": {
       out.price = price
       out.size = collectSizes(snapshot, 28)
       if (sku) out.sku = sku
@@ -325,6 +348,13 @@ function buildTextOverrides(
       if (sku) out.sku = sku
       return out
     }
+    case "bigprice-cutout-hero": {
+      out.price = price
+      out.size = collectSizes(snapshot, 28)
+      out.headline = productNameLabel(snapshot, 24)
+      if (sku) out.sku = sku
+      return out
+    }
     case "just-arrived-editorial": {
       out.price = price
       out.size = collectSizes(snapshot, 28)
@@ -340,6 +370,24 @@ function buildTextOverrides(
       out.price = price
       out.size = collectSizes(snapshot, 28)
       out.headline = productNameLabel(snapshot, 28)
+      if (sku) out.sku = sku
+      return out
+    }
+    case "split-thirds-editorial":
+    case "receipt-tag-1color":
+    case "framed-gallery-1color": {
+      out.price = price
+      out.size = collectSizes(snapshot, 28)
+      out.headline = productNameLabel(snapshot, 22)
+      if (sku) out.sku = sku
+      return out
+    }
+    case "cardflip-front-back":
+    case "lookbook-spread-back":
+    case "filmstrip-multiframe": {
+      out.price = price
+      out.size = collectSizes(snapshot, 28)
+      out.headline = productNameLabel(snapshot, 24)
       if (sku) out.sku = sku
       return out
     }
@@ -366,7 +414,9 @@ function buildTextOverrides(
     case "product-2colors-cream":
     case "product-2colors-sage":
     case "product-2colors-coral":
-    case "product-2colors-front": {
+    case "product-2colors-front":
+    case "diagonal-2color-wipe":
+    case "swipe-through-2color": {
       // Per-color size pills — variants_in_stock[0..1] match the front_a/front_b
       // slots that pickTemplate fills below, so the size badge on each card
       // reflects ONLY that color's in-stock sizes.
@@ -478,13 +528,13 @@ export function pickTemplate(
   // cutouts. Tradeoff accepted 2026-05-26.
   const cutoutUrlEarly = pickCutout(colors)
   if (pickedSoFar && cutoutUrlEarly && colors.length === 1) {
+    const CUTOUT_ROTATION = ["cutout-spotlight", "cutout-spotlight-v2", "bigprice-cutout-hero"] as const
     const cutoutCount =
       countOf(pickedSoFar, "cutout-spotlight") +
-      countOf(pickedSoFar, "cutout-spotlight-v2")
+      countOf(pickedSoFar, "cutout-spotlight-v2") +
+      countOf(pickedSoFar, "bigprice-cutout-hero")
     if (cutoutCount === 0) {
-      const cutoutSlug = isSaturated(pickedSoFar, "cutout-spotlight")
-        ? "cutout-spotlight-v2"
-        : "cutout-spotlight"
+      const cutoutSlug = leastUsed(CUTOUT_ROTATION, pickedSoFar)
       return {
         template_slug: cutoutSlug,
         slot_inputs: { product_cutout: cutoutUrlEarly },
@@ -587,11 +637,14 @@ export function pickTemplate(
         text_overrides: buildTextOverrides(slug, snapshot),
       }
     }
-    if (a && b && !isSaturated(pickedSoFar, "product-2colors-front")) {
+    if (a && b && TWO_COLOR_FRONT_ROTATION.some((sg) => !isSaturated(pickedSoFar, sg))) {
+      const slug = pickedSoFar
+        ? leastUsed(TWO_COLOR_FRONT_ROTATION, pickedSoFar)
+        : TWO_COLOR_FRONT_ROTATION[slotIndex % TWO_COLOR_FRONT_ROTATION.length]
       return {
-        template_slug: "product-2colors-front",
+        template_slug: slug,
         slot_inputs: { front_a: a, front_b: b },
-        text_overrides: buildTextOverrides("product-2colors-front", snapshot),
+        text_overrides: buildTextOverrides(slug, snapshot),
       }
     }
     // All 2-color templates saturated OR no distinct second front available
@@ -644,7 +697,7 @@ export function pickTemplate(
   // contract and same text_overrides — picker rotates between them on
   // separate slot indexes so the daily feed alternates the two looks.
   const pool: readonly string[] = cutoutEligible
-    ? [...SINGLE_IMAGE_ROTATION, "cutout-spotlight", "cutout-spotlight-v2"]
+    ? [...SINGLE_IMAGE_ROTATION, "cutout-spotlight", "cutout-spotlight-v2", "bigprice-cutout-hero"]
     : SINGLE_IMAGE_ROTATION
 
   // (The daily cutout guarantee runs at the top of pickTemplate now — see
@@ -659,7 +712,7 @@ export function pickTemplate(
   const slug = pickedSoFar
     ? leastUsed(pool, pickedSoFar)
     : pool[slotIndex % pool.length]
-  if ((slug === "cutout-spotlight" || slug === "cutout-spotlight-v2") && cutoutUrl) {
+  if ((slug === "cutout-spotlight" || slug === "cutout-spotlight-v2" || slug === "bigprice-cutout-hero") && cutoutUrl) {
     return {
       template_slug: slug,
       slot_inputs: { product_cutout: cutoutUrl },

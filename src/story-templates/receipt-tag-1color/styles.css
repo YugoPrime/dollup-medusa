@@ -1,0 +1,37 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: var(--story-w); height: var(--story-h); overflow: hidden; }
+.canvas { width: var(--story-w); height: var(--story-h); background: var(--dub-cream); }
+.scene { position: absolute; inset: 0; display: flex; flex-direction: column; }
+
+.photo-window { height: 58%; margin: 40px 40px 0; border-radius: 18px; overflow: hidden;
+  background: var(--dub-blush); box-shadow: 0 20px 40px rgba(43,43,43,.14); }
+.photo-img { width: 100%; height: 100%; object-fit: cover; display: block;
+  animation: focusPull .8s ease-out both; }
+@keyframes focusPull { from { filter: blur(16px); transform: scale(1.05); } to { filter: blur(0); transform: scale(1); } }
+
+.receipt { position: relative; flex: 1; margin: 26px 90px 60px; background: var(--dub-soft);
+  padding: 46px 46px 30px; box-shadow: 0 16px 30px rgba(43,43,43,.12);
+  display: flex; flex-direction: column; gap: 22px; }
+.tear { position: absolute; top: 0; left: 0; right: 0; height: 0; border-top: 3px dashed var(--dub-ink); }
+
+.r-row { display: flex; align-items: baseline; gap: 14px;
+  font-family: var(--dub-font-body); font-weight: 600; font-size: 34px; color: var(--dub-ink);
+  letter-spacing: 1px; clip-path: inset(0 0 100% 0); }
+.r1 { animation: printRow .01s linear .9s both; }
+.r2 { animation: printRow .01s linear 1.1s both; }
+.r3 { animation: printRow .01s linear 1.3s both; }
+@keyframes printRow { to { clip-path: inset(0 0 0 0); } }
+.r-key { font-weight: 800; letter-spacing: 3px; }
+.r-dots { flex: 1; border-bottom: 3px dotted rgba(43,43,43,.4); transform: translateY(-8px); }
+.r-val { font-weight: 700; }
+.r-val.gold { color: var(--dub-gold); font-family: var(--dub-font-display); font-size: 44px; }
+
+.barcode { height: 90px; margin-top: 8px;
+  background: repeating-linear-gradient(90deg, var(--dub-ink) 0, var(--dub-ink) 4px, transparent 4px, transparent 9px);
+  clip-path: inset(0 100% 0 0); animation: drawBar .5s ease-out 1.5s both; }
+@keyframes drawBar { to { clip-path: inset(0 0 0 0); } }
+.r-sku { font-family: var(--dub-font-body); font-weight: 600; font-size: 24px; letter-spacing: 6px;
+  text-align: center; color: var(--dub-ink); opacity: .8; }
+.r-footer { font-family: var(--dub-font-display); font-style: italic; font-size: 30px; text-align: center; color: var(--dub-ink); }
+.r-cta { margin-top: auto; text-align: center; font-family: var(--dub-font-body); font-weight: 800;
+  font-size: 28px; letter-spacing: 2px; color: var(--dub-ink); border-top: 3px dashed var(--dub-ink); padding-top: 18px; }

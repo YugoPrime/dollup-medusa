@@ -1,0 +1,15 @@
+{
+  "slug": "editorial-cover-hero",
+  "name": "Editorial Cover · Masthead Hero",
+  "category": "single-product",
+  "duration_seconds": 6,
+  "wave": 1,
+  "slots": [
+    { "id": "hero", "hint": "front", "label": "Product photo", "required": true }
+  ],
+  "text_overrides": [
+    { "id": "price", "default": "Rs.0", "max_chars": 12 },
+    { "id": "sku", "default": "IS0000", "max_chars": 10 },
+    { "id": "size", "default": "Size: S · M · L", "max_chars": 28 }
+  ]
+}

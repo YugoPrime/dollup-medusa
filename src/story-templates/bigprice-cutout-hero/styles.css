@@ -1,0 +1,46 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: var(--story-w); height: var(--story-h); overflow: hidden; }
+.canvas { width: var(--story-w); height: var(--story-h); background: var(--dub-cream); }
+.scene { position: absolute; inset: 0; overflow: hidden; }
+
+.glow { position: absolute; top: 30%; left: 50%; transform: translate(-50%, -50%);
+  width: 900px; height: 900px; border-radius: 50%;
+  background: radial-gradient(circle, var(--dub-blush), transparent 70%);
+  animation: breathe 6s ease-in-out infinite alternate; }
+@keyframes breathe { from { opacity: .6; } to { opacity: .85; } }
+
+.bigprice { position: absolute; top: 120px; left: 60px; z-index: 2;
+  font-family: var(--dub-font-display); font-weight: 800; line-height: .82;
+  animation: trackIn .9s ease-out both; }
+@keyframes trackIn { from { opacity: 0; letter-spacing: -.18em; } to { opacity: 1; letter-spacing: 0; } }
+/* Solid gold is the GUARANTEED fill — the price must never be invisible.
+   The headless Chromium renderer does not paint `background-clip:text`
+   reliably (verified 2026-05-30: the gradient-clipped number rendered fully
+   transparent in the preview), so we use a plain solid `color` fill and add
+   a non-clipping gold shimmer via text-shadow that only enhances, never
+   gates, visibility. */
+.amt { font-size: 200px; color: var(--dub-gold);
+  text-shadow: 0 2px 0 rgba(184, 151, 92, .35);
+  animation: goldGlow 2.4s ease-in-out .9s infinite alternate; }
+@keyframes goldGlow {
+  from { color: var(--dub-gold); }
+  to { color: #d8bd85; }
+}
+
+.cutout-wrap { position: absolute; right: 10px; bottom: 210px; height: 1080px; z-index: 3;
+  animation: cutoutRise .7s cubic-bezier(.16,1,.3,1) .5s both, float 4s ease-in-out 1.4s infinite alternate; }
+@keyframes cutoutRise { from { transform: translateY(40px) scale(.96); } to { transform: translateY(0) scale(1); } }
+@keyframes float { from { transform: translateY(0); } to { transform: translateY(-6px); } }
+.cutout { height: 100%; width: auto; object-fit: contain; display: block;
+  filter: drop-shadow(0 30px 40px rgba(43,43,43,.28)); }
+
+.meta { position: absolute; left: 60px; bottom: 150px; z-index: 4; display: flex; flex-direction: column; gap: 10px;
+  animation: rise .5s ease-out 1.8s both; }
+.name { font-family: var(--dub-font-display); font-style: italic; font-weight: 700; font-size: 56px; color: var(--dub-ink); }
+.size { font-family: var(--dub-font-body); font-weight: 700; font-size: 30px; letter-spacing: 2px; color: var(--dub-ink); }
+.sku { font-family: var(--dub-font-body); font-size: 22px; letter-spacing: 4px; color: var(--dub-ink); opacity: .6; }
+.cta { position: absolute; left: 60px; bottom: 64px; z-index: 4;
+  font-family: var(--dub-font-body); font-weight: 800; font-size: 30px; letter-spacing: 2px; color: var(--dub-soft);
+  background: var(--dub-ink); padding: 16px 30px; border-radius: 99px;
+  animation: rise .5s ease-out 2.0s both; }
+@keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }

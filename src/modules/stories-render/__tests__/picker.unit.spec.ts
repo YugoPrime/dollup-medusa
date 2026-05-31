@@ -50,6 +50,85 @@ function color(
 }
 
 describe("pickTemplate", () => {
+  it("cardflip-front-back fires only when a back shot exists", () => {
+    const s = snapshot({
+      name: "Tie Back Dress",
+      price_mur: 1490,
+      variants_in_stock: [color("blush", ["front", "back"], { sku: "IS4000-M-B", sizes: ["S", "M", "L"] })],
+      variant_in_stock_count: 1,
+    })
+    const picked = new Map<string, number>([
+      ["product-1color", 2], ["product-1color-blush", 2], ["product-1color-cream", 2],
+      ["product-1color-sage", 2], ["product-1color-coral", 2],
+      ["product-1color-featured", 2], ["product-1color-featured-blush", 2],
+      ["product-1color-featured-cream", 2], ["product-1color-featured-sage", 2],
+      ["product-1color-featured-coral", 2], ["new-drop-arch", 2], ["new-drop-arch-blush", 2],
+      ["new-drop-arch-cream", 2], ["new-drop-arch-sage", 2], ["new-drop-arch-coral", 2],
+      ["lookbook-spread-back", 2], ["filmstrip-multiframe", 2],
+    ])
+    const result = pickTemplate(s, 0, picked)
+    expect(result!.template_slug).toBe("cardflip-front-back")
+    expect(result!.slot_inputs.front).toBe("https://r2/blush.jpg")
+    expect(result!.slot_inputs.back).toBe("https://r2/blush-b.jpg")
+    expect(result!.text_overrides.price).toBe("Rs.1490")
+  })
+
+  it("lookbook-spread-back fills front + back slots", () => {
+    const s = snapshot({
+      name: "Halter Maxi",
+      price_mur: 1690,
+      variants_in_stock: [color("teal", ["front", "back"], { sku: "IS4200-M-T", sizes: ["S", "M"] })],
+      variant_in_stock_count: 1,
+    })
+    const picked = new Map<string, number>([
+      ["product-1color", 2], ["product-1color-blush", 2], ["product-1color-cream", 2],
+      ["product-1color-sage", 2], ["product-1color-coral", 2], ["product-1color-featured", 2],
+      ["product-1color-featured-blush", 2], ["product-1color-featured-cream", 2],
+      ["product-1color-featured-sage", 2], ["product-1color-featured-coral", 2],
+      ["new-drop-arch", 2], ["new-drop-arch-blush", 2], ["new-drop-arch-cream", 2],
+      ["new-drop-arch-sage", 2], ["new-drop-arch-coral", 2],
+      ["cardflip-front-back", 2], ["filmstrip-multiframe", 2],
+    ])
+    const result = pickTemplate(s, 0, picked)
+    expect(result!.template_slug).toBe("lookbook-spread-back")
+    expect(result!.slot_inputs.front).toBe("https://r2/teal.jpg")
+    expect(result!.slot_inputs.back).toBe("https://r2/teal-b.jpg")
+  })
+
+  it("filmstrip-multiframe fills front + back as reel frames", () => {
+    const s = snapshot({
+      name: "Belted Coat",
+      price_mur: 2490,
+      variants_in_stock: [color("camel", ["front", "back"], { sku: "IS4300-M-C", sizes: ["M", "L"] })],
+      variant_in_stock_count: 1,
+    })
+    const picked = new Map<string, number>([
+      ["product-1color", 2], ["product-1color-blush", 2], ["product-1color-cream", 2],
+      ["product-1color-sage", 2], ["product-1color-coral", 2], ["product-1color-featured", 2],
+      ["product-1color-featured-blush", 2], ["product-1color-featured-cream", 2],
+      ["product-1color-featured-sage", 2], ["product-1color-featured-coral", 2],
+      ["new-drop-arch", 2], ["new-drop-arch-blush", 2], ["new-drop-arch-cream", 2],
+      ["new-drop-arch-sage", 2], ["new-drop-arch-coral", 2],
+      ["cardflip-front-back", 2], ["lookbook-spread-back", 2],
+    ])
+    const result = pickTemplate(s, 0, picked)
+    expect(result!.template_slug).toBe("filmstrip-multiframe")
+    expect(result!.slot_inputs.front).toBe("https://r2/camel.jpg")
+    expect(result!.slot_inputs.back).toBe("https://r2/camel-b.jpg")
+  })
+
+  it("back templates never fire on a front-only product", () => {
+    const s = snapshot({
+      name: "Front Only Tee",
+      price_mur: 600,
+      variants_in_stock: [color("white", ["front"], { sku: "IS4100-M-W", sizes: ["M"] })],
+      variant_in_stock_count: 1,
+    })
+    const result = pickTemplate(s, 0)
+    expect(["cardflip-front-back", "lookbook-spread-back", "filmstrip-multiframe"])
+      .not.toContain(result!.template_slug)
+  })
+
   it("returns null when snapshot is null", () => {
     expect(pickTemplate(null, 0)).toBeNull()
   })
@@ -258,6 +337,49 @@ describe("pickTemplate", () => {
     expect(picked.text_overrides.size).toBeUndefined()
   })
 
+  it("2-color-no-back rotates the front pool incl diagonal-2color-wipe", () => {
+    const s = snapshot({
+      name: "Wrap Blouse",
+      price_mur: 1190,
+      variants_in_stock: [
+        color("rose", ["front"], { sku: "IS3000-M-R", sizes: ["S", "M"], color: "Rose" }),
+        color("noir", ["front"], { sku: "IS3000-M-N", sizes: ["M", "L"], color: "Noir" }),
+      ],
+      variant_in_stock_count: 2,
+    })
+    const picked = new Map<string, number>([
+      ["product-2colors-front", 2],
+      ["swipe-through-2color", 2],
+    ])
+    const result = pickTemplate(s, 0, picked)
+    expect(result!.template_slug).toBe("diagonal-2color-wipe")
+    expect(result!.slot_inputs.front_a).toBe("https://r2/rose.jpg")
+    expect(result!.slot_inputs.front_b).toBe("https://r2/noir.jpg")
+    expect(result!.text_overrides.size_a).toContain("S")
+    expect(result!.text_overrides.price).toBe("Rs.1190")
+  })
+
+  it("swipe-through-2color is reachable with both fronts + per-color sizes", () => {
+    const s = snapshot({
+      name: "Pleated Skirt",
+      price_mur: 1090,
+      variants_in_stock: [
+        color("ivory", ["front"], { sku: "IS3100-M-I", sizes: ["S", "M"], color: "Ivory" }),
+        color("olive", ["front"], { sku: "IS3100-M-O", sizes: ["L"], color: "Olive" }),
+      ],
+      variant_in_stock_count: 2,
+    })
+    const picked = new Map<string, number>([
+      ["product-2colors-front", 2],
+      ["diagonal-2color-wipe", 2],
+    ])
+    const result = pickTemplate(s, 0, picked)
+    expect(result!.template_slug).toBe("swipe-through-2color")
+    expect(result!.slot_inputs.front_a).toBe("https://r2/ivory.jpg")
+    expect(result!.slot_inputs.front_b).toBe("https://r2/olive.jpg")
+    expect(result!.text_overrides.size_b).toContain("L")
+  })
+
   it("product-3colors populates per-color size_a / size_b / size_c on the 2x2 grid", () => {
     const s = snapshot({
       variants_in_stock: [
@@ -357,11 +479,12 @@ describe("pickTemplate", () => {
     expect(picked.text_overrides.size).toBe("One size")
   })
 
-  it("rotates the 15-template 1-color pool by slot_index for 1-color front+back", () => {
-    // 15-template pool (2026-05-25: original 3 layouts × 4 palette siblings
-    // each, plus the 3 originals). Without a count map, picker rotates by
-    // slotIndex mod 15 for deterministic test behavior. Order follows
-    // ONE_COLOR_FRONT_BACK_ROTATION exactly.
+  it("rotates the 18-template 1-color pool by slot_index for 1-color front+back", () => {
+    // 18-template pool (2026-05-25: original 3 layouts × 4 palette siblings
+    // each, plus the 3 originals = 15; 2026-05-30: + cardflip-front-back,
+    // lookbook-spread-back, filmstrip-multiframe back templates = 18). Without
+    // a count map, picker rotates by slotIndex mod 18 for deterministic test
+    // behavior. Order follows ONE_COLOR_FRONT_BACK_ROTATION exactly.
     const s = snapshot({
       variants_in_stock: [color("pink", ["front", "back"])],
       variant_in_stock_count: 1,
@@ -370,8 +493,12 @@ describe("pickTemplate", () => {
     expect(pickTemplate(s, 1)!.template_slug).toBe("product-1color-blush")
     expect(pickTemplate(s, 5)!.template_slug).toBe("product-1color-featured")
     expect(pickTemplate(s, 10)!.template_slug).toBe("new-drop-arch")
-    // Wrap-around: slot 15 == slot 0.
-    expect(pickTemplate(s, 15)!.template_slug).toBe("product-1color")
+    // The three back templates appended 2026-05-30 land at indices 15/16/17.
+    expect(pickTemplate(s, 15)!.template_slug).toBe("cardflip-front-back")
+    expect(pickTemplate(s, 16)!.template_slug).toBe("lookbook-spread-back")
+    expect(pickTemplate(s, 17)!.template_slug).toBe("filmstrip-multiframe")
+    // Wrap-around: slot 18 == slot 0.
+    expect(pickTemplate(s, 18)!.template_slug).toBe("product-1color")
   })
 
   it("REGRESSION: product-1color is NOT used when the only second image is a detail/real/size_chart shot", () => {
@@ -389,23 +516,31 @@ describe("pickTemplate", () => {
     )
   })
 
-  it("rotates [in-stock-hero, in-stock-hero-blush, lifestyle-overlay, in-stock-hero-cream, just-arrived-editorial] by slot_index", () => {
-    // 5-template rotation (2026-05-21: added just-arrived-editorial — editorial
-    // cutout-hero treatment, beige palette, Shop the look CTA). All 5 templates
-    // accept the same `hero` (or `lifestyle`) slot from a single front shot.
-    // Order is: ink → blush → lifestyle → cream → editorial → repeat.
+  it("rotates the single-image pool by slot_index", () => {
+    // 9-template rotation (2026-05-30: added the four 1-color editorial slugs —
+    // editorial-cover-hero + split-thirds-editorial + receipt-tag-1color +
+    // framed-gallery-1color). All accept the same `hero` (or `lifestyle`) slot
+    // from a single front shot. Order: ink → blush → lifestyle → cream →
+    // just-arrived → editorial-cover → split-thirds → receipt-tag → framed →
+    // repeat.
     const s = snapshot({
       variants_in_stock: [color("pink", ["front"])],
       variant_in_stock_count: 1,
       is_new_arrival: false,
     })
-    const slugs = [0, 1, 2, 3, 4, 5, 6].map((i) => pickTemplate(s, i)!.template_slug)
+    const slugs = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(
+      (i) => pickTemplate(s, i)!.template_slug,
+    )
     expect(slugs).toEqual([
       "in-stock-hero",
       "in-stock-hero-blush",
       "lifestyle-overlay",
       "in-stock-hero-cream",
       "just-arrived-editorial",
+      "editorial-cover-hero",
+      "split-thirds-editorial",
+      "receipt-tag-1color",
+      "framed-gallery-1color",
       "in-stock-hero",
       "in-stock-hero-blush",
     ])
@@ -571,39 +706,47 @@ describe("pickTemplate", () => {
       expect(slugsOver10Slots).toContain("lifestyle-overlay")
     })
 
-    it("cutout-spotlight + cutout-spotlight-v2 are two entries in the 7-template single-image rotation when a cutout exists", () => {
+    it("cutout-spotlight + cutout-spotlight-v2 are the last two entries in the 11-template single-image rotation when a cutout exists", () => {
       // 2026-05-19: cutout-spotlight stopped winning unconditionally and joined
       // the rotation alongside the hero variants.
-      // 2026-05-21: just-arrived-editorial added to the rotation, so the
-      // cutout-enabled pool is now 6 entries: 5 base + cutout-spotlight as
-      // the final entry. Order: ink → blush → lifestyle → cream → editorial → cutout.
+      // 2026-05-21: just-arrived-editorial added to the rotation.
       // 2026-05-22: cutout-spotlight-v2 added (bold blush circle + italic-script
-      // typography variant). Pool is now 7: base 5 + cutout v1 + cutout v2.
+      // typography variant).
+      // 2026-05-30: four 1-color editorial slugs added to the base rotation
+      // (editorial-cover-hero, split-thirds-editorial, receipt-tag-1color,
+      // framed-gallery-1color). Cutout-enabled pool is now 11: base 9 + cutout
+      // v1 + cutout v2, with the two cutouts still the final two entries.
       const s = snapshot({
         variants_in_stock: [color("pink", ["front", "cutout"])],
         variant_in_stock_count: 1,
       })
-      const slugs = [0, 1, 2, 3, 4, 5, 6].map((i) => pickTemplate(s, i)!.template_slug)
+      const slugs = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(
+        (i) => pickTemplate(s, i)!.template_slug,
+      )
       expect(slugs).toEqual([
         "in-stock-hero",
         "in-stock-hero-blush",
         "lifestyle-overlay",
         "in-stock-hero-cream",
         "just-arrived-editorial",
+        "editorial-cover-hero",
+        "split-thirds-editorial",
+        "receipt-tag-1color",
+        "framed-gallery-1color",
         "cutout-spotlight",
         "cutout-spotlight-v2",
       ])
     })
 
-    it("cutout-spotlight-v2 lands at slot index 6 with the cutout PNG in product_cutout", () => {
-      // Slot 6 is the 7th item in the cutout-enabled rotation pool — that's
-      // the v2 layout (bold blush circle + script typography). Same slot
+    it("cutout-spotlight-v2 lands at slot index 10 with the cutout PNG in product_cutout", () => {
+      // Slot 10 is the 11th (last) item in the cutout-enabled rotation pool —
+      // that's the v2 layout (bold blush circle + script typography). Same slot
       // contract as v1 so the picker can route either way.
       const s = snapshot({
         variants_in_stock: [color("pink", ["front", "cutout"])],
         variant_in_stock_count: 1,
       })
-      const picked = pickTemplate(s, 6)!
+      const picked = pickTemplate(s, 10)!
       expect(picked.template_slug).toBe("cutout-spotlight-v2")
       expect(picked.slot_inputs.product_cutout).toBe("https://r2/pink-cutout.png")
     })
@@ -613,8 +756,8 @@ describe("pickTemplate", () => {
         variants_in_stock: [color("pink", ["front", "cutout"])],
         variant_in_stock_count: 1,
       })
-      // slotIndex 5 lands on cutout-spotlight per the 6-template rotation above.
-      const picked = pickTemplate(s, 5)!
+      // slotIndex 9 lands on cutout-spotlight per the 11-template rotation above.
+      const picked = pickTemplate(s, 9)!
       expect(picked.template_slug).toBe("cutout-spotlight")
       expect(picked.slot_inputs.product_cutout).toBe("https://r2/pink-cutout.png")
     })
@@ -702,7 +845,9 @@ describe("pickTemplate", () => {
         variants_in_stock: [color("pink", ["front", "real", "cutout"])],
         variant_in_stock_count: 1,
       })
-      const slugs = [0, 1, 2, 3, 4, 5, 6].map((i) => pickTemplate(s, i)!.template_slug)
+      const slugs = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(
+        (i) => pickTemplate(s, i)!.template_slug,
+      )
       expect(slugs).toContain("cutout-spotlight")
       expect(slugs).toContain("cutout-spotlight-v2")
     })
@@ -723,12 +868,15 @@ describe("pickTemplate", () => {
 
     it("cutout-spotlight still appears in the rotation when product has cutout but NO real shot", () => {
       // 2026-05-21: rotation grew from 5 to 6 entries with just-arrived-editorial.
-      // Sample 6 slots to catch cutout-spotlight at the final rotation position.
+      // 2026-05-30: base rotation grew to 9, so the cutout-enabled pool is 11.
+      // Sample 11 slots to catch cutout-spotlight at index 9.
       const s = snapshot({
         variants_in_stock: [color("pink", ["front", "cutout"])],
         variant_in_stock_count: 1,
       })
-      const slugs = [0, 1, 2, 3, 4, 5].map((i) => pickTemplate(s, i)!.template_slug)
+      const slugs = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(
+        (i) => pickTemplate(s, i)!.template_slug,
+      )
       expect(slugs).toContain("cutout-spotlight")
     })
 
@@ -838,6 +986,43 @@ describe("pickTemplate", () => {
       const dayCounts = new Map<string, number>()
       const picked = pickTemplate(s, 0, dayCounts)!
       expect(picked.template_slug).toBe("cutout-spotlight")
+    })
+
+    it("bigprice-cutout-hero can fire for a single-color cutout product", () => {
+      const s = snapshot({
+        name: "Mesh Bodysuit",
+        price_mur: 790,
+        variants_in_stock: [color("black", ["front", "cutout"], { sku: "IS5000-M-B", sizes: ["S", "M"] })],
+        variant_in_stock_count: 1,
+      })
+      const picked = new Map<string, number>([
+        ["in-stock-hero", 2], ["in-stock-hero-blush", 2], ["lifestyle-overlay", 2],
+        ["in-stock-hero-cream", 2], ["just-arrived-editorial", 2],
+        ["editorial-cover-hero", 2], ["split-thirds-editorial", 2],
+        ["receipt-tag-1color", 2], ["framed-gallery-1color", 2],
+        ["cutout-spotlight", 2], ["cutout-spotlight-v2", 2],
+      ])
+      const result = pickTemplate(s, 0, picked)
+      expect(result!.template_slug).toBe("bigprice-cutout-hero")
+      expect(result!.slot_inputs.product_cutout).toBe("https://r2/black-cutout.png")
+      expect(result!.text_overrides.price).toBe("Rs.790")
+    })
+
+    it("bigprice-cutout-hero never fires without a cutout PNG", () => {
+      const s = snapshot({
+        name: "Plain Front",
+        price_mur: 500,
+        variants_in_stock: [color("white", ["front"], { sku: "IS5100-M-W", sizes: ["M"] })],
+        variant_in_stock_count: 1,
+      })
+      const picked = new Map<string, number>([
+        ["in-stock-hero", 2], ["in-stock-hero-blush", 2], ["lifestyle-overlay", 2],
+        ["in-stock-hero-cream", 2], ["just-arrived-editorial", 2],
+        ["editorial-cover-hero", 2], ["split-thirds-editorial", 2],
+        ["receipt-tag-1color", 2], ["framed-gallery-1color", 2],
+      ])
+      const result = pickTemplate(s, 0, picked)
+      expect(result!.template_slug).not.toBe("bigprice-cutout-hero")
     })
   })
 
@@ -952,14 +1137,16 @@ describe("pickTemplate", () => {
       })
     }
 
-    it("first 15 single-color-with-back picks round-robin the 1-color pool (each once before any repeat)", () => {
+    it("first 18 single-color-with-back picks round-robin the 1-color pool (each once before any repeat)", () => {
       // 2026-05-25: pool grew from 3 to 15 templates (3 layouts × 4 palettes
-      // + originals). True least-used round-robin produces each slug exactly
-      // once across 15 slots; only on slot 16 does the first slug repeat.
+      // + originals). 2026-05-30: + 3 back templates (cardflip-front-back,
+      // lookbook-spread-back, filmstrip-multiframe) = 18. True least-used
+      // round-robin produces each slug exactly once across 18 slots; only on
+      // slot 19 does the first slug repeat.
       const s = oneColorWithBack()
       const counts = new Map<string, number>()
       const picks: string[] = []
-      for (let i = 0; i < 15; i++) {
+      for (let i = 0; i < 18; i++) {
         const p = pickTemplate(s, i, counts)!
         picks.push(p.template_slug)
         counts.set(p.template_slug, (counts.get(p.template_slug) ?? 0) + 1)
@@ -967,16 +1154,18 @@ describe("pickTemplate", () => {
       // Every slug should appear exactly once — leastUsed prefers count=0
       // candidates, and ties resolve by pool order.
       const unique = new Set(picks)
-      expect(unique.size).toBe(15)
+      expect(unique.size).toBe(18)
       expect(picks[0]).toBe("product-1color")
-      // Slot 16: the head of the pool comes around for its second hit.
-      const p16 = pickTemplate(s, 15, counts)!
-      expect(p16.template_slug).toBe("product-1color")
+      // Slot 19: the head of the pool comes around for its second hit.
+      const p19 = pickTemplate(s, 18, counts)!
+      expect(p19.template_slug).toBe("product-1color")
     })
 
-    it("16th single-color-with-back falls through to the single-image rotation when all 1-color templates are capped", () => {
+    it("19th single-color-with-back falls through to the single-image rotation when all 1-color templates are capped", () => {
       // 2026-05-25: was 7th with a 3-template pool. With 15 templates, all
       // need to be at MAX_TEMPLATE_PER_DAY=2 before the fallthrough fires.
+      // 2026-05-30: pool grew to 18 (+ cardflip-front-back, lookbook-spread-back,
+      // filmstrip-multiframe) — all 18 must be capped before fall-through.
       const s = oneColorWithBack()
       const counts = new Map<string, number>([
         ["product-1color", 2],
@@ -994,6 +1183,9 @@ describe("pickTemplate", () => {
         ["new-drop-arch-cream", 2],
         ["new-drop-arch-sage", 2],
         ["new-drop-arch-coral", 2],
+        ["cardflip-front-back", 2],
+        ["lookbook-spread-back", 2],
+        ["filmstrip-multiframe", 2],
       ])
       const p = pickTemplate(s, 30, counts)!
       expect([
@@ -1199,6 +1391,87 @@ describe("pickTemplate", () => {
       })
       expect(pickTemplate(s, 4)!.template_slug).toBe("new-arrival")
     })
+  })
+
+  it("editorial-cover-hero is reachable and gets real overrides", () => {
+    const s = snapshot({
+      name: "Linen Wrap Dress",
+      price_mur: 1290,
+      variants_in_stock: [color("pink", ["front"], { sku: "IS2364-M-P", sizes: ["S", "M", "L"] })],
+      variant_in_stock_count: 1,
+    })
+    const picked = new Map<string, number>([
+      ["in-stock-hero", 2],
+      ["in-stock-hero-blush", 2],
+      ["lifestyle-overlay", 2],
+      ["in-stock-hero-cream", 2],
+      ["just-arrived-editorial", 2],
+      ["split-thirds-editorial", 2],
+      ["receipt-tag-1color", 2],
+      ["framed-gallery-1color", 2],
+    ])
+    const result = pickTemplate(s, 0, picked)
+    expect(result).not.toBeNull()
+    expect(result!.template_slug).toBe("editorial-cover-hero")
+    expect(result!.slot_inputs.hero).toBe("https://r2/pink.jpg")
+    expect(result!.text_overrides.price).toBe("Rs.1290")
+    expect(result!.text_overrides.sku).toBe("IS2364")
+    expect(result!.text_overrides.size).toContain("L")
+  })
+
+  it("split-thirds-editorial gets headline=name + price + size", () => {
+    const s = snapshot({
+      name: "Ribbed Knit Top",
+      price_mur: 850,
+      variants_in_stock: [color("ecru", ["front"], { sku: "IS1900-M-E", sizes: ["S", "M"] })],
+      variant_in_stock_count: 1,
+    })
+    const picked = new Map<string, number>([
+      ["in-stock-hero", 2], ["in-stock-hero-blush", 2], ["lifestyle-overlay", 2],
+      ["in-stock-hero-cream", 2], ["just-arrived-editorial", 2],
+      ["editorial-cover-hero", 2], ["receipt-tag-1color", 2], ["framed-gallery-1color", 2],
+    ])
+    const result = pickTemplate(s, 0, picked)
+    expect(result!.template_slug).toBe("split-thirds-editorial")
+    expect(result!.text_overrides.headline).toBe("Ribbed Knit Top")
+    expect(result!.text_overrides.price).toBe("Rs.850")
+  })
+
+  it("receipt-tag-1color renders with hero slot + real overrides", () => {
+    const s = snapshot({
+      name: "Satin Slip",
+      price_mur: 1100,
+      variants_in_stock: [color("noir", ["front"], { sku: "IS2200-M-N", sizes: ["S", "M", "L"] })],
+      variant_in_stock_count: 1,
+    })
+    const picked = new Map<string, number>([
+      ["in-stock-hero", 2], ["in-stock-hero-blush", 2], ["lifestyle-overlay", 2],
+      ["in-stock-hero-cream", 2], ["just-arrived-editorial", 2],
+      ["editorial-cover-hero", 2], ["split-thirds-editorial", 2], ["framed-gallery-1color", 2],
+    ])
+    const result = pickTemplate(s, 0, picked)
+    expect(result!.template_slug).toBe("receipt-tag-1color")
+    expect(result!.slot_inputs.hero).toBe("https://r2/noir.jpg")
+    expect(result!.text_overrides.headline).toBe("Satin Slip")
+    expect(result!.text_overrides.price).toBe("Rs.1100")
+  })
+
+  it("framed-gallery-1color is reachable with name + price", () => {
+    const s = snapshot({
+      name: "Cotton Midi",
+      price_mur: 990,
+      variants_in_stock: [color("sage", ["front"], { sku: "IS2050-M-S", sizes: ["M", "L"] })],
+      variant_in_stock_count: 1,
+    })
+    const picked = new Map<string, number>([
+      ["in-stock-hero", 2], ["in-stock-hero-blush", 2], ["lifestyle-overlay", 2],
+      ["in-stock-hero-cream", 2], ["just-arrived-editorial", 2],
+      ["editorial-cover-hero", 2], ["split-thirds-editorial", 2], ["receipt-tag-1color", 2],
+    ])
+    const result = pickTemplate(s, 0, picked)
+    expect(result!.template_slug).toBe("framed-gallery-1color")
+    expect(result!.text_overrides.headline).toBe("Cotton Midi")
+    expect(result!.text_overrides.size).toContain("L")
   })
 
   describe("2026-05-21: color-mood-rail (3-color, front-only)", () => {
@@ -1495,5 +1768,27 @@ describe("pickTemplate", () => {
       },
     )
 
+  })
+
+  it("a simulated day of 12 single-color front-only products never repeats a template 3x", () => {
+    // Guards the enlarged SINGLE_IMAGE_ROTATION (9 entries as of 2026-05-30)
+    // against the "same template 3x in a day" regression. The MAX_TEMPLATE_PER_DAY
+    // cap (2) + least-used rotation must keep every single-image template <= 2
+    // across a 12-product day.
+    const counts = new Map<string, number>()
+    for (let i = 0; i < 12; i++) {
+      const s = snapshot({
+        name: `Item ${i}`,
+        price_mur: 900 + i,
+        variants_in_stock: [color(`c${i}`, ["front"], { sku: `IS90${i}0-M-X`, sizes: ["S", "M"] })],
+        variant_in_stock_count: 1,
+      })
+      const r = pickTemplate(s, i, counts)
+      expect(r).not.toBeNull()
+      counts.set(r!.template_slug, (counts.get(r!.template_slug) ?? 0) + 1)
+    }
+    for (const [, n] of counts) {
+      expect(n).toBeLessThanOrEqual(2)
+    }
   })
 })
