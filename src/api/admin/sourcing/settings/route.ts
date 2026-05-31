@@ -36,6 +36,7 @@ export const PUT = async (
     for (const k of [
       "fx_rate",
       "landed_multiplier_default",
+      "flat_add_mur",
       "markup_multiplier",
       "round_step",
     ] as const) {

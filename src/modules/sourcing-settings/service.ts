@@ -5,6 +5,7 @@ export type SettingsRow = {
   id: string
   fx_rate: number
   landed_multiplier_default: number
+  flat_add_mur: number
   markup_multiplier: number
   round_step: number
 }
@@ -12,6 +13,7 @@ export type SettingsRow = {
 export type UpdateSettingsInput = {
   fx_rate?: number
   landed_multiplier_default?: number
+  flat_add_mur?: number
   markup_multiplier?: number
   round_step?: number
 }
@@ -63,6 +65,15 @@ class SourcingSettingsService extends MedusaService({
       }
       patch.landed_multiplier_default = input.landed_multiplier_default
     }
+    if (input.flat_add_mur !== undefined) {
+      if (!Number.isFinite(input.flat_add_mur) || input.flat_add_mur < 0) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          "flat_add_mur must be a finite number >= 0",
+        )
+      }
+      patch.flat_add_mur = input.flat_add_mur
+    }
     if (input.markup_multiplier !== undefined) {
       if (
         !Number.isFinite(input.markup_multiplier) ||
@@ -98,6 +109,7 @@ class SourcingSettingsService extends MedusaService({
       id: String(r.id),
       fx_rate: Number(r.fx_rate),
       landed_multiplier_default: Number(r.landed_multiplier_default),
+      flat_add_mur: Number(r.flat_add_mur ?? 0),
       markup_multiplier: Number(r.markup_multiplier),
       round_step: Number(r.round_step),
     }
