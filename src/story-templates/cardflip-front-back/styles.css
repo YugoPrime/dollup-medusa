@@ -22,8 +22,6 @@ html, body { width: var(--story-w); height: var(--story-h); overflow: hidden; }
   box-shadow: 0 30px 60px rgba(43,43,43,.3); background: var(--dub-soft); }
 .face img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .face-back { transform: rotateY(180deg); }
-.spine { position: absolute; top: 0; bottom: 0; left: 50%; width: 8px; transform: translateX(-50%) translateZ(-4px);
-  background: linear-gradient(var(--dub-gold), #b8975c); border-radius: 4px; }
 
 .band { position: absolute; left: 0; right: 0; bottom: 70px; text-align: center;
   animation: rise .6s ease-out .6s both; }

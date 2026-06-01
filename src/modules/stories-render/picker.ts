@@ -80,10 +80,10 @@ const TWO_COLOR_BACK_ROTATION = [
 // 2-color, FRONT-ONLY (no usable back). Was a single hardcoded
 // product-2colors-front return; 2026-05-30 made a 3-way rotation so
 // consecutive 2-color-no-back products read distinct. Same { front_a,
-// front_b } slot contract across all three.
+// front_b } slot contract across all entries. (diagonal-2color-wipe was
+// removed 2026-05-31 — off-brand.)
 const TWO_COLOR_FRONT_ROTATION = [
   "product-2colors-front",
-  "diagonal-2color-wipe",
   "swipe-through-2color",
 ] as const
 
@@ -415,7 +415,6 @@ function buildTextOverrides(
     case "product-2colors-sage":
     case "product-2colors-coral":
     case "product-2colors-front":
-    case "diagonal-2color-wipe":
     case "swipe-through-2color": {
       // Per-color size pills — variants_in_stock[0..1] match the front_a/front_b
       // slots that pickTemplate fills below, so the size badge on each card
