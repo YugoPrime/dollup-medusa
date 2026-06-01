@@ -337,7 +337,7 @@ describe("pickTemplate", () => {
     expect(picked.text_overrides.size).toBeUndefined()
   })
 
-  it("2-color-no-back rotates the front pool incl diagonal-2color-wipe", () => {
+  it("2-color-no-back rotates the front pool (swipe-through when product-2colors-front is saturated)", () => {
     const s = snapshot({
       name: "Wrap Blouse",
       price_mur: 1190,
@@ -349,10 +349,9 @@ describe("pickTemplate", () => {
     })
     const picked = new Map<string, number>([
       ["product-2colors-front", 2],
-      ["swipe-through-2color", 2],
     ])
     const result = pickTemplate(s, 0, picked)
-    expect(result!.template_slug).toBe("diagonal-2color-wipe")
+    expect(result!.template_slug).toBe("swipe-through-2color")
     expect(result!.slot_inputs.front_a).toBe("https://r2/rose.jpg")
     expect(result!.slot_inputs.front_b).toBe("https://r2/noir.jpg")
     expect(result!.text_overrides.size_a).toContain("S")
@@ -371,7 +370,6 @@ describe("pickTemplate", () => {
     })
     const picked = new Map<string, number>([
       ["product-2colors-front", 2],
-      ["diagonal-2color-wipe", 2],
     ])
     const result = pickTemplate(s, 0, picked)
     expect(result!.template_slug).toBe("swipe-through-2color")

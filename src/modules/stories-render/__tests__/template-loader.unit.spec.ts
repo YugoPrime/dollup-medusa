@@ -33,8 +33,9 @@ describe("template-loader", () => {
     // product-1color-featured, new-drop-arch, product-2colors each cloned
     // into -blush / -cream / -sage / -coral siblings (16 new folders).
     // 2026-05-30: editorial 1-color (split-thirds-editorial, receipt-tag-1color,
-    // framed-gallery-1color), 2-color-front wipe siblings (diagonal-2color-wipe,
-    // swipe-through-2color), and back template cardflip-front-back added.
+    // framed-gallery-1color), 2-color-front swipe-through-2color, and back
+    // template cardflip-front-back added.
+    // 2026-05-31: diagonal-2color-wipe removed (off-brand).
     const slugs = (await listTemplates(TEMPLATES_ROOT)).map((template) => template.slug)
     expect(slugs).toEqual([
       "bigprice-cutout-hero",
@@ -43,7 +44,6 @@ describe("template-loader", () => {
       "customer-review",
       "cutout-spotlight",
       "cutout-spotlight-v2",
-      "diagonal-2color-wipe",
       "editorial-cover-hero",
       "filmstrip-multiframe",
       "framed-gallery-1color",
