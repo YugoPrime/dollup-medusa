@@ -11,6 +11,7 @@ import {
   REGION_ID_MU,
   SALES_CHANNEL_ID,
 } from "./delivery-map"
+import { buildManualOrderMetadata } from "./metadata"
 
 /**
  * POST /admin/dollup/manual-orders
@@ -71,6 +72,8 @@ type ManualOrderBody = {
   payment_status?: "paid" | "unpaid" | string
   payment_method?: string // e.g. "Juice / Bank Transfer", "Cash" — free text
   point_of_sale?: string // e.g. "Facebook", "Instagram", "WhatsApp" — free text
+  chat_thread_id?: string // chat_thread id for thread ↔ order traceability
+  chat_message_id?: string // chat_message id that triggered order creation
   delivery_date?: string
   note?: string
   external_id?: string // idempotency key (Messenger thread/message id)
@@ -245,20 +248,21 @@ export const POST = async (
     })
 
     // ---- build metadata exactly as the rest of the system expects ----
-    const metadata: Record<string, unknown> = {
+    const metadata = buildManualOrderMetadata({
       delivery_method: delivery.metadata_label,
-      source: "hermes",
-      channel: "messenger",
       delivery_fee: deliveryFee,
-    }
-    if (isPaid) metadata.sale_type = "paid"
-    if (body.payment_status) metadata.payment_status = body.payment_status
-    if (body.payment_method) metadata.payment_method = body.payment_method.trim()
-    if (body.point_of_sale) metadata.point_of_sale = body.point_of_sale.trim()
-    if (body.delivery_date) metadata.delivery_date = body.delivery_date
-    if (body.note) metadata.note = body.note
-    if (body.phone) metadata.phone = body.phone
-    if (body.external_id) metadata.external_id = body.external_id
+      is_paid: isPaid,
+      channel: "messenger",
+      payment_status: body.payment_status,
+      payment_method: body.payment_method,
+      point_of_sale: body.point_of_sale,
+      delivery_date: body.delivery_date,
+      note: body.note,
+      phone: body.phone,
+      external_id: body.external_id,
+      chat_thread_id: body.chat_thread_id,
+      chat_message_id: body.chat_message_id,
+    })
 
     // ---- create the order ----
     const { result: order } = await createOrderWorkflow(req.scope).run({
