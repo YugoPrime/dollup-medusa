@@ -195,6 +195,57 @@ medusaIntegrationTestRunner({
       })
     })
 
+    // ─── Group 4b: duplicate-phone rejection ─────────────────────────────────
+
+    describe("POST /admin/leads duplicate phone", () => {
+      let dupListId = ""
+
+      beforeAll(async () => {
+        const listRes = await api.post(
+          "/admin/leads/lists",
+          { name: "Dup-list" },
+          auth(),
+        )
+        dupListId = listRes.data.list.id
+        await api.post(
+          "/admin/leads",
+          { phone: "58881111", list_id: dupListId },
+          auth(),
+        )
+      })
+
+      it("rejects the same phone added again, even to a different list", async () => {
+        const res = await api
+          .post(
+            "/admin/leads",
+            { phone: "58881111", list_id: "leadlist_general" },
+            auth(),
+          )
+          .catch((e: { response: unknown }) => e.response)
+        expect((res as { status: number }).status).toBe(400)
+      })
+
+      it("treats spaced/formatted forms of the same number as a duplicate", async () => {
+        const res = await api
+          .post(
+            "/admin/leads",
+            { phone: "+230 5888 1111", list_id: dupListId },
+            auth(),
+          )
+          .catch((e: { response: unknown }) => e.response)
+        expect((res as { status: number }).status).toBe(400)
+      })
+
+      it("allows a different phone", async () => {
+        const res = await api.post(
+          "/admin/leads",
+          { phone: "58882222", list_id: dupListId },
+          auth(),
+        )
+        expect(res.status).toBe(200)
+      })
+    })
+
     // ─── Group 5: Delete list ─────────────────────────────────────────────────
 
     describe("DELETE /admin/leads/lists/:id", () => {

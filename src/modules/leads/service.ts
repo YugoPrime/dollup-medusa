@@ -122,10 +122,35 @@ class LeadsModuleService extends MedusaService({ Lead, LeadList }) {
       }) => Promise<LeadDTO>
       listLeadLists: (
         filters: Record<string, unknown>,
-      ) => Promise<Array<{ id: string }>>
+      ) => Promise<Array<{ id: string; name?: string }>>
+      listLeads: (
+        filters: Record<string, unknown>,
+        config?: Record<string, unknown>,
+      ) => Promise<LeadDTO[]>
     }
     const found = await service.listLeadLists({ id: list_id })
     const safeListId = found.length > 0 ? list_id : "leadlist_general"
+
+    // Reject duplicates by normalized phone (last-8-digits) across the whole
+    // database, regardless of which list the existing lead lives in or whether
+    // it has already been used. Name-only leads (no phone) are never deduped —
+    // too many false positives on common names. "+230 5906 6359" and
+    // "59066359" normalize to the same key, so formatted forms also collide.
+    const targetPhone = normalizePhone(phone)
+    if (targetPhone) {
+      const all = await service.listLeads({}, { take: 5000 })
+      const existing = all.find(
+        (row) => normalizePhone(row.phone) === targetPhone,
+      )
+      if (existing) {
+        const lists = await service.listLeadLists({ id: existing.list_id })
+        const listName = lists[0]?.name ?? existing.list_id
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          `This phone is already a lead in "${listName}"`,
+        )
+      }
+    }
 
     return service.createLeads({ name, phone, note, list_id: safeListId })
   }
