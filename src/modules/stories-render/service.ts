@@ -10,10 +10,20 @@ import type { RenderRequest, RenderResult, TemplateMeta } from "./types"
 
 export type R2Uploader = (localPath: string, key: string) => Promise<string>
 
+/**
+ * Resolves a slot image URL to the string that gets written into the <img src>.
+ * Production inlines the bytes as a base64 data: URI so there is zero network
+ * race during the headless render (see inlineImageAsDataUri). Tests pass an
+ * identity fn so the raw URL flows through and assertions stay simple.
+ */
+export type ImageResolver = (url: string) => Promise<string>
+
 type ServiceOptions = {
   templatesRoot?: string
   uploadToR2?: R2Uploader
   skipCli?: boolean
+  /** Override the slot-image resolver. Defaults to inlineImageAsDataUri. */
+  resolveImage?: ImageResolver
 }
 
 export class RequiredSlotEmptyError extends Error {
@@ -61,6 +71,7 @@ function tagError(err: unknown, stage: RenderStage): never {
 export default class StoriesRenderModuleService {
   private readonly templatesRoot: string
   private readonly skipCli: boolean
+  private readonly resolveImage: ImageResolver
   uploadToR2: R2Uploader | null
 
   // Medusa registers module services with awilix in PROXY mode: the first
@@ -73,6 +84,7 @@ export default class StoriesRenderModuleService {
     this.templatesRoot = o.templatesRoot ?? path.resolve(process.cwd(), "src/story-templates")
     this.uploadToR2 = o.uploadToR2 ?? null
     this.skipCli = o.skipCli ?? false
+    this.resolveImage = o.resolveImage ?? inlineImageAsDataUri
   }
 
   async list(): Promise<TemplateMeta[]> {
@@ -102,7 +114,16 @@ export default class StoriesRenderModuleService {
 
     for (const slot of meta.slots) {
       const url = req.slot_inputs[slot.id]
-      if (url) html = injectImageSrc(html, slot.id, url)
+      if (url) {
+        // Resolve the remote URL to a data: URI BEFORE writing the HTML.
+        // HyperFrames' screenshot mode only blocks frame capture on <video>
+        // readyState and document.fonts — it does NOT wait for <img> to load.
+        // A slow remote product photo therefore gets captured as an empty box
+        // (the "frame painted, product missing" glitch). Inlining the bytes
+        // removes the network race entirely.
+        const resolved = await this.resolveImage(url)
+        html = injectImageSrc(html, slot.id, resolved)
+      }
     }
     for (const override of meta.text_overrides) {
       html = injectText(
@@ -301,6 +322,90 @@ function injectImageSrc(html: string, slotId: string, url: string): string {
     if (/\ssrc="[^"]*"/.test(tag)) return tag.replace(/\ssrc="[^"]*"/, ` src="${safe}"`)
     return tag.replace(/\s*\/?>$/, (end) => ` src="${safe}"${end}`)
   })
+}
+
+const IMAGE_FETCH_TIMEOUT_MS = 20_000
+const MAX_INLINE_IMAGE_BYTES = 25 * 1024 * 1024 // 25MB safety cap
+
+/**
+ * Fetches a remote image and returns it as a base64 `data:` URI so it can be
+ * embedded directly in the template HTML. Eliminates the render-time network
+ * race that left product photos blank in some stories.
+ *
+ * Non-http(s) inputs (already a data: URI, a local path, or a test sentinel
+ * like "x") are returned unchanged. On ANY failure — fetch error, timeout,
+ * non-200, missing/odd content-type, oversized payload — we fall back to the
+ * original URL. That preserves the previous behavior as a floor: worst case we
+ * render exactly as before; best case (the common one) the image is inlined.
+ */
+export async function inlineImageAsDataUri(url: string): Promise<string> {
+  if (!/^https?:\/\//i.test(url)) return url
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), IMAGE_FETCH_TIMEOUT_MS)
+  try {
+    const res = await fetch(url, { signal: controller.signal })
+    if (!res.ok) {
+      logInlineWarn(url, `http_${res.status}`)
+      return url
+    }
+
+    const headerType = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase()
+    const buf = Buffer.from(await res.arrayBuffer())
+    if (buf.byteLength === 0) {
+      logInlineWarn(url, "empty_body")
+      return url
+    }
+    if (buf.byteLength > MAX_INLINE_IMAGE_BYTES) {
+      logInlineWarn(url, `too_large_${buf.byteLength}`)
+      return url
+    }
+
+    const mime = headerType.startsWith("image/")
+      ? headerType
+      : sniffImageMime(buf)
+    if (!mime) {
+      logInlineWarn(url, `not_image_${headerType || "unknown"}`)
+      return url
+    }
+
+    return `data:${mime};base64,${buf.toString("base64")}`
+  } catch (err) {
+    logInlineWarn(url, (err as Error).name === "AbortError" ? "timeout" : (err as Error).message)
+    return url
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
+ * Best-effort magic-byte sniff for the common product-photo formats. Used only
+ * when the server sends a missing/generic content-type (e.g. octet-stream from
+ * some Drive/R2 responses). Returns null for anything we can't positively
+ * identify so the caller falls back to the raw URL rather than guessing wrong.
+ */
+function sniffImageMime(buf: Buffer): string | null {
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "image/jpeg"
+  if (
+    buf.length >= 8 &&
+    buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47
+  ) return "image/png"
+  if (buf.length >= 12 && buf.toString("ascii", 0, 4) === "RIFF" && buf.toString("ascii", 8, 12) === "WEBP")
+    return "image/webp"
+  if (buf.length >= 6 && buf.toString("ascii", 0, 6) === "GIF89a") return "image/gif"
+  if (buf.length >= 6 && buf.toString("ascii", 0, 6) === "GIF87a") return "image/gif"
+  return null
+}
+
+function logInlineWarn(url: string, reason: string): void {
+  console.warn(
+    JSON.stringify({
+      msg: "[stories-render] image inline fell back to remote URL",
+      reason,
+      url,
+      ts: new Date().toISOString(),
+    }),
+  )
 }
 
 function injectText(html: string, overrideId: string, value: string): string {
