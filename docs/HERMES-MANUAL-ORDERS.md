@@ -38,7 +38,9 @@ Never put this key in client code. If leaked: revoke in admin, regenerate, or di
 | `item_price` | ✅ | MUR integer, e.g. `1000` = Rs 1000 |
 | `delivery_method` | ✅ | one of: `home_delivery`, `post_office`, `express`, `pickup`, `rodrigues` |
 | `delivery_fee` | optional | MUR integer, e.g. `70`; defaults to 0 |
-| `payment_status` | optional | `"paid"` marks it paid (sets `metadata.sale_type=paid`) |
+| `payment_status` | optional | `"paid"` marks it paid (sets `metadata.sale_type=paid`); omit for unpaid |
+| `payment_method` | recommended | free text, e.g. `"Juice / Bank Transfer"`, `"Cash"` → admin "Pay" column |
+| `point_of_sale` | recommended | free text, e.g. `"Facebook"`, `"Instagram"`, `"WhatsApp"` → admin "POS" column |
 | `delivery_date` | optional | free-text date string |
 | `note` | optional | internal note |
 | `external_id` | recommended | Messenger thread/message id — **idempotency key**, prevents duplicate orders on retry |
@@ -87,6 +89,8 @@ export type ManualOrder = {
     | "rodrigues"
   delivery_fee?: number
   payment_status?: "paid" | "unpaid"
+  payment_method?: string // e.g. "Juice / Bank Transfer", "Cash"
+  point_of_sale?: string // e.g. "Facebook", "Instagram", "WhatsApp"
   delivery_date?: string
   note?: string
   external_id?: string
@@ -133,6 +137,8 @@ await createDollUpOrder({
   delivery_method: "home_delivery",
   delivery_fee: 70,
   payment_status: "paid",
+  payment_method: "Juice / Bank Transfer",
+  point_of_sale: "Facebook",
   external_id: "msgr_<thread-id>", // dedupe on retry
 })
 // → { ok:true, order_id, display_id, total_charged:1070, paid:true }

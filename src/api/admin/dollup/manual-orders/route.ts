@@ -55,6 +55,8 @@ type ManualOrderBody = {
   delivery_method?: string
   delivery_fee?: number // MUR, integer (e.g. 70)
   payment_status?: "paid" | "unpaid" | string
+  payment_method?: string // e.g. "Juice / Bank Transfer", "Cash" — free text
+  point_of_sale?: string // e.g. "Facebook", "Instagram", "WhatsApp" — free text
   delivery_date?: string
   note?: string
   external_id?: string // idempotency key (Messenger thread/message id)
@@ -186,6 +188,8 @@ export const POST = async (
     }
     if (isPaid) metadata.sale_type = "paid"
     if (body.payment_status) metadata.payment_status = body.payment_status
+    if (body.payment_method) metadata.payment_method = body.payment_method.trim()
+    if (body.point_of_sale) metadata.point_of_sale = body.point_of_sale.trim()
     if (body.delivery_date) metadata.delivery_date = body.delivery_date
     if (body.note) metadata.note = body.note
     if (body.phone) metadata.phone = body.phone
