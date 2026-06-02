@@ -19,9 +19,13 @@ import {
  * (Messenger / WhatsApp orders that are already paid via MCB Juice / cash).
  *
  * This is the contract between the agent and the store: the agent sends WHAT
- * (variant, qty, price, delivery method, paid?), and this route owns HOW
+ * (variant(s), qty, price, delivery method, paid?), and this route owns HOW
  * (Medusa order creation + the Doll Up metadata conventions). The agent never
  * needs to know region ids, shipping-option ids, or the metadata schema.
+ *
+ * Items: send either a single item (variant_id/quantity/item_price at the top
+ * level) OR an `items: [{variant_id, quantity, item_price}, ...]` array for
+ * multi-product orders. The array wins if both are present.
  *
  * It stamps the same metadata the rest of the system reads:
  *  - metadata.delivery_method  → raw label ("Home Delivery", "Postage", ...)
@@ -40,6 +44,13 @@ import {
  * returned instead of creating a second one.
  */
 
+type ManualOrderItem = {
+  variant_id?: string
+  sku?: string
+  quantity?: number
+  item_price?: number // MUR, integer (e.g. 1000 = Rs 1000)
+}
+
 type ManualOrderBody = {
   customer_name?: string
   first_name?: string
@@ -48,10 +59,13 @@ type ManualOrderBody = {
   phone?: string
   address?: string
   city?: string
+  // Single-item shape (still supported for backward compatibility):
   variant_id?: string
   sku?: string
   quantity?: number
   item_price?: number // MUR, integer (e.g. 1000 = Rs 1000)
+  // Multi-item shape (preferred when an order has 2+ products):
+  items?: ManualOrderItem[]
   delivery_method?: string
   delivery_fee?: number // MUR, integer (e.g. 70)
   payment_status?: "paid" | "unpaid" | string
@@ -100,16 +114,46 @@ export const POST = async (
   // ---- validate ----
   const errors: string[] = []
 
-  const variantId = (body.variant_id ?? "").trim()
-  if (!variantId) errors.push("variant_id is required")
+  // Accept either a single-item payload or an `items` array. Normalize both
+  // into one validated list of { variant_id, quantity, item_price, sku }.
+  const rawItems: ManualOrderItem[] =
+    Array.isArray(body.items) && body.items.length > 0
+      ? body.items
+      : [
+          {
+            variant_id: body.variant_id,
+            sku: body.sku,
+            quantity: body.quantity,
+            item_price: body.item_price,
+          },
+        ]
 
-  const quantity = intOrNull(body.quantity) ?? 1
-  if (quantity < 1) errors.push("quantity must be >= 1")
+  const lineItems: {
+    variant_id: string
+    quantity: number
+    item_price: number
+    sku?: string
+  }[] = []
 
-  const itemPrice = intOrNull(body.item_price)
-  if (itemPrice === null || itemPrice < 0) {
-    errors.push("item_price (MUR integer) is required")
-  }
+  rawItems.forEach((it, i) => {
+    const label = rawItems.length > 1 ? `items[${i}]` : "item"
+    const vId = (it.variant_id ?? "").trim()
+    if (!vId) errors.push(`${label}.variant_id is required`)
+    const qty = intOrNull(it.quantity) ?? 1
+    if (qty < 1) errors.push(`${label}.quantity must be >= 1`)
+    const price = intOrNull(it.item_price)
+    if (price === null || price < 0) {
+      errors.push(`${label}.item_price (MUR integer) is required`)
+    }
+    if (vId && price !== null && price >= 0) {
+      lineItems.push({
+        variant_id: vId,
+        quantity: qty,
+        item_price: price,
+        sku: it.sku,
+      })
+    }
+  })
 
   const deliveryFee = intOrNull(body.delivery_fee) ?? 0
 
@@ -162,22 +206,43 @@ export const POST = async (
       }
     }
 
-    // ---- verify the variant exists (clear error instead of a workflow crash) ----
+    // ---- verify all variants exist (clear error instead of a workflow crash) ----
+    const variantIds = lineItems.map((li) => li.variant_id)
     const { data: variants } = await query.graph({
       entity: "variant",
       fields: ["id", "title", "sku", "product.title"],
-      filters: { id: variantId },
+      filters: { id: variantIds },
     })
-    const variant = variants?.[0] as
-      | { id: string; title?: string; sku?: string; product?: { title?: string } }
-      | undefined
-    if (!variant) {
-      res.status(404).json({ message: `variant_id "${variantId}" not found` })
+    const variantById = new Map(
+      (
+        variants as Array<{
+          id: string
+          title?: string
+          sku?: string
+          product?: { title?: string }
+        }>
+      ).map((v) => [v.id, v]),
+    )
+    const missing = variantIds.filter((id) => !variantById.has(id))
+    if (missing.length > 0) {
+      res
+        .status(404)
+        .json({ message: `variant(s) not found: ${missing.join(", ")}` })
       return
     }
 
-    const lineTitle =
-      variant.product?.title ?? variant.title ?? body.sku ?? "Item"
+    // ---- build line items for the order ----
+    const orderItems = lineItems.map((li) => {
+      const v = variantById.get(li.variant_id)!
+      const lineTitle = v.product?.title ?? v.title ?? li.sku ?? "Item"
+      return {
+        variant_id: li.variant_id,
+        quantity: li.quantity,
+        title: v.title ?? lineTitle,
+        product_title: lineTitle,
+        unit_price: li.item_price,
+      }
+    })
 
     // ---- build metadata exactly as the rest of the system expects ----
     const metadata: Record<string, unknown> = {
@@ -203,15 +268,7 @@ export const POST = async (
         currency_code: "mur",
         email: body.email || undefined,
         status: "pending",
-        items: [
-          {
-            variant_id: variantId,
-            quantity,
-            title: variant.title ?? lineTitle,
-            product_title: lineTitle,
-            unit_price: itemPrice as number,
-          },
-        ],
+        items: orderItems,
         shipping_methods: [
           {
             name: delivery.shipping_method_name,
@@ -233,15 +290,21 @@ export const POST = async (
 
     const created = order as { id: string; display_id?: number | string }
 
+    const itemsSubtotal = lineItems.reduce(
+      (sum, li) => sum + li.item_price * li.quantity,
+      0,
+    )
+
     logger.info(
-      `[admin/dollup/manual-orders] created order ${created.id} (#${created.display_id}) via hermes, paid=${isPaid}, delivery=${delivery.metadata_label}`,
+      `[admin/dollup/manual-orders] created order ${created.id} (#${created.display_id}) via hermes, ${lineItems.length} item(s), paid=${isPaid}, delivery=${delivery.metadata_label}`,
     )
 
     res.status(201).json({
       ok: true,
       order_id: created.id,
       display_id: created.display_id,
-      total_charged: (itemPrice as number) * quantity + deliveryFee,
+      item_count: lineItems.length,
+      total_charged: itemsSubtotal + deliveryFee,
       delivery_method: delivery.metadata_label,
       paid: isPaid,
     })

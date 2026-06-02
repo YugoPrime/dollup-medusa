@@ -32,10 +32,13 @@ Never put this key in client code. If leaked: revoke in admin, regenerate, or di
 | `address` | ✅ | street line |
 | `city` | optional | defaults to "Mauritius" |
 | `email` | optional | for order-confirmation email |
-| `variant_id` | ✅ | the exact Medusa variant (agent already resolves this) |
+| `variant_id` | ✅* | the exact Medusa variant (agent already resolves this) |
 | `sku` | optional | fallback label only |
 | `quantity` | optional | defaults to 1 |
-| `item_price` | ✅ | MUR integer, e.g. `1000` = Rs 1000 |
+| `item_price` | ✅* | MUR integer, e.g. `1000` = Rs 1000 |
+| `items` | ✅* | **for multi-product orders:** array of `{ variant_id, quantity, item_price, sku? }`. Use this OR the single `variant_id`/`item_price` fields above (array wins if both sent). |
+
+> \* Provide **either** the single-item fields (`variant_id` + `item_price`) **or** the `items` array — at least one item is required.
 | `delivery_method` | ✅ | one of: `home_delivery`, `post_office`, `express`, `pickup`, `rodrigues` |
 | `delivery_fee` | optional | MUR integer, e.g. `70`; defaults to 0 |
 | `payment_status` | optional | `"paid"` marks it paid (sets `metadata.sale_type=paid`); omit for unpaid |
@@ -57,7 +60,7 @@ Never put this key in client code. If leaked: revoke in admin, regenerate, or di
 
 ### Responses
 
-- `201` → `{ ok, order_id, display_id, total_charged, delivery_method, paid }`
+- `201` → `{ ok, order_id, display_id, item_count, total_charged, delivery_method, paid }`
 - `200` + `duplicate:true` → an order with that `external_id` already exists (idempotent)
 - `400` → `{ message, errors[] }` validation
 - `404` → variant not found
@@ -71,16 +74,26 @@ const BASE = process.env.MEDUSA_BACKEND_URL!
 const KEY = process.env.MEDUSA_ADMIN_API_KEY!
 const AUTH = "Basic " + Buffer.from(KEY + ":").toString("base64")
 
+export type ManualOrderItem = {
+  variant_id: string
+  quantity?: number
+  item_price: number
+  sku?: string
+}
+
 export type ManualOrder = {
   customer_name: string
   phone?: string
   address: string
   city?: string
   email?: string
-  variant_id: string
+  // Single item:
+  variant_id?: string
   sku?: string
   quantity?: number
-  item_price: number
+  item_price?: number
+  // OR multiple items:
+  items?: ManualOrderItem[]
   delivery_method:
     | "home_delivery"
     | "post_office"
@@ -116,6 +129,7 @@ export async function createDollUpOrder(order: ManualOrder) {
     duplicate?: boolean
     order_id: string
     display_id: number
+    item_count?: number
     total_charged: number
     delivery_method: string
     paid: boolean
@@ -142,6 +156,28 @@ await createDollUpOrder({
   external_id: "msgr_<thread-id>", // dedupe on retry
 })
 // → { ok:true, order_id, display_id, total_charged:1070, paid:true }
+```
+
+### Example — multiple products in one order
+
+```ts
+await createDollUpOrder({
+  customer_name: "Damini Kariman",
+  phone: "5702 2717",
+  address: "Ave Dr Ross, Quatre Bornes",
+  items: [
+    { variant_id: "variant_01KQPN...", quantity: 1, item_price: 1000, sku: "IS2209-XL-Black" },
+    { variant_id: "variant_01ABCD...", quantity: 2, item_price: 750,  sku: "IS3310-M-Red" },
+  ],
+  delivery_method: "home_delivery",
+  delivery_fee: 70,
+  payment_status: "paid",
+  payment_method: "Juice / Bank Transfer",
+  point_of_sale: "Facebook",
+  external_id: "msgr_<thread-id>",
+})
+// → { ok:true, order_id, display_id, item_count:2, total_charged:2570, paid:true }
+//    (1×1000 + 2×750 + 70 delivery)
 ```
 
 ## What the order looks like in the system
