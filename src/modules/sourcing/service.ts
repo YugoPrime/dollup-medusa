@@ -724,21 +724,51 @@ class SourcingModuleService extends MedusaService({
     const filtered = variants.filter((v) => v.qty > 0)
 
     const svc = this as unknown as {
-      listDraftVariants: (filters: Record<string, unknown>) => Promise<Array<{ id: string }>>
+      listDraftVariants: (
+        filters: Record<string, unknown>,
+      ) => Promise<
+        Array<{
+          id: string
+          color: string | null
+          size: string
+          override_price_mur: string | number | null
+          received_qty: number | null
+        }>
+      >
       deleteDraftVariants: (id: string) => Promise<void>
       createDraftVariants: (data: Record<string, unknown>) => Promise<unknown>
+      updateDraftVariants: (data: Record<string, unknown>) => Promise<unknown>
     }
+
+    // Diff against existing variants by (color, size) so we PRESERVE per-variant
+    // override prices and received qty instead of wiping them on every save.
+    // Previously this deleted + recreated everything, which silently dropped
+    // override_price_mur (and broke the price popover with stale ids).
     const existing = await svc.listDraftVariants({ draft_item_id: itemId })
-    for (const row of existing) {
-      await svc.deleteDraftVariants(row.id)
+    const keyOf = (color: string | null, size: string) =>
+      `${color ?? ""}__${size.trim()}`
+    const existingByKey = new Map(existing.map((e) => [keyOf(e.color, e.size), e]))
+    const desiredKeys = new Set(filtered.map((v) => keyOf(v.color, v.size)))
+
+    // Delete variants that are no longer present.
+    for (const e of existing) {
+      if (!desiredKeys.has(keyOf(e.color, e.size))) {
+        await svc.deleteDraftVariants(e.id)
+      }
     }
+    // Update qty on matches (keeping override price + received qty), create new.
     for (const v of filtered) {
-      await svc.createDraftVariants({
-        draft_item_id: itemId,
-        color: v.color,
-        size: v.size.trim(),
-        qty: v.qty,
-      })
+      const match = existingByKey.get(keyOf(v.color, v.size))
+      if (match) {
+        await svc.updateDraftVariants({ id: match.id, qty: v.qty })
+      } else {
+        await svc.createDraftVariants({
+          draft_item_id: itemId,
+          color: v.color,
+          size: v.size.trim(),
+          qty: v.qty,
+        })
+      }
     }
   }
 
@@ -1075,7 +1105,12 @@ class SourcingModuleService extends MedusaService({
             options: variantOptions,
             prices: [
               {
-                amount: Math.round(priceMur * 100),
+                // MUR is stored as whole rupees in this DB (the apex catalog
+                // stores 800/1100/890, and the storefront's formatPrice never
+                // divides by 100). Do NOT convert to minor units here — a *100
+                // shipped 3 preorder products at 100x (Rs 104,000). See
+                // scripts/fix-sourcing-price-100x.ts for the data backfill.
+                amount: Math.round(priceMur),
                 currency_code: "mur",
               },
             ],
