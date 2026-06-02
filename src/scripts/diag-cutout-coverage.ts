@@ -15,6 +15,12 @@ import type StoriesModuleService from "../modules/stories/service"
 
 const LOOKAHEAD_DAYS = 3
 
+function toIsoDate(value: unknown): string {
+  return value instanceof Date
+    ? value.toISOString().slice(0, 10)
+    : String(value).slice(0, 10)
+}
+
 export default async function diagCutoutCoverage({
   container,
 }: ExecArgs): Promise<void> {
@@ -33,10 +39,7 @@ export default async function diagCutoutCoverage({
 
   const upcoming = allPlans
     .filter((p) => {
-      const pd =
-        typeof p.plan_date === "string"
-          ? p.plan_date.slice(0, 10)
-          : (p.plan_date as Date).toISOString().slice(0, 10)
+      const pd = toIsoDate(p.plan_date)
       return planDates.has(pd)
     })
     .sort((a, b) => String(a.plan_date).localeCompare(String(b.plan_date)))
@@ -47,10 +50,7 @@ export default async function diagCutoutCoverage({
   }
 
   for (const plan of upcoming) {
-    const planDate =
-      typeof plan.plan_date === "string"
-        ? plan.plan_date.slice(0, 10)
-        : (plan.plan_date as Date).toISOString().slice(0, 10)
+    const planDate = toIsoDate(plan.plan_date)
     const slots = await stories.listStorySlots({ plan_id: plan.id })
     const productIds = slots
       .map((s) => s.product_id)
