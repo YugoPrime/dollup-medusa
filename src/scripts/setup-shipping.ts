@@ -131,12 +131,15 @@ export default async function setupShipping({ container }: ExecArgs) {
         },
         prices: [
           {
+            // Whole rupees — MUR is NOT stored in minor units in this DB
+            // (apex products store 800/1100/890; the storefront's formatPrice
+            // never divides by 100). 15000 here was a 100x error = Rs 15,000.
             currency_code: "mur",
-            amount: 15000,
+            amount: 150,
           },
           {
             region_id: region.id,
-            amount: 15000,
+            amount: 150,
           },
         ],
         rules: [],
