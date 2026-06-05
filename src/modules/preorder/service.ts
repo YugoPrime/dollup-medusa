@@ -12,10 +12,22 @@ import {
   type ComputePreorderPriceResult,
   type PreorderSettingsLike,
 } from "./lib/pricing"
+import {
+  parseQuoteUrlsCapped,
+  isValidSheinUrl,
+  isDaemonOnline,
+  isLockStale,
+  rollupRequestStatus,
+} from "./lib/quote-helpers"
 
 export const PREORDER_SETTINGS_ID = "preorder_settings"
 
-export type PreorderSettingsDTO = PreorderSettingsLike & { id: string }
+export type PreorderSettingsDTO = PreorderSettingsLike & {
+  id: string
+  // Daemon liveness heartbeat — lives on the settings row, not part of the
+  // pricing-math shape (PreorderSettingsLike).
+  shein_daemon_last_seen_at?: Date | null
+}
 
 export type UpdatePreorderSettingsInput = Partial<
   Omit<PreorderSettingsDTO, "id">
@@ -164,6 +176,75 @@ class PreorderModuleService extends MedusaService({
     const settings = await this.getSettings()
     const result = computePreorderPrice(input, settings)
     return { ...result, settingsId: settings.id }
+  }
+
+  /**
+   * Create a quote request + its item rows. Enforces <=5 links and the per-IP
+   * hourly rate limit (settings.submissions_per_ip_per_hour). If the SHEIN
+   * daemon is offline (stale heartbeat), items are created directly as
+   * "needs_manual" so the storefront shows the by-hand card immediately
+   * instead of an indefinite spinner.
+   */
+  async createQuoteRequest(input: {
+    contact: { whatsapp: string; name?: string }
+    rawUrls: string
+    clientIp?: string | null
+    notes?: string | null
+    now?: Date
+  }): Promise<{ requestId: string; itemCount: number; dropped: number }> {
+    const now = input.now ?? new Date()
+    const settings = await this.getSettings()
+
+    const { urls, dropped } = parseQuoteUrlsCapped(input.rawUrls, 5)
+    const valid = urls.filter((u) => isValidSheinUrl(u))
+    if (valid.length === 0) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        "No valid SHEIN links found. Links must be shein.com product URLs.",
+      )
+    }
+
+    // Per-IP rate limit (NAT-friendly default lives in settings).
+    if (input.clientIp) {
+      const windowStart = new Date(now.getTime() - 60 * 60 * 1000)
+      const recent = await (this as any).listPreorderQuoteRequests(
+        { client_ip: input.clientIp, created_at: { $gte: windowStart } },
+        { take: 100 },
+      )
+      const limit = Number(settings.submissions_per_ip_per_hour ?? 5)
+      if (Array.isArray(recent) && recent.length >= limit) {
+        throw new MedusaError(MedusaError.Types.NOT_ALLOWED, "rate_limited")
+      }
+    }
+
+    const daemonOnline = isDaemonOnline(
+      settings.shein_daemon_last_seen_at
+        ? new Date(settings.shein_daemon_last_seen_at)
+        : null,
+      now,
+      5,
+    )
+    const initialStatus = daemonOnline ? "pending" : "needs_manual"
+
+    const request = await (this as any).createPreorderQuoteRequests({
+      contact: input.contact,
+      notes: input.notes ?? null,
+      items_count: valid.length,
+      client_ip: input.clientIp ?? null,
+      status: initialStatus,
+      expires_at: new Date(now.getTime() + 48 * 60 * 60 * 1000),
+    })
+
+    await (this as any).createPreorderQuoteItems(
+      valid.map((url, i) => ({
+        request_id: request.id,
+        position: i,
+        shein_url: url,
+        status: initialStatus,
+      })),
+    )
+
+    return { requestId: request.id, itemCount: valid.length, dropped }
   }
 
   async generateBookmarkletToken(
