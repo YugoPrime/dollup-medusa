@@ -342,6 +342,79 @@ class PreorderModuleService extends MedusaService({
     })
   }
 
+  /** Storefront poll + admin detail. */
+  async getQuoteRequest(
+    id: string,
+    opts: { withItems?: boolean } = {},
+  ): Promise<any> {
+    const [request] = await (this as any).listPreorderQuoteRequests({ id })
+    if (!request) {
+      throw new MedusaError(MedusaError.Types.NOT_FOUND, "request not found")
+    }
+    if (!opts.withItems) return request
+    const items = await (this as any).listPreorderQuoteItems(
+      { request_id: id },
+      { order: { position: "ASC" } },
+    )
+    return { ...request, items }
+  }
+
+  /**
+   * Admin inline manual quote: owner types the SHEIN USD price, we run the same
+   * pricing math the daemon would and write a binding snapshot.
+   */
+  async setManualQuote(
+    itemId: string,
+    input: { priceUsd: number },
+  ): Promise<void> {
+    if (!Number.isFinite(input.priceUsd) || input.priceUsd <= 0) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        "priceUsd must be a positive number",
+      )
+    }
+    const preview = await this.previewPrice({ sheinPriceUsd: input.priceUsd })
+    const settings = await this.getSettings()
+    await this.recordScrapeResult(itemId, {
+      outcome: "quoted",
+      scraped_price_usd: input.priceUsd,
+      all_in_price_mur: preview.finalPriceMur,
+      price_breakdown: preview,
+      fx_rate_used: preview.fxRateUsed,
+      settings_snapshot: settings,
+    })
+  }
+
+  /** Client picks size/colour on a quoted card. */
+  async selectQuoteItemOptions(
+    itemId: string,
+    input: { size?: string | null; color?: string | null },
+  ): Promise<void> {
+    await (this as any).updatePreorderQuoteItems({
+      id: itemId,
+      selected_size: input.size ?? null,
+      selected_color: input.color ?? null,
+    })
+  }
+
+  /** Cron: mark unreserved requests older than 48h as expired. */
+  async expireOldRequests(now: Date = new Date()): Promise<number> {
+    const requests = await (this as any).listPreorderQuoteRequests({
+      status: ["pending", "quoted", "partial", "needs_manual"],
+    })
+    let expired = 0
+    for (const r of requests) {
+      if (r.expires_at && new Date(r.expires_at).getTime() < now.getTime()) {
+        await (this as any).updatePreorderQuoteRequests({
+          id: r.id,
+          status: "expired",
+        })
+        expired++
+      }
+    }
+    return expired
+  }
+
   async generateBookmarkletToken(
     options: { expiresInDays?: number } = {},
   ): Promise<{ token: string; expiresAt: Date | null }> {
