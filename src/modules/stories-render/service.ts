@@ -30,6 +30,17 @@ export class RequiredSlotEmptyError extends Error {
   name = "RequiredSlotEmptyError"
 }
 
+/**
+ * A required slot had an image URL, but inlining it failed every attempt (the
+ * fetch fell back to the raw remote URL). HyperFrames' screenshot mode does NOT
+ * wait for <img> to load, so a non-inlined required image renders as a blank
+ * box. Rather than ship that, we abort — the poller will pick the slot up again
+ * on its next pass, by which point the transient CDN hiccup has usually cleared.
+ */
+export class RequiredImageInlineFailedError extends Error {
+  name = "RequiredImageInlineFailedError"
+}
+
 export class TextOverrideTooLongError extends Error {
   name = "TextOverrideTooLongError"
 }
@@ -122,6 +133,18 @@ export default class StoriesRenderModuleService {
         // (the "frame painted, product missing" glitch). Inlining the bytes
         // removes the network race entirely.
         const resolved = await this.resolveImage(url)
+
+        // The resolver falls back to the raw URL when inlining fails. For an
+        // http(s) input, "resolved === url" therefore means we did NOT inline —
+        // the image would render as a blank box. Abort required slots so the
+        // poller retries rather than ship a broken story (the IS2237 incident).
+        const inlineFailed = /^https?:\/\//i.test(url) && resolved === url
+        if (inlineFailed && slot.required) {
+          throw new RequiredImageInlineFailedError(
+            `Required slot '${slot.id}' image failed to inline (${url}); aborting to avoid a blank box`,
+          )
+        }
+
         html = injectImageSrc(html, slot.id, resolved)
       }
     }
@@ -326,6 +349,62 @@ function injectImageSrc(html: string, slotId: string, url: string): string {
 
 const IMAGE_FETCH_TIMEOUT_MS = 20_000
 const MAX_INLINE_IMAGE_BYTES = 25 * 1024 * 1024 // 25MB safety cap
+const IMAGE_INLINE_MAX_ATTEMPTS = 3 // initial try + 2 retries
+const IMAGE_INLINE_RETRY_BASE_MS = 500 // backoff: 500ms, 1000ms
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+/**
+ * Outcome of a single inline attempt. `data:` URIs mean success. A `retryable`
+ * failure (network throw, timeout, 5xx, empty body) is worth another try — these
+ * are exactly the transient CDN hiccups that produced blank product photos in a
+ * posted story (IS2237, 2026-06-02: a brief `cdn.dollupboutique.com` outage made
+ * fetches fail for 2 of 3 slots). A `permanent` failure (4xx, oversized, non-image
+ * body) will never change, so we stop immediately.
+ */
+type InlineOutcome =
+  | { kind: "ok"; dataUri: string }
+  | { kind: "retryable"; reason: string }
+  | { kind: "permanent"; reason: string }
+
+async function attemptInline(url: string): Promise<InlineOutcome> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), IMAGE_FETCH_TIMEOUT_MS)
+  try {
+    const res = await fetch(url, { signal: controller.signal })
+    if (!res.ok) {
+      // 5xx is a server hiccup worth retrying; 4xx is a real miss, give up.
+      return res.status >= 500
+        ? { kind: "retryable", reason: `http_${res.status}` }
+        : { kind: "permanent", reason: `http_${res.status}` }
+    }
+
+    const headerType = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase()
+    const buf = Buffer.from(await res.arrayBuffer())
+    if (buf.byteLength === 0) {
+      return { kind: "retryable", reason: "empty_body" }
+    }
+    if (buf.byteLength > MAX_INLINE_IMAGE_BYTES) {
+      return { kind: "permanent", reason: `too_large_${buf.byteLength}` }
+    }
+
+    const mime = headerType.startsWith("image/") ? headerType : sniffImageMime(buf)
+    if (!mime) {
+      return { kind: "permanent", reason: `not_image_${headerType || "unknown"}` }
+    }
+
+    return { kind: "ok", dataUri: `data:${mime};base64,${buf.toString("base64")}` }
+  } catch (err) {
+    // Fetch throws (DNS, ECONNRESET, "socket hang up") and aborts (timeout) are
+    // transient — retry them.
+    return {
+      kind: "retryable",
+      reason: (err as Error).name === "AbortError" ? "timeout" : (err as Error).message,
+    }
+  } finally {
+    clearTimeout(timer)
+  }
+}
 
 /**
  * Fetches a remote image and returns it as a base64 `data:` URI so it can be
@@ -333,49 +412,31 @@ const MAX_INLINE_IMAGE_BYTES = 25 * 1024 * 1024 // 25MB safety cap
  * race that left product photos blank in some stories.
  *
  * Non-http(s) inputs (already a data: URI, a local path, or a test sentinel
- * like "x") are returned unchanged. On ANY failure — fetch error, timeout,
- * non-200, missing/odd content-type, oversized payload — we fall back to the
- * original URL. That preserves the previous behavior as a floor: worst case we
- * render exactly as before; best case (the common one) the image is inlined.
+ * like "x") are returned unchanged. Transient failures are retried up to
+ * {@link IMAGE_INLINE_MAX_ATTEMPTS} times with backoff. If every attempt fails
+ * we fall back to the original URL — but callers that care (required slots in
+ * materialize) detect this by comparing the result against the input and fail
+ * the render rather than ship a blank box. See {@link materializeTemplate}.
  */
 export async function inlineImageAsDataUri(url: string): Promise<string> {
   if (!/^https?:\/\//i.test(url)) return url
 
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), IMAGE_FETCH_TIMEOUT_MS)
-  try {
-    const res = await fetch(url, { signal: controller.signal })
-    if (!res.ok) {
-      logInlineWarn(url, `http_${res.status}`)
-      return url
-    }
+  let lastReason = "unknown"
+  for (let attempt = 1; attempt <= IMAGE_INLINE_MAX_ATTEMPTS; attempt++) {
+    const outcome = await attemptInline(url)
+    if (outcome.kind === "ok") return outcome.dataUri
 
-    const headerType = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase()
-    const buf = Buffer.from(await res.arrayBuffer())
-    if (buf.byteLength === 0) {
-      logInlineWarn(url, "empty_body")
-      return url
-    }
-    if (buf.byteLength > MAX_INLINE_IMAGE_BYTES) {
-      logInlineWarn(url, `too_large_${buf.byteLength}`)
-      return url
-    }
+    lastReason = outcome.reason
+    if (outcome.kind === "permanent") break
 
-    const mime = headerType.startsWith("image/")
-      ? headerType
-      : sniffImageMime(buf)
-    if (!mime) {
-      logInlineWarn(url, `not_image_${headerType || "unknown"}`)
-      return url
+    if (attempt < IMAGE_INLINE_MAX_ATTEMPTS) {
+      logInlineWarn(url, `${outcome.reason}_retry_${attempt}`)
+      await sleep(IMAGE_INLINE_RETRY_BASE_MS * attempt)
     }
-
-    return `data:${mime};base64,${buf.toString("base64")}`
-  } catch (err) {
-    logInlineWarn(url, (err as Error).name === "AbortError" ? "timeout" : (err as Error).message)
-    return url
-  } finally {
-    clearTimeout(timer)
   }
+
+  logInlineWarn(url, lastReason)
+  return url
 }
 
 /**
