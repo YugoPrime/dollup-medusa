@@ -143,7 +143,13 @@ export async function createPreorderProduct(
       title: `${color.name} / ${size}`,
       sku: undefined,
       options: { Color: color.name, Size: size },
-      prices: [{ currency_code: "mur", amount: preview.finalPriceMur * 100 }],
+      // MUR is stored as whole rupees in this DB (the apex catalog stores
+      // 800/1100/890, and the storefront's formatPrice never divides by 100).
+      // finalPriceMur is already whole rupees — do NOT multiply by 100. A *100
+      // here shipped SHEIN preorder products at 100x (e.g. Rs 104,000 for a
+      // ~Rs 1,040 dress). See scripts/fix-sourcing-price-100x.ts for the
+      // data backfill (it scopes the whole Pre-Order channel, both paths).
+      prices: [{ currency_code: "mur", amount: preview.finalPriceMur }],
       manage_inventory: false,
       metadata: {
         image_urls: color.images,
