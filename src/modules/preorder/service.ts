@@ -247,6 +247,101 @@ class PreorderModuleService extends MedusaService({
     return { requestId: request.id, itemCount: valid.length, dropped }
   }
 
+  /** Daemon poll: oldest pending jobs first. */
+  async listQuoteJobs(opts: { status?: string; limit?: number } = {}): Promise<any[]> {
+    const status = opts.status ?? "pending"
+    const take = opts.limit ?? 5
+    return (this as any).listPreorderQuoteItems(
+      { status },
+      { take, order: { created_at: "ASC" } },
+    )
+  }
+
+  /**
+   * Atomically claim a job for scraping. Returns false if the row is already
+   * locked by a fresh (non-stale) lock — prevents double-scrape across poll
+   * cycles. A scraping row whose lock is stale (>5 min) is reclaimable.
+   */
+  async claimQuoteJob(itemId: string, now: Date = new Date()): Promise<boolean> {
+    const [item] = await (this as any).listPreorderQuoteItems({ id: itemId })
+    if (!item) return false
+    if (
+      item.status === "scraping" &&
+      !isLockStale(item.locked_at ? new Date(item.locked_at) : null, now, 5)
+    ) {
+      return false
+    }
+    await (this as any).updatePreorderQuoteItems({
+      id: itemId,
+      status: "scraping",
+      locked_at: now,
+      last_attempt_at: now,
+      attempts: Number(item.attempts ?? 0) + 1,
+    })
+    return true
+  }
+
+  /**
+   * Record a daemon (or manual) scrape result and bubble the request status.
+   */
+  async recordScrapeResult(
+    itemId: string,
+    payload: {
+      outcome: "quoted" | "failed" | "needs_manual"
+      scraped_title?: string | null
+      scraped_thumbnail?: string | null
+      scraped_price_usd?: number | null
+      color_options?: unknown
+      size_options?: unknown
+      all_in_price_mur?: number | null
+      price_breakdown?: unknown
+      fx_rate_used?: number | null
+      settings_snapshot?: unknown
+      last_error_kind?: string | null
+    },
+  ): Promise<void> {
+    const [item] = await (this as any).listPreorderQuoteItems({ id: itemId })
+    if (!item) {
+      throw new MedusaError(MedusaError.Types.NOT_FOUND, "quote item not found")
+    }
+    await (this as any).updatePreorderQuoteItems({
+      id: itemId,
+      status: payload.outcome,
+      locked_at: null,
+      scraped_title: payload.scraped_title ?? item.scraped_title ?? null,
+      scraped_thumbnail: payload.scraped_thumbnail ?? item.scraped_thumbnail ?? null,
+      scraped_price_usd: payload.scraped_price_usd ?? item.scraped_price_usd ?? null,
+      color_options: payload.color_options ?? item.color_options ?? null,
+      size_options: payload.size_options ?? item.size_options ?? null,
+      all_in_price_mur: payload.all_in_price_mur ?? item.all_in_price_mur ?? null,
+      price_breakdown: payload.price_breakdown ?? item.price_breakdown ?? null,
+      fx_rate_used: payload.fx_rate_used ?? item.fx_rate_used ?? null,
+      settings_snapshot: payload.settings_snapshot ?? item.settings_snapshot ?? null,
+      last_error_kind: payload.last_error_kind ?? null,
+    })
+    await this.recomputeRequestStatus(item.request_id)
+  }
+
+  /** Re-roll a request's status from its items. */
+  async recomputeRequestStatus(requestId: string): Promise<void> {
+    const items = await (this as any).listPreorderQuoteItems({
+      request_id: requestId,
+    })
+    const next = rollupRequestStatus(
+      items.map((i: any) => ({ status: i.status })),
+    )
+    await (this as any).updatePreorderQuoteRequests({ id: requestId, status: next })
+  }
+
+  /** Daemon liveness — write heartbeat on the singleton settings row. */
+  async recordDaemonHeartbeat(now: Date = new Date()): Promise<void> {
+    const settings = await this.getSettings()
+    await (this as any).updatePreorderSettings({
+      id: settings.id,
+      shein_daemon_last_seen_at: now,
+    })
+  }
+
   async generateBookmarkletToken(
     options: { expiresInDays?: number } = {},
   ): Promise<{ token: string; expiresAt: Date | null }> {
