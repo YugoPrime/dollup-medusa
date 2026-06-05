@@ -1,4 +1,5 @@
 import { isValidSheinUrl, parseQuoteUrls, parseQuoteUrlsCapped } from "../quote-helpers"
+import { rollupRequestStatus } from "../quote-helpers"
 
 describe("isValidSheinUrl", () => {
   it("accepts a shein.com product URL", () => {
@@ -28,5 +29,29 @@ describe("parseQuoteUrls", () => {
     const { urls, dropped } = parseQuoteUrlsCapped(six, 5)
     expect(urls).toHaveLength(5)
     expect(dropped).toBe(1)
+  })
+})
+
+describe("rollupRequestStatus", () => {
+  const s = (...statuses: string[]) => statuses.map((status) => ({ status }))
+
+  it("all quoted -> quoted", () => {
+    expect(rollupRequestStatus(s("quoted", "quoted"))).toBe("quoted")
+  })
+  it("all reserved -> reserved", () => {
+    expect(rollupRequestStatus(s("reserved", "reserved"))).toBe("reserved")
+  })
+  it("mix of quoted and needs_manual -> partial", () => {
+    expect(rollupRequestStatus(s("quoted", "needs_manual"))).toBe("partial")
+  })
+  it("all needs_manual -> needs_manual", () => {
+    expect(rollupRequestStatus(s("needs_manual", "needs_manual"))).toBe("needs_manual")
+  })
+  it("any still pending/scraping -> pending", () => {
+    expect(rollupRequestStatus(s("quoted", "scraping"))).toBe("pending")
+    expect(rollupRequestStatus(s("pending", "quoted"))).toBe("pending")
+  })
+  it("reserved items count as resolved alongside quoted", () => {
+    expect(rollupRequestStatus(s("reserved", "quoted"))).toBe("partial")
   })
 })

@@ -27,3 +27,40 @@ export function parseQuoteUrlsCapped(
   const all = parseQuoteUrls(raw)
   return { urls: all.slice(0, max), dropped: Math.max(0, all.length - max) }
 }
+
+export type QuoteItemStatusLike = { status: string }
+export type RequestStatus =
+  | "pending"
+  | "quoted"
+  | "partial"
+  | "needs_manual"
+  | "reserved"
+
+/**
+ * Roll N item statuses up to the request status.
+ * - Any item still in-flight (pending|scraping) -> "pending".
+ * - All reserved -> "reserved"; all quoted -> "quoted"; all needs_manual -> "needs_manual".
+ * - Otherwise a resolved mix -> "partial".
+ * `failed` items are treated as resolved-but-not-actionable (don't block "quoted"/rollup);
+ * they neither force "partial" alone nor count as quoted.
+ */
+export function rollupRequestStatus(
+  items: QuoteItemStatusLike[],
+): RequestStatus {
+  if (items.length === 0) return "pending"
+  const inFlight = items.some(
+    (i) => i.status === "pending" || i.status === "scraping",
+  )
+  if (inFlight) return "pending"
+
+  const actionable = items.filter((i) => i.status !== "failed")
+  if (actionable.length === 0) return "needs_manual" // all failed -> owner sees it
+
+  const allReserved = actionable.every((i) => i.status === "reserved")
+  if (allReserved) return "reserved"
+  const allQuoted = actionable.every((i) => i.status === "quoted")
+  if (allQuoted) return "quoted"
+  const allManual = actionable.every((i) => i.status === "needs_manual")
+  if (allManual) return "needs_manual"
+  return "partial"
+}
