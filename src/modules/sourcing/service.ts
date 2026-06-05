@@ -15,7 +15,7 @@ import DraftOrder, { DRAFT_ORDER_STATUSES } from "./models/draft-order"
 import DraftItem from "./models/draft-item"
 import DraftVariant from "./models/draft-variant"
 import DraftCostHistory from "./models/draft-cost-history"
-import { getNextRef } from "./lib/ref-allocator"
+import { nextRefFromHandles } from "./lib/ref-allocator"
 
 export type CreateSupplierInput = {
   name: string
@@ -886,6 +886,53 @@ class SourcingModuleService extends MedusaService({
   }
 
   /**
+   * Compute the next free `IS####` ref by scanning live product handles.
+   *
+   * History / why this is not a raw-SQL aggregate:
+   * `ContainerRegistrationKeys.MANAGER` does NOT resolve from the sourcing
+   * module's scoped container (it throws "Could not resolve"). The old code
+   * resolved MANAGER inside a try/catch at three call sites, swallowed that
+   * throw, and fell back to max=0 — which is why "Assign refs" restarted
+   * numbering at IS1 instead of continuing past the live catalog's max
+   * (is2389), risking handle collisions on push.
+   *
+   * `ContainerRegistrationKeys.QUERY` DOES resolve here (the push path already
+   * uses it for query.graph). So we page product handles via query.graph,
+   * filter to `is\d+` in JS, and reuse `nextRefFromHandles`. ~500 products,
+   * paged 1000 at a time — one round trip in practice.
+   *
+   * Throws if QUERY is unresolvable, so callers fail loudly rather than
+   * silently producing colliding IS1 refs.
+   */
+  private async getNextProductRef(): Promise<string> {
+    const container = (this as unknown as { __container__: unknown })
+      .__container__ as { resolve: (key: string) => unknown }
+    const query = container.resolve(ContainerRegistrationKeys.QUERY) as {
+      graph: (input: {
+        entity: string
+        fields: string[]
+        filters?: Record<string, unknown>
+        pagination?: { skip: number; take: number }
+      }) => Promise<{ data: Array<{ handle: string | null }> }>
+    }
+
+    const handles: string[] = []
+    const take = 1000
+    for (let skip = 0; ; skip += take) {
+      const { data } = await query.graph({
+        entity: "product",
+        fields: ["handle"],
+        filters: { handle: { $like: "is%" } },
+        pagination: { skip, take },
+      })
+      for (const p of data) if (p.handle) handles.push(p.handle)
+      if (data.length < take) break
+    }
+
+    return nextRefFromHandles(handles)
+  }
+
+  /**
    * Pre-allocate IS refs to every item in a draft that doesn't have one yet,
    * WITHOUT pushing to Medusa. Lets the operator name product photos by the
    * final SKU (IS####) before publishing.
@@ -909,25 +956,13 @@ class SourcingModuleService extends MedusaService({
       updateDraftItems: (data: Record<string, unknown>) => Promise<unknown>
     }
 
-    // Max IS number currently live in the product table.
+    // Max IS number currently live in the product table. getNextProductRef
+    // returns `IS${max+1}`; subtract 1 back to the raw max so we can also fold
+    // in the max ref already sitting on unpushed draft items below.
     let productMax = 0
-    try {
-      const container = (this as unknown as { __container__: unknown })
-        .__container__ as { resolve: (key: string) => unknown }
-      const manager = container.resolve(ContainerRegistrationKeys.MANAGER) as {
-        execute: (
-          sql: string,
-        ) => Promise<{ rows?: Array<{ max: number | string | null }> }>
-      }
-      const res = await manager.execute(`
-        select coalesce(max((substring(handle from '^[Ii][Ss](\\d+)$'))::int), 0) as max
-        from product
-        where deleted_at is null and handle ~* '^is\\d+$'
-      `)
-      productMax = Number(res.rows?.[0]?.max ?? 0)
-    } catch {
-      productMax = 0
-    }
+    const nextFromProducts = await this.getNextProductRef()
+    const pm = nextFromProducts.match(/^IS(\d+)$/)
+    if (pm) productMax = parseInt(pm[1], 10) - 1
 
     // Max IS number already assigned to ANY draft item (across all drafts).
     const allItems = (await svc.listDraftItems({})) as Array<{
@@ -1101,19 +1136,7 @@ class SourcingModuleService extends MedusaService({
       let assignedRef: string | null = null
       let createdProductId: string | null = null
       try {
-        const manager = (
-          container.resolve(ContainerRegistrationKeys.MANAGER) as {
-            execute: (sql: string) => Promise<{
-              rows?: Array<{ max: number | string | null }>
-            }>
-          }
-        )
-        assignedRef = await getNextRef({
-          execute: async (sql: string) => {
-            const res = await manager.execute(sql)
-            return { rows: res.rows ?? [] }
-          },
-        })
+        assignedRef = await this.getNextProductRef()
         await this.assignItemRef(item.id, assignedRef)
 
         const variants = (await svc.listDraftVariants({
@@ -1335,24 +1358,7 @@ class SourcingModuleService extends MedusaService({
    */
   async previewNextRef(): Promise<string | null> {
     try {
-      const container = (this as unknown as { __container__: unknown })
-        .__container__ as {
-        resolve: (key: string) => unknown
-      }
-      const manager = container.resolve(
-        ContainerRegistrationKeys.MANAGER,
-      ) as {
-        execute: (
-          sql: string,
-        ) => Promise<{ rows?: unknown[] } | unknown[]>
-      }
-      return await getNextRef({
-        execute: async (sql: string) => {
-          const r = await manager.execute(sql)
-          const rows = (r as { rows?: unknown[] }).rows ?? (r as unknown[])
-          return { rows: rows as Array<{ max: number | string | null }> }
-        },
-      })
+      return await this.getNextProductRef()
     } catch {
       return null
     }
