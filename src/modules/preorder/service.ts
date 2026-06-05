@@ -4,6 +4,8 @@ import { MedusaError, MedusaService } from "@medusajs/framework/utils"
 
 import PreorderSettings from "./models/preorder-settings"
 import PreorderToken from "./models/preorder-token"
+import PreorderQuoteRequest from "./models/preorder-quote-request"
+import PreorderQuoteItem from "./models/preorder-quote-item"
 import {
   computePreorderPrice,
   type ComputePreorderPriceInput,
@@ -60,6 +62,8 @@ const DEFAULTS: Omit<PreorderSettingsDTO, "id"> = {
 class PreorderModuleService extends MedusaService({
   PreorderSettings,
   PreorderToken,
+  PreorderQuoteRequest,
+  PreorderQuoteItem,
 }) {
   async getSettings(): Promise<PreorderSettingsDTO> {
     const service = this as unknown as {
