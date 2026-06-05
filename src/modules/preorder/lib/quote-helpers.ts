@@ -4,7 +4,8 @@
  */
 
 // Mirror the bookmarklet's host check (api/hooks/preorder-bookmarklet/route.ts):
-// shein.com with an optional single-label subdomain (www, m, us, etc.).
+// Accepts http:// too (manual paste tolerance); shein.com with an optional
+// single-label subdomain (www, m, us, etc.).
 const SHEIN_URL_RE = /^https?:\/\/(?:[a-z0-9-]+\.)?shein\.com\//i
 
 export function isValidSheinUrl(url: string): boolean {
@@ -12,6 +13,10 @@ export function isValidSheinUrl(url: string): boolean {
   return SHEIN_URL_RE.test(url.trim())
 }
 
+/**
+ * Split + trim pasted links. Does NOT host-validate — callers filter the
+ * result with isValidSheinUrl (the service layer does parse-then-filter).
+ */
 export function parseQuoteUrls(raw: string): string[] {
   if (typeof raw !== "string") return []
   return raw
@@ -20,6 +25,10 @@ export function parseQuoteUrls(raw: string): string[] {
     .filter((l) => l.length > 0)
 }
 
+/**
+ * Split + cap pasted links. Does NOT host-validate — callers filter the
+ * result with isValidSheinUrl (the service layer does parse-then-filter).
+ */
 export function parseQuoteUrlsCapped(
   raw: string,
   max: number,

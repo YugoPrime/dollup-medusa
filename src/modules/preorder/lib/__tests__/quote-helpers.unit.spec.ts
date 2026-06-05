@@ -1,6 +1,11 @@
-import { isValidSheinUrl, parseQuoteUrls, parseQuoteUrlsCapped } from "../quote-helpers"
-import { rollupRequestStatus } from "../quote-helpers"
-import { isLockStale, isDaemonOnline } from "../quote-helpers"
+import {
+  isValidSheinUrl,
+  parseQuoteUrls,
+  parseQuoteUrlsCapped,
+  rollupRequestStatus,
+  isLockStale,
+  isDaemonOnline,
+} from "../quote-helpers"
 
 describe("isValidSheinUrl", () => {
   it("accepts a shein.com product URL", () => {
@@ -55,6 +60,12 @@ describe("rollupRequestStatus", () => {
   it("reserved items count as resolved alongside quoted", () => {
     expect(rollupRequestStatus(s("reserved", "quoted"))).toBe("partial")
   })
+  it("all failed -> needs_manual (owner must see it)", () => {
+    expect(rollupRequestStatus(s("failed", "failed"))).toBe("needs_manual")
+  })
+  it("failed mixed with quoted is ignored -> quoted", () => {
+    expect(rollupRequestStatus(s("failed", "quoted"))).toBe("quoted")
+  })
 })
 
 describe("isLockStale", () => {
@@ -68,6 +79,9 @@ describe("isLockStale", () => {
   it("lock 2 min old is fresh", () => {
     expect(isLockStale(new Date("2026-06-06T11:58:00Z"), now, 5)).toBe(false)
   })
+  it("lock exactly at threshold is NOT stale (> not >=)", () => {
+    expect(isLockStale(new Date("2026-06-06T11:55:00Z"), now, 5)).toBe(false)
+  })
 })
 
 describe("isDaemonOnline", () => {
@@ -80,5 +94,8 @@ describe("isDaemonOnline", () => {
   })
   it("never seen (null) -> offline", () => {
     expect(isDaemonOnline(null, now, 5)).toBe(false)
+  })
+  it("heartbeat exactly at threshold is still online (<= not <)", () => {
+    expect(isDaemonOnline(new Date("2026-06-06T11:55:00Z"), now, 5)).toBe(true)
   })
 })
