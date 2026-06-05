@@ -64,3 +64,25 @@ export function rollupRequestStatus(
   if (allManual) return "needs_manual"
   return "partial"
 }
+
+const MS_PER_MIN = 60_000
+
+/** A scraping lock older than `maxAgeMin` (or absent) is reclaimable. */
+export function isLockStale(
+  lockedAt: Date | null,
+  now: Date,
+  maxAgeMin: number,
+): boolean {
+  if (!lockedAt) return true
+  return now.getTime() - lockedAt.getTime() > maxAgeMin * MS_PER_MIN
+}
+
+/** Daemon is online if it heartbeat within `maxAgeMin`. */
+export function isDaemonOnline(
+  lastSeenAt: Date | null,
+  now: Date,
+  maxAgeMin: number,
+): boolean {
+  if (!lastSeenAt) return false
+  return now.getTime() - lastSeenAt.getTime() <= maxAgeMin * MS_PER_MIN
+}

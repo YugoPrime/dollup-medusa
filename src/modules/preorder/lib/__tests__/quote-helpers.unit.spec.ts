@@ -1,5 +1,6 @@
 import { isValidSheinUrl, parseQuoteUrls, parseQuoteUrlsCapped } from "../quote-helpers"
 import { rollupRequestStatus } from "../quote-helpers"
+import { isLockStale, isDaemonOnline } from "../quote-helpers"
 
 describe("isValidSheinUrl", () => {
   it("accepts a shein.com product URL", () => {
@@ -53,5 +54,31 @@ describe("rollupRequestStatus", () => {
   })
   it("reserved items count as resolved alongside quoted", () => {
     expect(rollupRequestStatus(s("reserved", "quoted"))).toBe("partial")
+  })
+})
+
+describe("isLockStale", () => {
+  const now = new Date("2026-06-06T12:00:00Z")
+  it("null lock is stale (reclaimable)", () => {
+    expect(isLockStale(null, now, 5)).toBe(true)
+  })
+  it("lock 6 min old is stale", () => {
+    expect(isLockStale(new Date("2026-06-06T11:54:00Z"), now, 5)).toBe(true)
+  })
+  it("lock 2 min old is fresh", () => {
+    expect(isLockStale(new Date("2026-06-06T11:58:00Z"), now, 5)).toBe(false)
+  })
+})
+
+describe("isDaemonOnline", () => {
+  const now = new Date("2026-06-06T12:00:00Z")
+  it("heartbeat 2 min ago -> online", () => {
+    expect(isDaemonOnline(new Date("2026-06-06T11:58:00Z"), now, 5)).toBe(true)
+  })
+  it("heartbeat 6 min ago -> offline", () => {
+    expect(isDaemonOnline(new Date("2026-06-06T11:54:00Z"), now, 5)).toBe(false)
+  })
+  it("never seen (null) -> offline", () => {
+    expect(isDaemonOnline(null, now, 5)).toBe(false)
   })
 })
