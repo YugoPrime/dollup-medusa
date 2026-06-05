@@ -885,6 +885,78 @@ class SourcingModuleService extends MedusaService({
     await svc.updateDraftItems({ id: itemId, ref: null })
   }
 
+  /**
+   * Pre-allocate IS refs to every item in a draft that doesn't have one yet,
+   * WITHOUT pushing to Medusa. Lets the operator name product photos by the
+   * final SKU (IS####) before publishing.
+   *
+   * Numbering starts after BOTH the max IS handle already in the product table
+   * AND the max IS ref already assigned to any draft item — otherwise two
+   * drafts (or a re-run) would hand out colliding numbers, since nothing has
+   * been written to `product` yet. Push later reuses each item's existing ref
+   * (assignItemRef on push is idempotent for an already-set value).
+   *
+   * Items are numbered in `position` order so the sequence matches the on-screen
+   * card order. Returns the {id, ref} pairs assigned (existing refs included).
+   */
+  async assignRefsForDraft(
+    draftOrderId: string,
+  ): Promise<Array<{ id: string; ref: string }>> {
+    const svc = this as unknown as {
+      listDraftItems: (
+        filters: Record<string, unknown>,
+      ) => Promise<Array<{ id: string; ref: string | null; position: number }>>
+      updateDraftItems: (data: Record<string, unknown>) => Promise<unknown>
+    }
+
+    // Max IS number currently live in the product table.
+    let productMax = 0
+    try {
+      const container = (this as unknown as { __container__: unknown })
+        .__container__ as { resolve: (key: string) => unknown }
+      const manager = container.resolve(ContainerRegistrationKeys.MANAGER) as {
+        execute: (
+          sql: string,
+        ) => Promise<{ rows?: Array<{ max: number | string | null }> }>
+      }
+      const res = await manager.execute(`
+        select coalesce(max((substring(handle from '^[Ii][Ss](\\d+)$'))::int), 0) as max
+        from product
+        where deleted_at is null and handle ~* '^is\\d+$'
+      `)
+      productMax = Number(res.rows?.[0]?.max ?? 0)
+    } catch {
+      productMax = 0
+    }
+
+    // Max IS number already assigned to ANY draft item (across all drafts).
+    const allItems = (await svc.listDraftItems({})) as Array<{
+      ref: string | null
+    }>
+    let draftMax = 0
+    for (const it of allItems) {
+      const m = it.ref?.match(/^IS(\d+)$/)
+      if (m) draftMax = Math.max(draftMax, parseInt(m[1], 10))
+    }
+
+    let next = Math.max(productMax, draftMax) + 1
+
+    const items = await svc.listDraftItems({ draft_order_id: draftOrderId })
+    items.sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+
+    const out: Array<{ id: string; ref: string }> = []
+    for (const item of items) {
+      if (item.ref && /^IS\d+$/.test(item.ref)) {
+        out.push({ id: item.id, ref: item.ref })
+        continue
+      }
+      const ref = `IS${next++}`
+      await svc.updateDraftItems({ id: item.id, ref })
+      out.push({ id: item.id, ref })
+    }
+    return out
+  }
+
   async validateForPush(draftOrderId: string): Promise<PushValidationResult> {
     const draft = await this.retrieveDraft(draftOrderId)
     if (draft.status !== "received") {
