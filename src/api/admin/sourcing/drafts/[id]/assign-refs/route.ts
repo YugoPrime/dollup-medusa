@@ -3,8 +3,11 @@ import type {
   MedusaResponse,
 } from "@medusajs/framework/http"
 
+import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
+
 import { SOURCING_MODULE } from "../../../../../../modules/sourcing"
 import type SourcingModuleService from "../../../../../../modules/sourcing/service"
+import type { QueryService } from "../../../../../../modules/sourcing/service"
 
 // Pre-allocate IS#### refs to every unrefed item in the draft, without pushing.
 // Lets the operator name product photos by the final SKU before publishing.
@@ -15,7 +18,8 @@ export const POST = async (
   try {
     const id = String(req.params.id)
     const service = req.scope.resolve<SourcingModuleService>(SOURCING_MODULE)
-    const refs = await service.assignRefsForDraft(id)
+    const query = req.scope.resolve(ContainerRegistrationKeys.QUERY) as QueryService
+    const refs = await service.assignRefsForDraft(id, query)
     res.json({ refs })
   } catch (err) {
     const e = err as Error

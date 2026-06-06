@@ -13,7 +13,7 @@ export const POST = async (
   try {
     const id = String(req.params.id)
     const service = req.scope.resolve<SourcingModuleService>(SOURCING_MODULE)
-    const result = await service.pushDraftToMedusa(id)
+    const result = await service.pushDraftToMedusa(id, req.scope)
     res.json(result)
   } catch (err) {
     const e = err as Error
