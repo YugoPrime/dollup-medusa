@@ -22,6 +22,41 @@ import {
 
 export const PREORDER_SETTINGS_ID = "preorder_settings"
 
+// Quote-intake policy knobs (kept named so the three distinct "5"s don't drift).
+const MAX_LINKS_PER_REQUEST = 5
+const DAEMON_HEARTBEAT_WINDOW_MIN = 5 // daemon considered offline past this
+const SCRAPE_LOCK_TTL_MIN = 5 // a scraping lock older than this is reclaimable
+const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000 // per-IP rate-limit window (1h)
+const QUOTE_TTL_MS = 48 * 60 * 60 * 1000 // unreserved request lifetime (48h)
+
+// Shape the daemon + storefront actually read off a quote item. Loosely typed
+// (the MedusaService CRUD returns untyped rows) but enough to catch field typos
+// at the daemon/admin call sites.
+export type QuoteItemRow = {
+  id: string
+  request_id: string
+  position: number
+  shein_url: string
+  status: string
+  attempts: number
+  locked_at: Date | null
+  last_attempt_at: Date | null
+  last_error_kind: string | null
+  scraped_title: string | null
+  scraped_thumbnail: string | null
+  scraped_price_usd: number | null
+  color_options: unknown
+  size_options: unknown
+  all_in_price_mur: number | null
+  price_breakdown: unknown
+  fx_rate_used: number | null
+  settings_snapshot: unknown
+  selected_size: string | null
+  selected_color: string | null
+  reserved_product_id: string | null
+  reserved_at: Date | null
+}
+
 export type PreorderSettingsDTO = PreorderSettingsLike & {
   id: string
   // Daemon liveness heartbeat — lives on the settings row, not part of the
@@ -195,7 +230,7 @@ class PreorderModuleService extends MedusaService({
     const now = input.now ?? new Date()
     const settings = await this.getSettings()
 
-    const { urls, dropped } = parseQuoteUrlsCapped(input.rawUrls, 5)
+    const { urls, dropped } = parseQuoteUrlsCapped(input.rawUrls, MAX_LINKS_PER_REQUEST)
     const valid = urls.filter((u) => isValidSheinUrl(u))
     if (valid.length === 0) {
       throw new MedusaError(
@@ -206,13 +241,13 @@ class PreorderModuleService extends MedusaService({
 
     // Per-IP rate limit (NAT-friendly default lives in settings).
     if (input.clientIp) {
-      const windowStart = new Date(now.getTime() - 60 * 60 * 1000)
+      const windowStart = new Date(now.getTime() - RATE_LIMIT_WINDOW_MS)
       const recent = await (this as any).listPreorderQuoteRequests(
         { client_ip: input.clientIp, created_at: { $gte: windowStart } },
         { take: 100 },
       )
       const limit = Number(settings.submissions_per_ip_per_hour ?? 5)
-      if (Array.isArray(recent) && recent.length >= limit) {
+      if (recent.length >= limit) {
         throw new MedusaError(MedusaError.Types.NOT_ALLOWED, "rate_limited")
       }
     }
@@ -222,7 +257,7 @@ class PreorderModuleService extends MedusaService({
         ? new Date(settings.shein_daemon_last_seen_at)
         : null,
       now,
-      5,
+      DAEMON_HEARTBEAT_WINDOW_MIN,
     )
     const initialStatus = daemonOnline ? "pending" : "needs_manual"
 
@@ -232,7 +267,7 @@ class PreorderModuleService extends MedusaService({
       items_count: valid.length,
       client_ip: input.clientIp ?? null,
       status: initialStatus,
-      expires_at: new Date(now.getTime() + 48 * 60 * 60 * 1000),
+      expires_at: new Date(now.getTime() + QUOTE_TTL_MS),
     })
 
     await (this as any).createPreorderQuoteItems(
@@ -248,26 +283,30 @@ class PreorderModuleService extends MedusaService({
   }
 
   /** Daemon poll: oldest pending jobs first. */
-  async listQuoteJobs(opts: { status?: string; limit?: number } = {}): Promise<any[]> {
+  async listQuoteJobs(opts: { status?: string; limit?: number } = {}): Promise<QuoteItemRow[]> {
     const status = opts.status ?? "pending"
     const take = opts.limit ?? 5
     return (this as any).listPreorderQuoteItems(
       { status },
       { take, order: { created_at: "ASC" } },
-    )
+    ) as Promise<QuoteItemRow[]>
   }
 
   /**
-   * Atomically claim a job for scraping. Returns false if the row is already
-   * locked by a fresh (non-stale) lock — prevents double-scrape across poll
-   * cycles. A scraping row whose lock is stale (>5 min) is reclaimable.
+   * Claim a job for scraping. Returns false if the row is already locked by a
+   * fresh (non-stale) lock — prevents double-scrape across poll cycles. A
+   * scraping row whose lock is stale (> SCRAPE_LOCK_TTL_MIN) is reclaimable.
+   *
+   * NOTE: read-then-update, NOT a DB-level compare-and-swap. Safe because the
+   * daemon is a single serial poller. If concurrent pollers are ever added,
+   * this must become a raw `UPDATE … WHERE status='pending' RETURNING *`.
    */
   async claimQuoteJob(itemId: string, now: Date = new Date()): Promise<boolean> {
     const [item] = await (this as any).listPreorderQuoteItems({ id: itemId })
     if (!item) return false
     if (
       item.status === "scraping" &&
-      !isLockStale(item.locked_at ? new Date(item.locked_at) : null, now, 5)
+      !isLockStale(item.locked_at ? new Date(item.locked_at) : null, now, SCRAPE_LOCK_TTL_MIN)
     ) {
       return false
     }
@@ -317,6 +356,8 @@ class PreorderModuleService extends MedusaService({
       price_breakdown: payload.price_breakdown ?? item.price_breakdown ?? null,
       fx_rate_used: payload.fx_rate_used ?? item.fx_rate_used ?? null,
       settings_snapshot: payload.settings_snapshot ?? item.settings_snapshot ?? null,
+      // Unlike the scrape fields above, last_error_kind does NOT fall back to
+      // the prior value — a successful re-quote must clear the old error.
       last_error_kind: payload.last_error_kind ?? null,
     })
     await this.recomputeRequestStatus(item.request_id)
