@@ -36,6 +36,7 @@ export default async function scrapeQuoteJobs({ container }: ExecArgs) {
     for (const job of jobs) {
       const claimed = await svc.claimQuoteJob(job.id)
       if (!claimed) continue
+      const attemptNo = (job.attempts ?? 0) + 1 // mirrors the +1 claimQuoteJob just wrote
       try {
         const raw = await fetcher.fetchPdp(job.shein_url)
         const outcome = classifyFetchOutcome(raw)
@@ -46,14 +47,14 @@ export default async function scrapeQuoteJobs({ container }: ExecArgs) {
         }
 
         if (outcome.kind === "challenge" || outcome.kind === "parse-fail") {
-          // claimQuoteJob already bumped attempts. Once the budget is spent,
-          // give up to manual; otherwise return to the pending pool for retry.
-          if (job.attempts >= MAX_ATTEMPTS) {
+          // attemptNo is this scrape's number (1-based). At MAX_ATTEMPTS, this is the last try → manual.
+          if (attemptNo >= MAX_ATTEMPTS) {
             await svc.recordScrapeResult(job.id, {
               outcome: "needs_manual",
               last_error_kind: outcome.kind,
             })
           } else {
+            logger.info(`[quote-scrape] ${job.id} -> requeue (attempt ${attemptNo}, ${outcome.kind})`)
             await svc.requeueQuoteJob(job.id)
           }
           continue
@@ -67,16 +68,24 @@ export default async function scrapeQuoteJobs({ container }: ExecArgs) {
         })
         await svc.recordScrapeResult(job.id, payload)
         logger.info(`[quote-scrape] ${job.id} -> ${payload.outcome}`)
-      } catch (err: any) {
-        await svc.recordScrapeResult(job.id, {
-          outcome: "needs_manual",
-          last_error_kind: "network-error",
-        })
-        logger.warn(`[quote-scrape] ${job.id} errored: ${err?.message ?? err}`)
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err)
+        logger.warn(`[quote-scrape] ${job.id} errored: ${msg}`)
+        // Transient (wifi/timeout/playwright) — give it the same budget as a
+        // challenge rather than dumping straight to manual on one blip.
+        if (attemptNo >= MAX_ATTEMPTS) {
+          await svc.recordScrapeResult(job.id, {
+            outcome: "needs_manual",
+            last_error_kind: "network-error",
+          })
+        } else {
+          await svc.requeueQuoteJob(job.id)
+        }
       }
     }
-  } catch (err: any) {
-    await sendTelegram(`❌ quote-scrape daemon tick failed: ${err?.message ?? err}`)
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    await sendTelegram(`❌ quote-scrape daemon tick failed: ${msg}`)
     throw err
   } finally {
     await fetcher.close()
