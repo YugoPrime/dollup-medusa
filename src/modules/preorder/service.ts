@@ -419,6 +419,18 @@ class PreorderModuleService extends MedusaService({
     return { ...request, items }
   }
 
+  /** Admin list: requests, newest first, optionally filtered by status. */
+  async listQuoteRequests(
+    opts: { status?: string | string[]; limit?: number } = {},
+  ): Promise<any[]> {
+    const filters: Record<string, unknown> = {}
+    if (opts.status) filters.status = opts.status
+    return (this as any).listPreorderQuoteRequests(filters, {
+      take: opts.limit ?? 200,
+      order: { created_at: "DESC" },
+    })
+  }
+
   /**
    * Admin inline manual quote: owner types the SHEIN USD price, we run the same
    * pricing math the daemon would and write a binding snapshot.
