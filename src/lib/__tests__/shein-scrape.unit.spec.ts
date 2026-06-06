@@ -48,4 +48,24 @@ describe("buildQuotePayload", () => {
     const out = await buildQuotePayload(oos, { previewPrice: async (u) => fakePreview(u), settingsSnapshot: { id: "s" } })
     expect(out.outcome).toBe("failed")
   })
+
+  it("already-absolute https thumbnail passes through unchanged", async () => {
+    const html = HTML_OK.replace("//img.ltwebstatic.com/a.jpg", "https://img.ltwebstatic.com/a.jpg")
+    const out = await buildQuotePayload(html, { previewPrice: async (u) => fakePreview(u), settingsSnapshot: { id: "s" } })
+    expect(out.scraped_thumbnail).toBe("https://img.ltwebstatic.com/a.jpg")
+  })
+
+  it("non-finite price -> needs_manual/parse-fail", async () => {
+    const html = HTML_OK.replace(/"price":"12.50"/g, '"price":"N/A"')
+    const out = await buildQuotePayload(html, { previewPrice: async (u) => fakePreview(u), settingsSnapshot: { id: "s" } })
+    expect(out.outcome).toBe("needs_manual")
+    expect(out.last_error_kind).toBe("parse-fail")
+  })
+
+  it("empty image array -> null thumbnail, still quoted", async () => {
+    const html = HTML_OK.replace('"image":["//img.ltwebstatic.com/a.jpg"]', '"image":[]')
+    const out = await buildQuotePayload(html, { previewPrice: async (u) => fakePreview(u), settingsSnapshot: { id: "s" } })
+    expect(out.outcome).toBe("quoted")
+    expect(out.scraped_thumbnail).toBeNull()
+  })
 })
