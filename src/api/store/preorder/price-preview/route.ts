@@ -27,8 +27,9 @@ export const GET = async (req: MedusaRequest, res: MedusaResponse) => {
       breakdown: preview,
     })
   } catch (err) {
-    res
-      .status(400)
-      .json({ message: (err as Error)?.message ?? "failed" })
+    const e = err as Error & { type?: string }
+    // MedusaError (bad input) -> 400; anything else (DB/infra) -> 500.
+    const status = e?.type ? 400 : 500
+    res.status(status).json({ message: e?.message ?? "failed" })
   }
 }

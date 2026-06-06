@@ -226,12 +226,13 @@ class PreorderModuleService extends MedusaService({
     clientIp?: string | null
     notes?: string | null
     now?: Date
-  }): Promise<{ requestId: string; itemCount: number; dropped: number }> {
+  }): Promise<{ requestId: string; itemCount: number; dropped: number; invalidCount: number }> {
     const now = input.now ?? new Date()
     const settings = await this.getSettings()
 
     const { urls, dropped } = parseQuoteUrlsCapped(input.rawUrls, MAX_LINKS_PER_REQUEST)
     const valid = urls.filter((u) => isValidSheinUrl(u))
+    const invalidCount = urls.length - valid.length
     if (valid.length === 0) {
       throw new MedusaError(
         MedusaError.Types.INVALID_DATA,
@@ -251,6 +252,10 @@ class PreorderModuleService extends MedusaService({
         throw new MedusaError(MedusaError.Types.NOT_ALLOWED, "rate_limited")
       }
     }
+
+    // NOTE: settings.submissions_per_day_total (global daily cap) is NOT yet
+    // enforced here — deferred to the store-route layer in Plan B. The per-IP
+    // hourly limit above is the only cap active in this foundation layer.
 
     const daemonOnline = isDaemonOnline(
       settings.shein_daemon_last_seen_at
@@ -279,7 +284,7 @@ class PreorderModuleService extends MedusaService({
       })),
     )
 
-    return { requestId: request.id, itemCount: valid.length, dropped }
+    return { requestId: request.id, itemCount: valid.length, dropped, invalidCount }
   }
 
   /** Daemon poll: oldest pending jobs first. */
@@ -304,12 +309,13 @@ class PreorderModuleService extends MedusaService({
   async claimQuoteJob(itemId: string, now: Date = new Date()): Promise<boolean> {
     const [item] = await (this as any).listPreorderQuoteItems({ id: itemId })
     if (!item) return false
-    if (
-      item.status === "scraping" &&
-      !isLockStale(item.locked_at ? new Date(item.locked_at) : null, now, SCRAPE_LOCK_TTL_MIN)
-    ) {
-      return false
-    }
+    // Only pending or stale-scraping items are claimable. A quoted/failed/
+    // needs_manual/reserved item must NOT be clobbered back to scraping.
+    const claimable =
+      item.status === "pending" ||
+      (item.status === "scraping" &&
+        isLockStale(item.locked_at ? new Date(item.locked_at) : null, now, SCRAPE_LOCK_TTL_MIN))
+    if (!claimable) return false
     await (this as any).updatePreorderQuoteItems({
       id: itemId,
       status: "scraping",
@@ -363,8 +369,12 @@ class PreorderModuleService extends MedusaService({
     await this.recomputeRequestStatus(item.request_id)
   }
 
-  /** Re-roll a request's status from its items. */
+  /** Re-roll a request's status from its items. Never resurrects a request that
+   *  has already reached a terminal owner-set status (expired/abandoned). */
   async recomputeRequestStatus(requestId: string): Promise<void> {
+    const [request] = await (this as any).listPreorderQuoteRequests({ id: requestId })
+    if (!request) return
+    if (request.status === "expired" || request.status === "abandoned") return
     const items = await (this as any).listPreorderQuoteItems({
       request_id: requestId,
     })
@@ -414,8 +424,12 @@ class PreorderModuleService extends MedusaService({
         "priceUsd must be a positive number",
       )
     }
-    const preview = await this.previewPrice({ sheinPriceUsd: input.priceUsd })
+    // Read settings adjacent to the price computation so the snapshot reflects
+    // the same fx/handling used by previewPrice (best-effort; previewPrice reads
+    // settings internally — a separate edit between these two lines is the only
+    // gap, acceptable for a solo-admin store).
     const settings = await this.getSettings()
+    const preview = await this.previewPrice({ sheinPriceUsd: input.priceUsd })
     await this.recordScrapeResult(itemId, {
       outcome: "quoted",
       scraped_price_usd: input.priceUsd,
