@@ -54,6 +54,58 @@ moduleIntegrationTestRunner<PreorderModuleService>({
         })
       })
 
+      describe("recomputeRequestStatus", () => {
+        it("does NOT change status when request is already 'expired'", async () => {
+          const svc = service as any
+          const request = await svc.createPreorderQuoteRequests({
+            contact: { whatsapp: "+23050000000" },
+            items_count: 1,
+            status: "expired",
+          })
+          // A late daemon result lands a quoted item on an already-expired request.
+          await svc.createPreorderQuoteItems([
+            {
+              request_id: request.id,
+              position: 0,
+              shein_url: "https://shein.com/p/1",
+              status: "quoted",
+            },
+          ])
+
+          await service.recomputeRequestStatus(request.id)
+
+          const [after] = await svc.listPreorderQuoteRequests({ id: request.id })
+          expect(after.status).toBe("expired")
+        })
+      })
+
+      describe("claimQuoteJob", () => {
+        it("returns false and does not update when item.status is 'quoted'", async () => {
+          const svc = service as any
+          const request = await svc.createPreorderQuoteRequests({
+            contact: { whatsapp: "+23050000001" },
+            items_count: 1,
+            status: "quoted",
+          })
+          const [item] = await svc.createPreorderQuoteItems([
+            {
+              request_id: request.id,
+              position: 0,
+              shein_url: "https://shein.com/p/2",
+              status: "quoted",
+              attempts: 0,
+            },
+          ])
+
+          const claimed = await service.claimQuoteJob(item.id)
+
+          expect(claimed).toBe(false)
+          const [after] = await svc.listPreorderQuoteItems({ id: item.id })
+          expect(after.status).toBe("quoted")
+          expect(Number(after.attempts ?? 0)).toBe(0)
+        })
+      })
+
       describe("previewPrice", () => {
         it("uses current settings to compute price", async () => {
           await service.updateSettings({

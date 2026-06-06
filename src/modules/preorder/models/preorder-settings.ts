@@ -24,6 +24,9 @@ const PreorderSettings = model.define("PreorderSettings", {
   deposit_percent: model.number().default(75),
   submissions_per_ip_per_hour: model.number().default(5),
   submissions_per_day_total: model.number().default(50),
+  // Liveness heartbeat written by the SHEIN headless daemon every poll.
+  // Used to detect daemon-offline so new quote items go straight to manual.
+  shein_daemon_last_seen_at: model.dateTime().nullable(),
 })
 
 export default PreorderSettings

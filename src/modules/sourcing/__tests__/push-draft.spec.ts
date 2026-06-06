@@ -48,7 +48,7 @@ medusaIntegrationTestRunner({
 
       it("creates Medusa products with assigned Refs and inventory", async () => {
         const { draftId, itemAId, itemBId } = await fullySetUpDraft()
-        const result = await service.pushDraftToMedusa(draftId)
+        const result = await service.pushDraftToMedusa(draftId, container)
         expect(result.failed).toEqual([])
         expect(result.pushed).toHaveLength(2)
         const a = result.pushed.find((p) => p.draft_item_id === itemAId)
@@ -78,7 +78,7 @@ medusaIntegrationTestRunner({
 
       it("locks pushed items from edits", async () => {
         const { draftId, itemAId } = await fullySetUpDraft()
-        await service.pushDraftToMedusa(draftId)
+        await service.pushDraftToMedusa(draftId, container)
         await expect(service.setItemPrice(itemAId, 9999)).rejects.toThrow(
           /locked|published/i,
         )
@@ -86,8 +86,8 @@ medusaIntegrationTestRunner({
 
       it("idempotent: re-pushing skips already-published items", async () => {
         const { draftId } = await fullySetUpDraft()
-        const first = await service.pushDraftToMedusa(draftId)
-        const second = await service.pushDraftToMedusa(draftId)
+        const first = await service.pushDraftToMedusa(draftId, container)
+        const second = await service.pushDraftToMedusa(draftId, container)
         expect(first.pushed).toHaveLength(2)
         expect(second.pushed).toHaveLength(0)
         expect(second.failed).toEqual([])
@@ -95,7 +95,7 @@ medusaIntegrationTestRunner({
 
       it("creates products in 'draft' status; operator flips via goLive", async () => {
         const { draftId, itemAId } = await fullySetUpDraft()
-        const result = await service.pushDraftToMedusa(draftId)
+        const result = await service.pushDraftToMedusa(draftId, container)
         const aProductId = result.pushed.find(
           (p) => p.draft_item_id === itemAId,
         )?.product_id
@@ -109,7 +109,7 @@ medusaIntegrationTestRunner({
 
       it("creates products with Color/Size when colors present, Size only when not", async () => {
         const { draftId, itemAId, itemBId } = await fullySetUpDraft()
-        const result = await service.pushDraftToMedusa(draftId)
+        const result = await service.pushDraftToMedusa(draftId, container)
         const aProductId = result.pushed.find((p) => p.draft_item_id === itemAId)?.product_id
         const bProductId = result.pushed.find((p) => p.draft_item_id === itemBId)?.product_id
         expect(aProductId).toBeDefined()

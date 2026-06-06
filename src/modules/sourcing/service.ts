@@ -17,6 +17,25 @@ import DraftVariant from "./models/draft-variant"
 import DraftCostHistory from "./models/draft-cost-history"
 import { nextRefFromHandles } from "./lib/ref-allocator"
 
+/**
+ * Minimal shape of the Medusa `query` service (query.graph). Passed into
+ * ref/push methods from the request scope — see getNextProductRef for why it
+ * can't be resolved from the module's own container.
+ */
+export type QueryService = {
+  graph: (input: {
+    entity: string
+    fields: string[]
+    filters?: Record<string, unknown>
+    pagination?: { skip: number; take: number }
+  }) => Promise<{ data: Array<Record<string, unknown>> }>
+}
+
+/** Container shape we need from req.scope for the push path. */
+export type RequestContainer = {
+  resolve: (key: string) => unknown
+}
+
 export type CreateSupplierInput = {
   name: string
   contact_handle?: string | null
@@ -896,26 +915,16 @@ class SourcingModuleService extends MedusaService({
    * numbering at IS1 instead of continuing past the live catalog's max
    * (is2389), risking handle collisions on push.
    *
-   * `ContainerRegistrationKeys.QUERY` DOES resolve here (the push path already
-   * uses it for query.graph). So we page product handles via query.graph,
-   * filter to `is\d+` in JS, and reuse `nextRefFromHandles`. ~500 products,
-   * paged 1000 at a time — one round trip in practice.
+   * The `query` service is NOT resolvable from this module's own container
+   * (`this.__container__` is the module-scoped cradle, where every resolve —
+   * even "query" — throws "Could not resolve 'resolve'"). It MUST be passed in
+   * from the request scope (`req.scope`), which is the only container that has
+   * `query` registered. Callers obtain it via `req.scope.resolve(QUERY)`.
    *
-   * Throws if QUERY is unresolvable, so callers fail loudly rather than
-   * silently producing colliding IS1 refs.
+   * Pages product handles via query.graph, filters to `is\d+` in JS, and
+   * reuses `nextRefFromHandles`. ~500 products, paged 1000 at a time.
    */
-  private async getNextProductRef(): Promise<string> {
-    const container = (this as unknown as { __container__: unknown })
-      .__container__ as { resolve: (key: string) => unknown }
-    const query = container.resolve(ContainerRegistrationKeys.QUERY) as {
-      graph: (input: {
-        entity: string
-        fields: string[]
-        filters?: Record<string, unknown>
-        pagination?: { skip: number; take: number }
-      }) => Promise<{ data: Array<{ handle: string | null }> }>
-    }
-
+  private async getNextProductRef(query: QueryService): Promise<string> {
     const handles: string[] = []
     const take = 1000
     for (let skip = 0; ; skip += take) {
@@ -925,7 +934,10 @@ class SourcingModuleService extends MedusaService({
         filters: { handle: { $like: "is%" } },
         pagination: { skip, take },
       })
-      for (const p of data) if (p.handle) handles.push(p.handle)
+      for (const p of data) {
+        const handle = p.handle
+        if (typeof handle === "string" && handle) handles.push(handle)
+      }
       if (data.length < take) break
     }
 
@@ -948,6 +960,7 @@ class SourcingModuleService extends MedusaService({
    */
   async assignRefsForDraft(
     draftOrderId: string,
+    query: QueryService,
   ): Promise<Array<{ id: string; ref: string }>> {
     const svc = this as unknown as {
       listDraftItems: (
@@ -960,7 +973,7 @@ class SourcingModuleService extends MedusaService({
     // returns `IS${max+1}`; subtract 1 back to the raw max so we can also fold
     // in the max ref already sitting on unpushed draft items below.
     let productMax = 0
-    const nextFromProducts = await this.getNextProductRef()
+    const nextFromProducts = await this.getNextProductRef(query)
     const pm = nextFromProducts.match(/^IS(\d+)$/)
     if (pm) productMax = parseInt(pm[1], 10) - 1
 
@@ -1070,11 +1083,15 @@ class SourcingModuleService extends MedusaService({
    *
    * Idempotent: items with `published_product_id` already set are skipped.
    *
-   * Container-using ops (core-flows + query.graph) read `this.__container__`
-   * which the MedusaService base class populates from its constructor — no
-   * need to override the constructor.
+   * Container-using ops (core-flows + query.graph) need the REQUEST-scope
+   * container, passed in from the route as `req.scope`. The module's own
+   * `this.__container__` cannot resolve `query` (see getNextProductRef).
    */
-  async pushDraftToMedusa(draftOrderId: string): Promise<PushDraftResult> {
+  async pushDraftToMedusa(
+    draftOrderId: string,
+    container: RequestContainer,
+  ): Promise<PushDraftResult> {
+    const query = container.resolve(ContainerRegistrationKeys.QUERY) as QueryService
     const draft = await this.retrieveDraft(draftOrderId)
     // Status gate intentionally dropped: pushing creates products in `draft`
     // status, invisible to the storefront. Operator flips to `published` per
@@ -1087,15 +1104,6 @@ class SourcingModuleService extends MedusaService({
         MedusaError.Types.INVALID_DATA,
         `Push validation failed: ${JSON.stringify(failing)}`,
       )
-    }
-
-    // MedusaService base class assigns the DI container to `this.__container__`
-    // in its constructor; v2 doesn't expose a public accessor. We need the
-    // container to invoke core-flow workflows and query.graph, neither of
-    // which are reachable from MedusaService alone.
-    const container = (this as unknown as { __container__: unknown })
-      .__container__ as {
-      resolve: (key: string) => unknown
     }
 
     const svc = this as unknown as {
@@ -1136,7 +1144,7 @@ class SourcingModuleService extends MedusaService({
       let assignedRef: string | null = null
       let createdProductId: string | null = null
       try {
-        assignedRef = await this.getNextProductRef()
+        assignedRef = await this.getNextProductRef(query)
         await this.assignItemRef(item.id, assignedRef)
 
         const variants = (await svc.listDraftVariants({
@@ -1259,16 +1267,7 @@ class SourcingModuleService extends MedusaService({
           skuToQty.set(sku, Number(v.qty ?? 0))
         }
 
-        const remoteQuery = container.resolve(
-          ContainerRegistrationKeys.QUERY,
-        ) as {
-          graph: (input: {
-            entity: string
-            fields: string[]
-            filters?: Record<string, unknown>
-          }) => Promise<{ data: unknown[] }>
-        }
-        const { data: variantData } = await remoteQuery.graph({
+        const { data: variantData } = await query.graph({
           entity: "variant",
           fields: ["id", "sku", "inventory_items.inventory.id"],
           filters: { product_id: productId },
@@ -1347,18 +1346,14 @@ class SourcingModuleService extends MedusaService({
   }
 
   /**
-   * Preview the next IS ref that will be allocated on push. Uses the same
-   * SQL path as the real allocator but doesn't write anything. Returns null
-   * if container/manager isn't accessible (in which case the admin just
-   * hides the preview pill — push itself is unaffected).
-   *
-   * Lives on the service rather than in the route because routes can't
-   * resolve "manager" from req.scope on this Medusa version; the service's
-   * MedusaService base class gives us __container__ which can.
+   * Preview the next IS ref that will be allocated on push. Same read path as
+   * the real allocator but writes nothing. Returns null if anything fails (the
+   * admin just hides the preview pill — push itself is unaffected). `query`
+   * comes from the request scope; see getNextProductRef.
    */
-  async previewNextRef(): Promise<string | null> {
+  async previewNextRef(query: QueryService): Promise<string | null> {
     try {
-      return await this.getNextProductRef()
+      return await this.getNextProductRef(query)
     } catch {
       return null
     }

@@ -3,8 +3,11 @@ import type {
   MedusaResponse,
 } from "@medusajs/framework/http"
 
+import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
+
 import { SOURCING_MODULE } from "../../../../../../modules/sourcing"
 import type SourcingModuleService from "../../../../../../modules/sourcing/service"
+import type { QueryService } from "../../../../../../modules/sourcing/service"
 
 export const GET = async (
   req: AuthenticatedMedusaRequest,
@@ -14,10 +17,10 @@ export const GET = async (
     const id = String(req.params.id)
     const service = req.scope.resolve<SourcingModuleService>(SOURCING_MODULE)
     const validation = await service.validateForPush(id)
-    // Preview is best-effort; service returns null if container manager isn't
-    // accessible. The admin hides the preview pill in that case — push itself
-    // uses a different code path and is unaffected.
-    const nextRef = await service.previewNextRef()
+    // Preview is best-effort; service returns null on any failure, in which
+    // case the admin hides the preview pill — push itself is unaffected.
+    const query = req.scope.resolve(ContainerRegistrationKeys.QUERY) as QueryService
+    const nextRef = await service.previewNextRef(query)
     res.json({ validation, next_ref_preview: nextRef })
   } catch (err) {
     const e = err as Error
