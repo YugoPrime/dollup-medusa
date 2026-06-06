@@ -2,6 +2,7 @@ import type {
   AuthenticatedMedusaRequest,
   MedusaResponse,
 } from "@medusajs/framework/http"
+import { MedusaError } from "@medusajs/framework/utils"
 
 import { PREORDER_MODULE } from "../../../../../../../../modules/preorder"
 import type PreorderModuleService from "../../../../../../../../modules/preorder/service"
@@ -22,6 +23,10 @@ export const POST = async (
     await svc.setManualQuote(req.params.itemId, { priceUsd })
     res.json({ ok: true })
   } catch (err) {
+    if (err instanceof MedusaError && err.type === MedusaError.Types.NOT_FOUND) {
+      res.status(404).json({ message: (err as Error).message })
+      return
+    }
     res.status(400).json({ message: (err as Error)?.message ?? "failed" })
   }
 }
