@@ -33,6 +33,7 @@ import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
 import { updateProductsWorkflow } from "@medusajs/medusa/core-flows"
 
 import { extractJsonLd } from "../lib/shein-extract"
+import { PlaywrightSheinFetcher, classifyFetchOutcome } from "../lib/shein-fetcher"
 import {
   outOfStockMessage,
   removedMessage,
@@ -41,9 +42,6 @@ import {
 } from "../lib/preorder-availability-messages"
 import { sendTelegram } from "../lib/telegram"
 
-const USER_AGENT =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-const FETCH_TIMEOUT_MS = 10_000
 const CIRCUIT_BREAK_THRESHOLD = 0.3 // 30%
 const FAILURE_ALERT_THRESHOLD = 3
 
@@ -73,6 +71,16 @@ export default async function preorderAvailabilityCheck(
   container: MedusaContainer,
 ): Promise<void> {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER)
+
+  // SHEIN now requires a real browser (JS captcha). This sweep only runs where
+  // a browser is available — the laptop daemon sets AVAILABILITY_SWEEP_ENABLED.
+  // On Coolify the flag is unset, so the cron is an intentional no-op (it would
+  // otherwise classify every product as "blocked").
+  if (process.env.AVAILABILITY_SWEEP_ENABLED !== "true") {
+    logger.info("[preorder-availability] skipped — no browser (set AVAILABILITY_SWEEP_ENABLED=true on the daemon host)")
+    return
+  }
+
   const query = container.resolve(ContainerRegistrationKeys.QUERY)
 
   const { data: rows } = await query.graph({
@@ -97,10 +105,13 @@ export default async function preorderAvailabilityCheck(
     `[preorder-availability] checking ${preorderPublished.length} products`,
   )
 
+  const fetcher = new PlaywrightSheinFetcher()
+
   let blocked = 0
   const blockedTitles: string[] = []
   const movedToDraft: string[] = []
 
+  try {
   for (const p of preorderPublished) {
     // Gather product-level + every variant's SHEIN URL (per-color siblings).
     const productSheinUrl: string | undefined = p.metadata?.shein_url
@@ -123,7 +134,7 @@ export default async function preorderAvailabilityCheck(
     const results = await Promise.all(
       distinctUrls.map(async (u): Promise<CheckResult> => {
         try {
-          return await checkSheinUrl(u)
+          return await checkSheinUrl(u, fetcher)
         } catch (err: any) {
           return {
             kind: "network-error",
@@ -256,41 +267,38 @@ export default async function preorderAvailabilityCheck(
   logger.info(
     `[preorder-availability] done. moved-to-draft=${movedToDraft.length}, blocked=${blocked}`,
   )
+  } finally {
+    await fetcher.close()
+  }
 }
 
-async function checkSheinUrl(url: string): Promise<CheckResult> {
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
-  try {
-    const res = await fetch(url, {
-      method: "GET",
-      headers: {
-        "User-Agent": USER_AGENT,
-        Accept: "text/html,application/xhtml+xml",
-        "Accept-Language": "en-US,en;q=0.9",
-      },
-      signal: controller.signal,
-      redirect: "follow",
-    })
-    // SHEIN's anti-bot redirects to /risk/challenge — that's a "blocked" signal.
-    if (res.url && res.url.includes("/risk/challenge")) {
-      return { kind: "blocked", status: res.status }
+async function checkSheinUrl(
+  url: string,
+  fetcher: PlaywrightSheinFetcher,
+): Promise<CheckResult> {
+  // Browser-based fetch — SHEIN's JS captcha blocks plain fetch(). The fetcher
+  // loads the PDP in real Chromium, lets the anti-bot challenge self-resolve,
+  // and returns the rendered HTML + final status/URL.
+  const raw = await fetcher.fetchPdp(url)
+  const outcome = classifyFetchOutcome(raw)
+  switch (outcome.kind) {
+    case "removed":
+      return { kind: "removed" }
+    case "challenge":
+      // Anti-bot wall (challenge redirect or 4xx/5xx behind it) — "blocked".
+      return { kind: "blocked", status: raw.status }
+    case "parse-fail":
+      // 200 OK but no goodsDetailSchema — same as the old parse-fail branch.
+      return { kind: "parse-fail" }
+    case "ok": {
+      const pg = extractJsonLd(raw.html)
+      if (!pg) return { kind: "parse-fail" }
+      // Available if any variant is InStock; out otherwise.
+      const anyInStock = pg.hasVariant.some(
+        (v) => v.offers.availability === "https://schema.org/InStock",
+      )
+      return anyInStock ? { kind: "in-stock" } : { kind: "out-of-stock" }
     }
-    if (res.status === 404) return { kind: "removed" }
-    if (res.status === 403 || res.status === 429) {
-      return { kind: "blocked", status: res.status }
-    }
-    if (!res.ok) return { kind: "blocked", status: res.status }
-    const html = await res.text()
-    const pg = extractJsonLd(html)
-    if (!pg) return { kind: "parse-fail" }
-    // Available if any variant is InStock; out otherwise.
-    const anyInStock = pg.hasVariant.some(
-      (v) => v.offers.availability === "https://schema.org/InStock",
-    )
-    return anyInStock ? { kind: "in-stock" } : { kind: "out-of-stock" }
-  } finally {
-    clearTimeout(timeout)
   }
 }
 
