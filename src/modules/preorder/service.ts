@@ -326,6 +326,15 @@ class PreorderModuleService extends MedusaService({
     return true
   }
 
+  /** Return a job to the pending pool for another daemon tick (pre-budget-exhaustion retry). */
+  async requeueQuoteJob(itemId: string): Promise<void> {
+    await (this as any).updatePreorderQuoteItems({
+      id: itemId,
+      status: "pending",
+      locked_at: null,
+    })
+  }
+
   /**
    * Record a daemon (or manual) scrape result and bubble the request status.
    */
