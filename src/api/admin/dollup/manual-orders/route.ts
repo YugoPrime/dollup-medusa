@@ -2,8 +2,11 @@ import type {
   AuthenticatedMedusaRequest,
   MedusaResponse,
 } from "@medusajs/framework/http"
-import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
-import { createOrderWorkflow } from "@medusajs/medusa/core-flows"
+import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils"
+import {
+  createOrderWorkflow,
+  createReservationsWorkflow,
+} from "@medusajs/medusa/core-flows"
 import {
   DELIVERY_KEYS,
   DELIVERY_MAP,
@@ -294,6 +297,96 @@ export const POST = async (
 
     const created = order as { id: string; display_id?: number | string }
 
+    // ---- reserve inventory for each line item ----
+    // createOrderWorkflow does NOT create inventory reservations (unlike cart
+    // completion). Without a reservation, "Mark Shipped" fails with
+    // "No stock reservation found for item ...". Create them here so manual
+    // orders behave like storefront orders: stock is held + deducted on fulfil.
+    let reservationsOk = true
+    try {
+      const { data: orderItems2 } = await query.graph({
+        entity: "order",
+        fields: [
+          "id",
+          "items.id",
+          "items.variant_id",
+          "items.variant.manage_inventory",
+          "items.variant.inventory_items.inventory_item_id",
+          "items.variant.inventory_items.required_quantity",
+          "items.variant.inventory_items.inventory.location_levels.location_id",
+        ],
+        filters: { id: created.id },
+      })
+      const fullOrder = orderItems2?.[0] as
+        | {
+            items?: Array<{
+              id: string
+              variant?: {
+                manage_inventory?: boolean
+                inventory_items?: Array<{
+                  inventory_item_id: string
+                  required_quantity?: number
+                  inventory?: {
+                    location_levels?: Array<{ location_id: string }>
+                  }
+                }>
+              } | null
+            }>
+          }
+        | undefined
+
+      // query.graph does NOT hydrate order.items.quantity, and OrderLineItem
+      // has no quantity column (it lives on the OrderItem join). retrieveOrder
+      // with the items relation hydrates quantity per line.
+      const orderModule = req.scope.resolve(Modules.ORDER)
+      const ordWithQty = (await orderModule.retrieveOrder(created.id, {
+        select: ["id"],
+        relations: ["items"],
+      })) as { items?: Array<{ id: string; quantity: number }> }
+      const qtyById = new Map(
+        (ordWithQty.items ?? []).map((l) => [l.id, Number(l.quantity)]),
+      )
+
+      const reservations: Array<{
+        line_item_id: string
+        inventory_item_id: string
+        location_id: string
+        quantity: number
+      }> = []
+
+      for (const it of fullOrder?.items ?? []) {
+        const v = it.variant
+        // Skip variants that don't track inventory — nothing to reserve.
+        if (!v || v.manage_inventory === false) continue
+        const lineQty = qtyById.get(it.id)
+        if (!lineQty || !Number.isFinite(lineQty)) continue
+        for (const inv of v.inventory_items ?? []) {
+          const locationId =
+            inv.inventory?.location_levels?.[0]?.location_id
+          if (!locationId) continue
+          reservations.push({
+            line_item_id: it.id,
+            inventory_item_id: inv.inventory_item_id,
+            location_id: locationId,
+            quantity: lineQty * (inv.required_quantity ?? 1),
+          })
+        }
+      }
+
+      if (reservations.length > 0) {
+        await createReservationsWorkflow(req.scope).run({
+          input: { reservations },
+        })
+      }
+    } catch (resErr) {
+      reservationsOk = false
+      logger.warn(
+        `[admin/dollup/manual-orders] order ${created.id} created but reserving inventory failed: ${
+          (resErr as Error).message
+        } — fulfilment may fail until stock is reserved/adjusted manually.`,
+      )
+    }
+
     const itemsSubtotal = lineItems.reduce(
       (sum, li) => sum + li.item_price * li.quantity,
       0,
@@ -311,6 +404,7 @@ export const POST = async (
       total_charged: itemsSubtotal + deliveryFee,
       delivery_method: delivery.metadata_label,
       paid: isPaid,
+      inventory_reserved: reservationsOk,
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : "unknown error"
