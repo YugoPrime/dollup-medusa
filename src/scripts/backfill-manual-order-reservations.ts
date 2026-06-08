@@ -13,8 +13,18 @@ import { createReservationsWorkflow } from "@medusajs/medusa/core-flows"
  *   set -a; . ./.env.local-render; set +a
  *   yarn medusa exec ./src/scripts/backfill-manual-order-reservations.ts
  *
- * Optional: ORDER_DISPLAY_ID=211 to target a single order by its # number.
- * Delete this script after the backfill is done.
+ * Env flags:
+ *   ORDER_DISPLAY_ID=211  target a single order by its # number
+ *   DRY_RUN=true          report what WOULD be reserved, write nothing
+ *   FORCE=true            also fix orders marked fulfilled/delivered that
+ *                         never got a real Medusa fulfilment (so still lack
+ *                         reservations). Use WITH ORDER_DISPLAY_ID.
+ *
+ * Keep this script — it's the on-demand fix for any pre-fix order that hits
+ * "No stock reservation found" on ship/edit. Do NOT mass-run it across all old
+ * orders: many "pending" orders here were already delivered to customers via
+ * the DM admin (metadata.dm_status), never fulfilled in Medusa — reserving
+ * them retroactively can lock phantom stock. Fix on-demand, per order #.
  */
 export default async function backfill({ container }: { container: any }) {
   const query = container.resolve(ContainerRegistrationKeys.QUERY)
@@ -70,12 +80,21 @@ export default async function backfill({ container }: { container: any }) {
   let ordersTouched = 0
   let reservationsCreated = 0
 
+  // FORCE=true bypasses the fulfilled/delivered skip — needed for orders that
+  // were marked delivered in the admin WITHOUT a Medusa fulfilment (so they
+  // still lack reservations and re-trigger the error on edit). Only meaningful
+  // together with ORDER_DISPLAY_ID so you don't sweep all delivered orders.
+  const force = process.env.FORCE === "true"
+  const dryRun = process.env.DRY_RUN === "true"
+
   for (const o of orders as Array<any>) {
     if (targetDisplayId != null && o.display_id !== targetDisplayId) continue
 
-    // Skip cancelled or already-fulfilled orders.
+    // Skip cancelled orders always.
     if (o.status === "canceled" || o.status === "cancelled") continue
+    // Skip already-fulfilled orders unless FORCE.
     if (
+      !force &&
       o.fulfillment_status &&
       ["fulfilled", "shipped", "delivered", "partially_fulfilled"].includes(
         o.fulfillment_status,
@@ -116,6 +135,15 @@ export default async function backfill({ container }: { container: any }) {
 
     if (reservations.length === 0) continue
 
+    if (dryRun) {
+      ordersTouched++
+      reservationsCreated += reservations.length
+      logger.info(
+        `[DRY RUN] #${o.display_id} (${o.id}, status=${o.status}/${o.fulfillment_status ?? "n/a"}): WOULD create ${reservations.length} reservation(s)`,
+      )
+      continue
+    }
+
     try {
       await createReservationsWorkflow(container).run({
         input: { reservations },
@@ -133,6 +161,10 @@ export default async function backfill({ container }: { container: any }) {
   }
 
   logger.info(
-    `\nBackfill done. Orders touched: ${ordersTouched}, reservations created: ${reservationsCreated}.`,
+    `\nBackfill ${dryRun ? "DRY RUN" : "done"}. Orders ${
+      dryRun ? "that would be touched" : "touched"
+    }: ${ordersTouched}, reservations ${
+      dryRun ? "that would be created" : "created"
+    }: ${reservationsCreated}.`,
   )
 }
