@@ -138,6 +138,9 @@ module.exports = defineConfig({
       resolve: "./src/modules/stories-render",
     },
     {
+      resolve: "./src/modules/feed-posts",
+    },
+    {
       resolve: "./src/modules/store-config",
     },
     {

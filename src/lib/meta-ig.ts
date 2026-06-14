@@ -112,6 +112,94 @@ export async function submitStoryContainer(
   return result.id
 }
 
+/**
+ * Creates an image media container for a FEED post (not a story). Used both for
+ * single-image posts (with caption) and as a carousel child (is_carousel_item).
+ * Returns the container creation_id. Instagram requires the image to be a
+ * publicly reachable JPEG.
+ */
+export async function submitImageContainer(
+  args: { imageUrl: string; caption?: string; isCarouselItem?: boolean },
+  cfg: MetaIgConfig = readMetaIgEnv() ?? throwUnconfigured(),
+): Promise<string> {
+  const params: Record<string, string> = { image_url: args.imageUrl }
+  if (args.isCarouselItem) params.is_carousel_item = "true"
+  if (args.caption != null) params.caption = args.caption
+  const result = await call<{ id: string }>(`${cfg.igUserId}/media`, cfg, {
+    method: "POST",
+    params,
+  })
+  return result.id
+}
+
+/**
+ * Creates a CAROUSEL parent container from already-created child container ids
+ * (2–10). The caption lives on the parent. Returns the parent creation_id.
+ */
+export async function submitCarouselContainer(
+  args: { childrenIds: string[]; caption?: string },
+  cfg: MetaIgConfig = readMetaIgEnv() ?? throwUnconfigured(),
+): Promise<string> {
+  if (args.childrenIds.length < 2) {
+    throw new MetaIgError(
+      "Carousel needs at least 2 children; use submitImageContainer for a single image",
+      400,
+    )
+  }
+  const params: Record<string, string> = {
+    media_type: "CAROUSEL",
+    children: args.childrenIds.join(","),
+  }
+  if (args.caption != null) params.caption = args.caption
+  const result = await call<{ id: string }>(`${cfg.igUserId}/media`, cfg, {
+    method: "POST",
+    params,
+  })
+  return result.id
+}
+
+/**
+ * High-level: publish a single image OR a carousel of images to the IG feed.
+ * Builds child containers as needed, waits for processing, then publishes.
+ * Returns the published media id.
+ */
+export async function publishFeedImages(
+  args: { imageUrls: string[]; caption: string },
+  cfg: MetaIgConfig = readMetaIgEnv() ?? throwUnconfigured(),
+): Promise<string> {
+  const urls = args.imageUrls.filter((u) => typeof u === "string" && u.length > 0)
+  if (urls.length === 0) {
+    throw new MetaIgError("No image URLs to publish", 400)
+  }
+
+  let creationId: string
+  if (urls.length === 1) {
+    creationId = await submitImageContainer(
+      { imageUrl: urls[0], caption: args.caption },
+      cfg,
+    )
+  } else {
+    const childrenIds: string[] = []
+    for (const url of urls.slice(0, 10)) {
+      childrenIds.push(
+        await submitImageContainer({ imageUrl: url, isCarouselItem: true }, cfg),
+      )
+    }
+    creationId = await submitCarouselContainer(
+      { childrenIds, caption: args.caption },
+      cfg,
+    )
+  }
+
+  // Image containers normally process in a second or two, but the container can
+  // briefly report IN_PROGRESS — reuse the story poller (short timeout).
+  await pollContainerUntilReady(
+    { creationId, timeoutMs: 60_000, pollIntervalMs: 2000 },
+    cfg,
+  )
+  return publishContainer({ creationId }, cfg)
+}
+
 export async function getContainerStatus(
   creationId: string,
   cfg: MetaIgConfig = readMetaIgEnv() ?? throwUnconfigured(),

@@ -260,6 +260,73 @@ export async function publishFbVideoStory(
   return finishResult.post_id
 }
 
+/**
+ * True only when FEED_CROSSPOST_FB === "true" AND FB credentials are present.
+ * Mirrors isFbCrosspostEnabled() but for the daily feed post.
+ */
+export function isFeedFbCrosspostEnabled(): boolean {
+  if (process.env.FEED_CROSSPOST_FB !== "true") return false
+  return isMetaFbConfigured()
+}
+
+/**
+ * Publishes a photo (or multi-photo) post to the Facebook Page *feed*.
+ *
+ * Single image: POST /{page}/photos with url + caption (published=true) →
+ * returns post_id. Multiple: upload each photo unpublished
+ * (POST /{page}/photos?published=false&url=…) to collect media fbids, then
+ * POST /{page}/feed with message + attached_media so they land as ONE post.
+ *
+ * Returns the FB post_id. Throws MetaFbError on failure (caller treats FB as
+ * a soft cross-post, IG remains source of truth).
+ */
+export async function publishFbPhotoPost(
+  args: { imageUrls: string[]; caption: string },
+  cfg: MetaFbConfig = readMetaFbEnv() ?? throwUnconfigured(),
+): Promise<string> {
+  const urls = args.imageUrls.filter((u) => typeof u === "string" && u.length > 0)
+  if (urls.length === 0) {
+    throw new MetaFbError("No image URLs to publish to FB", 400)
+  }
+
+  if (urls.length === 1) {
+    const res = await call<{ id?: string; post_id?: string }>(
+      `${cfg.pageId}/photos`,
+      cfg,
+      {
+        method: "POST",
+        params: { url: urls[0], caption: args.caption, published: "true" },
+      },
+    )
+    const postId = res.post_id ?? res.id
+    if (!postId) throw new MetaFbError("FB photos returned no id", 502)
+    return postId
+  }
+
+  const mediaFbids: string[] = []
+  for (const url of urls) {
+    const res = await call<{ id?: string }>(`${cfg.pageId}/photos`, cfg, {
+      method: "POST",
+      params: { url, published: "false" },
+    })
+    if (res.id) mediaFbids.push(res.id)
+  }
+  if (mediaFbids.length === 0) {
+    throw new MetaFbError("FB unpublished photo upload returned no ids", 502)
+  }
+
+  const attached = mediaFbids.map((fbid) => ({ media_fbid: fbid }))
+  const feed = await call<{ id?: string }>(`${cfg.pageId}/feed`, cfg, {
+    method: "POST",
+    params: {
+      message: args.caption,
+      attached_media: JSON.stringify(attached),
+    },
+  })
+  if (!feed.id) throw new MetaFbError("FB feed returned no post id", 502)
+  return feed.id
+}
+
 async function uploadFbVideoStorySource(
   args: { uploadUrl: string; videoUrl: string; videoId: string },
   cfg: MetaFbConfig,
