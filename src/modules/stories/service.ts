@@ -5,6 +5,11 @@ import StorySlot from "./models/story-slot"
 import PublicationLog from "./models/publication-log"
 import StorySettings from "./models/story-settings"
 import { buildSnapshot, type ProductLike } from "./snapshot"
+import {
+  DEFAULT_WEIGHTING,
+  pickWeightedProduct,
+  type WeightingConfig,
+} from "./picker-weighting"
 
 export const STORY_SETTINGS_ID = "story_settings"
 
@@ -23,6 +28,11 @@ export type StorySettingsDTO = {
   default_distribution: Array<{ category_id: string; count: number }>
   default_schedule: string[]
   stock_alert_threshold: number
+  /** Auto-picker bias toward the newest collection (see picker-weighting.ts).
+   *  collection_boost is the weight multiplier for products created within
+   *  collection_boost_days; 1 = pure random. */
+  collection_boost: number
+  collection_boost_days: number
 }
 
 export type UpdateStorySettingsInput = Partial<Omit<StorySettingsDTO, "id">>
@@ -70,6 +80,8 @@ export const DEFAULT_STORY_SETTINGS: Omit<StorySettingsDTO, "id"> = {
   default_distribution: [],
   default_schedule: [],
   stock_alert_threshold: 0,
+  collection_boost: DEFAULT_WEIGHTING.collection_boost,
+  collection_boost_days: DEFAULT_WEIGHTING.collection_boost_days,
 }
 
 class StoriesModuleService extends MedusaService({
@@ -231,6 +243,7 @@ class StoriesModuleService extends MedusaService({
       productSource: (filter: { category_id?: string }) => Promise<ProductLike[]>
     },
     excluded: Set<string>,
+    weighting: WeightingConfig = DEFAULT_WEIGHTING,
   ): Promise<void> {
     const [plan] = await this.listStoryPlans({ id: planId })
     if (!plan) throw new Error(`Plan ${planId} not found`)
@@ -267,8 +280,11 @@ class StoriesModuleService extends MedusaService({
     const eligible = (p: ProductLike) =>
       p.variants.some((v) => v.inventory_quantity > 0) && !excluded.has(p.id)
 
-    const pickRandom = <T,>(arr: T[]): T | null =>
-      arr.length > 0 ? arr[Math.floor(Math.random() * arr.length)] : null
+    // Single `now` for the whole plan so every slot weights recency against the
+    // same instant (deterministic given a fixed rng in tests).
+    const now = Date.now()
+    const pick = (arr: ProductLike[]): ProductLike | null =>
+      pickWeightedProduct(arr, weighting, now)
 
     for (const { slot_index, category_id } of toFill) {
       const scheduledAt = resolveScheduledAt(
@@ -277,12 +293,12 @@ class StoriesModuleService extends MedusaService({
       )
 
       const inCategory = (await deps.productSource({ category_id })).filter(eligible)
-      let product = pickRandom(inCategory)
+      let product = pick(inCategory)
       let fallbackUsed = false
 
       if (!product) {
         const union = (await deps.productSource({})).filter(eligible)
-        product = pickRandom(union)
+        product = pick(union)
         fallbackUsed = product != null
       }
 
@@ -336,7 +352,7 @@ class StoriesModuleService extends MedusaService({
       if (s.plan_id === planId) continue
       if (s.product_id && !s.posted_at) excluded.add(s.product_id)
     }
-    await this.pickProductsForPlan(planId, deps, excluded)
+    await this.pickProductsForPlan(planId, deps, excluded, weightingFromSettings(settings))
   }
 
   async getStockAlerts(deps: {
@@ -496,6 +512,7 @@ class StoriesModuleService extends MedusaService({
     const settings = await this.getSettings()
     const excluded = new Set(await this.getExcludedProductIds(settings.anti_repeat_days))
 
+    const weighting = weightingFromSettings(settings)
     const created: StoryPlanDTO[] = []
     for (const date of dates) {
       const plan = await this.createPlan({
@@ -504,10 +521,24 @@ class StoriesModuleService extends MedusaService({
         scheduled_times: input.scheduled_times,
         notes: input.notes ?? null,
       })
-      await this.pickProductsForPlan(plan.id, deps, excluded)
+      await this.pickProductsForPlan(plan.id, deps, excluded, weighting)
       created.push(plan)
     }
     return created
+  }
+}
+
+/** Maps persisted settings to the picker's weighting config, tolerating rows
+ *  written before the collection_boost columns existed. */
+function weightingFromSettings(settings: {
+  collection_boost?: number | null
+  collection_boost_days?: number | null
+}): WeightingConfig {
+  return {
+    collection_boost:
+      settings.collection_boost ?? DEFAULT_WEIGHTING.collection_boost,
+    collection_boost_days:
+      settings.collection_boost_days ?? DEFAULT_WEIGHTING.collection_boost_days,
   }
 }
 

@@ -13,6 +13,12 @@ const StorySettings = model.define("StorySettings", {
   default_distribution: model.json(),
   default_schedule: model.json(),
   stock_alert_threshold: model.number().default(0),
+  // Auto-picker bias toward the newest collection. `collection_boost` is the
+  // selection-weight multiplier applied to products created within
+  // `collection_boost_days`; 1 disables the boost (pure random). See
+  // picker-weighting.ts.
+  collection_boost: model.number().default(3),
+  collection_boost_days: model.number().default(14),
 })
 
 export default StorySettings

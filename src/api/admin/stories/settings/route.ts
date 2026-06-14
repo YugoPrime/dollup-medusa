@@ -32,6 +32,11 @@ export const PUT = async (
     input.default_schedule = body.default_schedule as never
   if (typeof body.stock_alert_threshold === "number")
     input.stock_alert_threshold = Math.max(0, Math.min(50, Math.trunc(body.stock_alert_threshold)))
+  // Newest-collection picker bias. boost 1 = pure random; clamp to a sane range.
+  if (typeof body.collection_boost === "number")
+    input.collection_boost = Math.max(1, Math.min(20, Math.trunc(body.collection_boost)))
+  if (typeof body.collection_boost_days === "number")
+    input.collection_boost_days = Math.max(1, Math.min(120, Math.trunc(body.collection_boost_days)))
 
   const service = req.scope.resolve<StoriesModuleService>(STORIES_MODULE)
   try {
