@@ -1144,8 +1144,20 @@ class SourcingModuleService extends MedusaService({
       let assignedRef: string | null = null
       let createdProductId: string | null = null
       try {
-        assignedRef = await this.getNextProductRef(query)
-        await this.assignItemRef(item.id, assignedRef)
+        // Honor a ref already assigned to this draft item (sheet import /
+        // "Assign refs" — the operator names photos by it). Only allocate a
+        // fresh one when the item has none. Re-allocating unconditionally was
+        // the cause of the 2026-06-14 off-by-one: deleting a mid-draft item
+        // made the contiguous max+1 allocator shift every later product down
+        // one vs the operator's photo numbering. The unique handle constraint
+        // still guards against an accidental duplicate preset ref.
+        const presetRef = (item.ref ?? "").trim().toUpperCase()
+        assignedRef = /^IS\d+$/.test(presetRef)
+          ? presetRef
+          : await this.getNextProductRef(query)
+        if (assignedRef !== item.ref) {
+          await this.assignItemRef(item.id, assignedRef)
+        }
 
         const variants = (await svc.listDraftVariants({
           draft_item_id: item.id,
