@@ -41,10 +41,14 @@ function monthRange(year: number, month: number) {
 }
 
 const FeedPlannerPage = () => {
-  const now = new Date()
-  const todayStr = ymd(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
-  const [year, setYear] = useState(now.getUTCFullYear())
-  const [month, setMonth] = useState(now.getUTCMonth()) // 0-based
+  // "Today" must be Mauritius-local (UTC+4) to match the backend's date guards;
+  // using UTC would mislabel the day during the 20:00–24:00 MU window.
+  const todayStr = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Indian/Mauritius",
+  }).format(new Date())
+  const [ty, tm] = todayStr.split("-").map(Number)
+  const [year, setYear] = useState(ty)
+  const [month, setMonth] = useState(tm - 1) // 0-based
   const [pool, setPool] = useState<PoolProduct[]>([])
   const [pushedAt, setPushedAt] = useState<string | null>(null)
   const [rowsByDate, setRowsByDate] = useState<Record<string, FeedPostRow>>({})
@@ -99,7 +103,7 @@ const FeedPlannerPage = () => {
   }
 
   const unplan = async (date: string) => {
-    const { ok } = await api("/admin/feed-posts/plan", {
+    const { ok } = await api(`/admin/feed-posts/plan?date=${encodeURIComponent(date)}`, {
       method: "DELETE",
       body: JSON.stringify({ date }),
     })

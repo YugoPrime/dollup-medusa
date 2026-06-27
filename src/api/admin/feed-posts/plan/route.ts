@@ -45,7 +45,9 @@ export const DELETE = async (
   res: MedusaResponse,
 ) => {
   const body = (req.body ?? {}) as { date?: unknown }
-  const date = typeof body.date === "string" ? body.date : ""
+  const date =
+    (typeof body.date === "string" && body.date) ||
+    (typeof req.query.date === "string" ? req.query.date : "")
   if (!DATE_RE.test(date)) {
     res.status(400).json({ ok: false, reason: "bad_input" })
     return
