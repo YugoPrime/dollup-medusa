@@ -96,6 +96,29 @@ class FeedPostsModuleService extends MedusaService({ FeedPost }) {
     } as unknown as Parameters<this["updateFeedPosts"]>[0])
     return attempts
   }
+
+  /** Feed posts whose post_date is within [from, to] inclusive (MU date strings). */
+  async listByDateRange(from: string, to: string): Promise<FeedPostDTO[]> {
+    const rows = await this.listFeedPosts(
+      { post_date: { $gte: from, $lte: to } } as any,
+      { take: 1000 },
+    )
+    return rows as unknown as FeedPostDTO[]
+  }
+
+  /**
+   * Deletes the `planned` row(s) for a date. Never deletes posted/failed rows
+   * (those represent real or attempted publishes). Returns the count removed.
+   */
+  async deletePlannedByDate(date: string): Promise<number> {
+    const rows = (await this.listFeedPosts({
+      post_date: date,
+      status: "planned",
+    })) as unknown as FeedPostDTO[]
+    if (rows.length === 0) return 0
+    await this.deleteFeedPosts(rows.map((r) => r.id))
+    return rows.length
+  }
 }
 
 export default FeedPostsModuleService
