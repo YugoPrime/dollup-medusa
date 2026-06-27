@@ -165,7 +165,10 @@ const FeedPlannerPage = () => {
               <div
                 key={p.id}
                 draggable={live}
-                onDragStart={(e) => e.dataTransfer.setData("text/plain", p.id)}
+                onDragStart={(e) => {
+                  if (!live) return
+                  e.dataTransfer.setData("text/plain", p.id)
+                }}
                 className={`flex gap-2 items-center rounded-lg border p-2 ${
                   live ? "cursor-grab bg-ui-bg-base" : "opacity-50 bg-ui-bg-disabled"
                 }`}
