@@ -11,6 +11,7 @@ import type FeedPostsModuleService from "../../../../modules/feed-posts/service"
 import { mauritiusToday, addDaysToMauritiusDate } from "../../../../lib/mauritius-date"
 
 type DraftItemRow = {
+  draft_order_id: string | null
   ref: string | null
   published_product_id: string | null
   published_at: Date | string | null
@@ -30,32 +31,40 @@ export const GET = async (
   const feed = req.scope.resolve<FeedPostsModuleService>(FEED_POSTS_MODULE)
   const query = req.scope.resolve(ContainerRegistrationKeys.QUERY)
 
-  const items = (await (sourcing as any).listDraftItems(
+  const items = (await sourcing.listDraftItems(
     { published_product_id: { $ne: null } },
     { take: 2000 },
-  )) as DraftItemRow[]
+  )) as unknown as DraftItemRow[]
 
-  if (items.length === 0) {
+  const pushed = items.filter(
+    (i) => i.published_product_id && i.published_at && i.draft_order_id,
+  )
+  if (pushed.length === 0) {
     res.json({ pushed_at: null, products: [] })
     return
   }
 
-  // Latest push = max published_at; group that day's items by their draft order
-  // is overkill — take the items pushed within the same 6h window as the newest.
-  const withTime = items
-    .filter((i) => i.published_product_id && i.published_at)
-    .map((i) => ({ ...i, t: new Date(i.published_at as string).getTime() }))
-    .sort((a, b) => b.t - a.t)
-
-  if (withTime.length === 0) {
-    res.json({ pushed_at: null, products: [] })
-    return
+  // Most recent push = the draft order that contains the newest published item.
+  // One push = one draft order, so grouping by draft_order_id captures exactly
+  // that push's products regardless of how many seconds the items span.
+  let newest = pushed[0]
+  for (const i of pushed) {
+    if (
+      new Date(i.published_at as string).getTime() >
+      new Date(newest.published_at as string).getTime()
+    ) {
+      newest = i
+    }
   }
-  const newest = withTime[0].t
-  const WINDOW_MS = 6 * 60 * 60 * 1000
-  const latest = withTime.filter((i) => newest - i.t <= WINDOW_MS)
+  const latestOrderId = newest.draft_order_id
+  const latest = pushed.filter((i) => i.draft_order_id === latestOrderId)
   const productIds = latest.map((i) => i.published_product_id as string)
-  const refById = new Map(latest.map((i) => [i.published_product_id as string, i.ref]))
+  const refById = new Map(
+    latest.map((i) => [i.published_product_id as string, i.ref]),
+  )
+  const pushedAt = new Date(
+    Math.max(...latest.map((i) => new Date(i.published_at as string).getTime())),
+  ).toISOString()
 
   const { data: products } = await query.graph({
     entity: "product",
@@ -85,5 +94,5 @@ export const GET = async (
     }),
   )
 
-  res.json({ pushed_at: new Date(newest).toISOString(), products: out })
+  res.json({ pushed_at: pushedAt, products: out })
 }

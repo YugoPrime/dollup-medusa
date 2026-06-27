@@ -32,8 +32,7 @@ export const POST = async (
     dedupDays,
   })
   if (!result.ok) {
-    const status =
-      result.reason === "posted" ? 409 : result.reason === "past" ? 422 : 422
+    const status = result.reason === "posted" ? 409 : 422
     res.status(status).json({ ok: false, reason: result.reason })
     return
   }
