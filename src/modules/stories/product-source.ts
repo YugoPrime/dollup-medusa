@@ -104,7 +104,10 @@ export function createMedusaProductSource(scope: {
           "variants.calculated_price.*",
         ],
         filters,
-        pagination: { take: PAGE, skip },
+        // Stable order is required for skip-based pagination: without it the DB
+        // may return rows in a different order per page, skipping/duplicating
+        // products. id is a ULID (monotonic by creation) so ASC is deterministic.
+        pagination: { take: PAGE, skip, order: { id: "ASC" } },
         context: {
           variants: {
             calculated_price: QueryContext({ currency_code: "mur" }),
