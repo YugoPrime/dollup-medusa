@@ -1,4 +1,4 @@
-import { toProductLike } from "../product-source"
+import { collectCategoryAndDescendants, toProductLike } from "../product-source"
 
 const SAMPLE = {
   id: "prod_1",
@@ -29,6 +29,56 @@ const SAMPLE = {
     },
   ],
 }
+
+describe("collectCategoryAndDescendants", () => {
+  // Mirrors the live Doll Up tree: "Beachwear" parent with Bikini Sets /
+  // Cover-Ups / One-Pieces children, plus an unrelated branch.
+  const CATS = [
+    { id: "beachwear", parent_category_id: null },
+    { id: "bikini-sets", parent_category_id: "beachwear" },
+    { id: "cover-ups", parent_category_id: "beachwear" },
+    { id: "one-pieces", parent_category_id: "beachwear" },
+    { id: "string-bikinis", parent_category_id: "bikini-sets" }, // grandchild
+    { id: "dresses", parent_category_id: null },
+    { id: "two-piece-outfits", parent_category_id: "clothing" },
+    { id: "clothing", parent_category_id: null },
+  ]
+
+  it("returns the root plus all descendants (recursively)", () => {
+    expect(collectCategoryAndDescendants(CATS, "beachwear").sort()).toEqual(
+      ["beachwear", "bikini-sets", "cover-ups", "one-pieces", "string-bikinis"].sort(),
+    )
+  })
+
+  it("includes deep grandchildren", () => {
+    expect(collectCategoryAndDescendants(CATS, "bikini-sets").sort()).toEqual(
+      ["bikini-sets", "string-bikinis"].sort(),
+    )
+  })
+
+  it("returns just the root for a leaf category", () => {
+    expect(collectCategoryAndDescendants(CATS, "dresses")).toEqual(["dresses"])
+  })
+
+  it("returns just the root id when the category isn't in the list", () => {
+    expect(collectCategoryAndDescendants(CATS, "unknown")).toEqual(["unknown"])
+  })
+
+  it("does not cross into unrelated branches", () => {
+    const out = collectCategoryAndDescendants(CATS, "beachwear")
+    expect(out).not.toContain("two-piece-outfits")
+    expect(out).not.toContain("dresses")
+  })
+
+  it("never infinite-loops on a cyclic parent reference", () => {
+    const cyclic = [
+      { id: "a", parent_category_id: "b" },
+      { id: "b", parent_category_id: "a" },
+    ]
+    const out = collectCategoryAndDescendants(cyclic, "a").sort()
+    expect(out).toEqual(["a", "b"])
+  })
+})
 
 describe("toProductLike", () => {
   it("includes product.images on every variant by default", () => {

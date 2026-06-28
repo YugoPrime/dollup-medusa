@@ -3,13 +3,52 @@ import { ContainerRegistrationKeys, QueryContext } from "@medusajs/framework/uti
 import type { ProductLike } from "./snapshot"
 
 /**
+ * Returns the given category id plus the ids of every descendant category
+ * (children, grandchildren, …) found in `cats` — a flat list of
+ * `{ id, parent_category_id }` rows. The boutique nests its catalog (e.g.
+ * "Beachwear" → Bikini Sets / Cover-Ups / One-Pieces), but the distribution
+ * picks the parent. Without this expansion the picker only saw products tagged
+ * directly to the parent, starving categories whose products live in children.
+ *
+ * Guards against cyclic parent references (returns each id once, no infinite
+ * loop) and always includes `rootId` even if it isn't in `cats`.
+ */
+export function collectCategoryAndDescendants(
+  cats: Array<{ id: string; parent_category_id?: string | null }>,
+  rootId: string,
+): string[] {
+  const childrenByParent = new Map<string, string[]>()
+  for (const c of cats) {
+    const parent = c.parent_category_id ?? null
+    if (parent == null) continue
+    const arr = childrenByParent.get(parent) ?? []
+    arr.push(c.id)
+    childrenByParent.set(parent, arr)
+  }
+
+  const result = new Set<string>()
+  const stack = [rootId]
+  while (stack.length > 0) {
+    const id = stack.pop()!
+    if (result.has(id)) continue
+    result.add(id)
+    for (const child of childrenByParent.get(id) ?? []) {
+      if (!result.has(child)) stack.push(child)
+    }
+  }
+  return Array.from(result)
+}
+
+/**
  * Wires the stories picker to Medusa's product module via query.graph so the
  * pricing module's calculated_price + original_amount (a remote link) and the
  * inventory levels are traversed in one call.
  *
  * Returns a `productSource(filter)` function with the same signature
  * StoriesModuleService.regeneratePlan / createBatchPlans expect. Filters by
- * status=published and an optional `category_id`. Skips Intimates products
+ * status=published and an optional `category_id` — which is expanded to include
+ * all descendant categories so a parent like "Beachwear" pulls products from
+ * its Bikini Sets / Cover-Ups / One-Pieces children. Skips Intimates products
  * (18+, marked unlisted) so the auto-planner never picks them.
  */
 export function createMedusaProductSource(scope: {
@@ -20,7 +59,19 @@ export function createMedusaProductSource(scope: {
   return async (filter) => {
     const filters: Record<string, unknown> = { status: "published" }
     if (filter.category_id) {
-      filters.categories = { id: filter.category_id }
+      // Expand the requested category to itself + all descendants so nested
+      // catalogs (parent category, products in children) are picked up.
+      const { data: cats } = await query.graph({
+        entity: "product_category",
+        fields: ["id", "parent_category_id"],
+        pagination: { take: 1000 },
+      })
+      const ids = collectCategoryAndDescendants(
+        cats as Array<{ id: string; parent_category_id?: string | null }>,
+        filter.category_id,
+      )
+      // Array value on `categories` is an IN filter across category ids.
+      filters.categories = ids
     }
     const { data: products } = await query.graph({
       entity: "product",
