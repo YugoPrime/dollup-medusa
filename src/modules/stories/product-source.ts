@@ -79,9 +79,10 @@ export function createMedusaProductSource(scope: {
     // planned). Page size is modest because each row carries nested
     // variant/inventory/price data.
     const PAGE = 200
+    const MAX_SKIP = 20000 // safety bound (~100 pages) against an unbounded loop
     const products: any[] = []
-    for (let skip = 0; ; skip += PAGE) {
-      const { data, metadata } = await query.graph({
+    for (let skip = 0; skip < MAX_SKIP; skip += PAGE) {
+      const { data } = await query.graph({
         entity: "product",
         fields: [
           "id",
@@ -112,8 +113,8 @@ export function createMedusaProductSource(scope: {
       })
       const page = data as any[]
       products.push(...page)
-      const total = (metadata as { count?: number } | undefined)?.count ?? products.length
-      if (page.length < PAGE || products.length >= total) break
+      // A short page marks the end — robust whether or not graph returns a count.
+      if (page.length < PAGE) break
     }
     return products.filter((p) => !isIntimatesProduct(p)).map(toProductLike)
   }
