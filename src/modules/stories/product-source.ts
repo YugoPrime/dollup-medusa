@@ -73,36 +73,49 @@ export function createMedusaProductSource(scope: {
       // Array value on `categories` is an IN filter across category ids.
       filters.categories = ids
     }
-    const { data: products } = await query.graph({
-      entity: "product",
-      fields: [
-        "id",
-        "title",
-        "handle",
-        "created_at",
-        "metadata",
-        "images.url",
-        "categories.handle",
-        "variants.id",
-        "variants.sku",
-        "variants.title",
-        "variants.manage_inventory",
-        "variants.inventory_items.required_quantity",
-        "variants.inventory_items.inventory.location_levels.stocked_quantity",
-        "variants.inventory_items.inventory.location_levels.reserved_quantity",
-        "variants.options.value",
-        "variants.options.option.title",
-        "variants.calculated_price.*",
-      ],
-      filters,
-      pagination: { take: 500 },
-      context: {
-        variants: {
-          calculated_price: QueryContext({ currency_code: "mur" }),
+    // Paginate through ALL published products. A fixed cap silently dropped the
+    // newest products once the catalog grew past it (e.g. 552 published > a 500
+    // cap meant the latest import could be neither auto-picked nor manually
+    // planned). Page size is modest because each row carries nested
+    // variant/inventory/price data.
+    const PAGE = 200
+    const products: any[] = []
+    for (let skip = 0; ; skip += PAGE) {
+      const { data, metadata } = await query.graph({
+        entity: "product",
+        fields: [
+          "id",
+          "title",
+          "handle",
+          "created_at",
+          "metadata",
+          "images.url",
+          "categories.handle",
+          "variants.id",
+          "variants.sku",
+          "variants.title",
+          "variants.manage_inventory",
+          "variants.inventory_items.required_quantity",
+          "variants.inventory_items.inventory.location_levels.stocked_quantity",
+          "variants.inventory_items.inventory.location_levels.reserved_quantity",
+          "variants.options.value",
+          "variants.options.option.title",
+          "variants.calculated_price.*",
+        ],
+        filters,
+        pagination: { take: PAGE, skip },
+        context: {
+          variants: {
+            calculated_price: QueryContext({ currency_code: "mur" }),
+          },
         },
-      },
-    })
-    return (products as any[]).filter((p) => !isIntimatesProduct(p)).map(toProductLike)
+      })
+      const page = data as any[]
+      products.push(...page)
+      const total = (metadata as { count?: number } | undefined)?.count ?? products.length
+      if (page.length < PAGE || products.length >= total) break
+    }
+    return products.filter((p) => !isIntimatesProduct(p)).map(toProductLike)
   }
 }
 
