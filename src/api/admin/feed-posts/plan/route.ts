@@ -20,7 +20,9 @@ export const POST = async (
   const date = typeof body.date === "string" ? body.date : ""
   const productId = typeof body.product_id === "string" ? body.product_id : ""
   if (!DATE_RE.test(date) || !productId) {
-    res.status(400).json({ ok: false, reason: "bad_input" })
+    // `message` mirrors `reason` so clients using @medusajs/js-sdk (which
+    // surfaces only the body's `message` on a thrown FetchError) can recover it.
+    res.status(400).json({ ok: false, reason: "bad_input", message: "bad_input" })
     return
   }
   const dedupDays = Number(process.env.FEED_DEDUP_DAYS) || DEFAULT_DEDUP_DAYS
@@ -33,7 +35,9 @@ export const POST = async (
   })
   if (!result.ok) {
     const status = result.reason === "posted" ? 409 : 422
-    res.status(status).json({ ok: false, reason: result.reason })
+    // `message` mirrors `reason` so SDK clients can recover the specific reason
+    // (the js-sdk FetchError exposes only the body's `message`, not `reason`).
+    res.status(status).json({ ok: false, reason: result.reason, message: result.reason })
     return
   }
   res.json({ ok: true, feed_post: result.row })
