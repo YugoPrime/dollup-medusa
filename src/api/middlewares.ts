@@ -54,6 +54,14 @@ export default defineMiddlewares({
       ],
     },
     {
+      // Rapido webhook: HMAC over the raw body, so disable Medusa's JSON parser
+      // and read the body as a Buffer (same reasoning as /hooks/meta/*).
+      matcher: "/hooks/rapido",
+      methods: ["POST"],
+      bodyParser: false,
+      middlewares: [raw({ type: "*/*", limit: "1mb" })],
+    },
+    {
       matcher: "/admin/chat/uploads",
       methods: ["POST"],
       // Disable Medusa's JSON body parser so Busboy can read the multipart stream

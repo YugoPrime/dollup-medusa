@@ -6,7 +6,7 @@
 
 **Architecture:** Two services. **dollup-admin** owns the order→Rapido payload mapping (incl. COD math, which already lives on the prep card) and exposes a server action + button. The **Medusa backend** owns the Rapido API key + webhook secret: a thin `POST /admin/rapido/dispatch` route validates the payload, calls Rapido (with an idempotency key), and writes `rapido_*` to order metadata; a `POST /hooks/rapido` route verifies the HMAC signature and updates status. Each secret lives in exactly one service.
 
-**Tech Stack:** Medusa v2 (custom API routes, `defineMiddlewares`, `express.raw`), `@medusajs/js-sdk` (admin client in dollup-admin), Next.js 16 App Router server actions, Node `crypto` for HMAC. Backend tests: **Jest** via `npm run test:unit` (files `src/**/__tests__/**/*.unit.spec.ts`, Jest globals — no import). Admin tests: **vitest** (added in Task 7).
+**Tech Stack:** Medusa v2 (custom API routes, `defineMiddlewares`, `express.raw`), `@medusajs/js-sdk` (admin client in dollup-admin), Next.js 16 App Router server actions, Node `crypto` for HMAC. **Package managers differ per repo: the backend uses Yarn 4 (`yarn …`), dollup-admin uses npm (`npm …`).** Backend tests: **Jest** via `yarn test:unit` (files `src/**/__tests__/**/*.unit.spec.ts`, Jest globals — no import). Backend compile check: `yarn build`. Admin tests: **vitest** (added in Task 7).
 
 ## Global Constraints
 
@@ -118,7 +118,7 @@ describe("validateRapidoPayload", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd Backend/dollup-medusa && npm run test:unit -- src/modules/rapido`
+Run: `cd Backend/dollup-medusa && yarn test:unit src/modules/rapido`
 Expected: FAIL — cannot find module `../rapido-payload`.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -180,7 +180,7 @@ export function validateRapidoPayload(
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd Backend/dollup-medusa && npm run test:unit -- src/modules/rapido`
+Run: `cd Backend/dollup-medusa && yarn test:unit src/modules/rapido`
 Expected: PASS (5 tests).
 
 - [ ] **Step 5: Commit**
@@ -237,7 +237,7 @@ describe("verifyRapidoSignature", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd Backend/dollup-medusa && npm run test:unit -- src/modules/rapido`
+Run: `cd Backend/dollup-medusa && yarn test:unit src/modules/rapido`
 Expected: the new file FAILs — cannot find module `../verify-rapido-signature`.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -276,7 +276,7 @@ export function verifyRapidoSignature(
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd Backend/dollup-medusa && npm run test:unit -- src/modules/rapido`
+Run: `cd Backend/dollup-medusa && yarn test:unit src/modules/rapido`
 Expected: PASS (10 tests total across the two rapido spec files).
 
 - [ ] **Step 5: Commit**
@@ -375,7 +375,7 @@ export class RapidoClient {
 
 - [ ] **Step 2: Type-check**
 
-Run: `cd Backend/dollup-medusa && npx tsc --noEmit`
+Run: `cd Backend/dollup-medusa && yarn build`
 Expected: no new errors from `src/modules/rapido/client.ts`.
 
 - [ ] **Step 3: Commit**
@@ -480,7 +480,7 @@ export const POST = async (
 
 - [ ] **Step 3: Type-check + build**
 
-Run: `cd Backend/dollup-medusa && npx tsc --noEmit && npm run build`
+Run: `cd Backend/dollup-medusa && yarn build`
 Expected: compiles; route registered.
 
 - [ ] **Step 4: Commit**
@@ -575,7 +575,7 @@ export const POST = async (req: MedusaRequest, res: MedusaResponse) => {
 
 - [ ] **Step 3: Type-check + build**
 
-Run: `cd Backend/dollup-medusa && npx tsc --noEmit && npm run build`
+Run: `cd Backend/dollup-medusa && yarn build`
 Expected: compiles, both routes registered.
 
 - [ ] **Step 4: Commit**
