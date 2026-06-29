@@ -26,16 +26,21 @@ authenticated with an `x-api-key` header.
 - **COD amount:** auto. Unpaid → amount still due (`total − deposit −
   exchangeCredit`); already-paid → `0`. No manual entry.
 - **Webhook:** built now (status updates flow back into admin).
-- **Code location:** all Rapido logic lives in the Medusa backend. The webhook
-  must be on the public backend (`api.dollupboutique.com`), so dispatch lives
-  there too — one Rapido client, one place for the secret. `dollup-admin` stays a
-  thin UI that calls a backend admin route.
+- **Code location:** the Rapido API key + webhook secret + outbound call + webhook
+  receiver all live in the Medusa backend (`api.dollupboutique.com`). The
+  **order→Rapido payload mapping (incl. COD math) lives in `dollup-admin`**, because
+  `OrderRow` already carries every field and the prep card already computes the
+  paid/deposit/exchange-credit logic. The backend `/admin/rapido/dispatch` route is
+  **thin**: it receives a ready payload, adds the secret, calls Rapido, writes
+  metadata. This keeps money-sensitive COD logic in one place (admin) and each
+  secret in one service (backend).
 
 ### Rejected alternative
 
-Dispatch from a `dollup-admin` server action (admin already has order data + SDK),
-webhook in the backend. Slightly faster to build but puts the Rapido API key in
-two services and splits the logic. Not chosen.
+Re-derive the COD amount and full payload server-side in the backend (spec's
+original Approach A). Rejected during planning: it duplicates the admin's
+paid/deposit/exchange-credit rules in a second service, risking drift where the
+card shows one COD figure and Rapido collects another.
 
 ## Components
 
@@ -43,21 +48,22 @@ two services and splits the logic. Not chosen.
 
 - **`RapidoClient`** — thin `fetch` wrapper over the base URL. `createOrder(payload,
   idempotencyKey)` sends `x-api-key`, `x-idempotency-key`, `Content-Type:
-  application/json`. Reads `RAPIDO_API_KEY`, `RAPIDO_BASE_URL`, optional
-  `RAPIDO_STORE_ID`.
+  application/json`. Reads `RAPIDO_API_KEY`, `RAPIDO_BASE_URL`.
 - **`verify-rapido-signature.ts`** — HMAC-SHA256 of the raw request body compared
   against the `X-Rapido-Signature` header (`sha256=<hex>`). Mirrors the existing
   `src/modules/chat/lib/verify-meta-signature.ts`.
-- **`map-order-to-rapido.ts`** — pure function `AdminOrder → Rapido payload`.
-  Unit-testable in isolation. Houses the field mapping + COD logic.
+- **`rapido-payload.ts`** — shared `RapidoOrderPayload` TypeScript type + a
+  lightweight server-side validator (`recipientPhone` is 8 digits, `zone`
+  non-empty, `codAmount >= 0`). The payload itself is *built in dollup-admin*; the
+  backend only validates and forwards.
 
-### 2. Backend — `POST /admin/rapido/dispatch/:orderId`
+### 2. Backend — `POST /admin/rapido/dispatch`
 
-- Retrieves the order (shipping address, items, metadata, totals).
-- Builds the payload via `map-order-to-rapido`.
-- Calls Rapido with `x-idempotency-key: <order.id>` — safe to retry, no duplicate
+- Body: `{ orderId: string, payload: RapidoOrderPayload }`.
+- Validates the payload (`rapido-payload.ts`) → `400` on bad input.
+- Calls Rapido with `x-idempotency-key: <orderId>` — safe to retry, no duplicate
   delivery.
-- On success, read-modify-write `order.metadata` (Medusa replaces metadata
+- On success, read-modify-write the order's `metadata` (Medusa replaces metadata
   wholesale, so merge with existing):
   - `rapido_order_number` — e.g. `RPD-2026-000123`
   - `rapido_tracking` — first of `trackingNumbers[]`
@@ -75,11 +81,17 @@ two services and splits the logic. Not chosen.
 - Looks up the order by `event.externalOrderRef` (= our `order.id`), updates
   `rapido_status` (and `rapido_tracking` if newly present). Returns `200` fast.
 
-### 4. dollup-admin — button + status
+### 4. dollup-admin — payload builder, button + status
 
+- **`buildRapidoPayload(order: OrderRow)`** pure function (new
+  `src/lib/rapido-payload.ts`) → maps `OrderRow` to the Rapido payload, including
+  COD (`isOrderPaid` ? 0 : `totalMur − depositMur − exchangeCreditMur`) and
+  digits-only phone. Unit-testable, no I/O. Throws a typed error on invalid phone
+  (≠ 8 digits) or missing zone so the action can surface it before any network call.
 - **`dispatchToRapidoAction(orderId)`** server action in
-  `src/app/(app)/prep/actions.ts` → calls the backend admin route via
-  `getAdminSdk().client.fetch`. Returns the structured `ActionResult` shape
+  `src/app/(app)/prep/actions.ts` → loads the order, calls `buildRapidoPayload`,
+  POSTs `{ orderId, payload }` to the backend route via `getAdminSdk().client.fetch`,
+  then `revalidatePath("/prep")`. Returns the structured `ActionResult` shape
   already used in that file.
 - **`PrepOrderCard`** — when `deliveryMethod === "Home Delivery"` and not yet
   dispatched (`!order.metadata.rapido_order_number`), show a **Send to Rapido**
@@ -124,14 +136,16 @@ New, **backend only** (never in storefront or admin client bundle):
 - `RAPIDO_API_KEY`
 - `RAPIDO_WEBHOOK_SECRET`
 - `RAPIDO_BASE_URL` (`https://wktlwrxxgnsirrkkkric.supabase.co/functions/v1/merchant-api`)
-- `RAPIDO_STORE_ID` (optional, only if the account has multiple stores)
 
-API key + webhook secret supplied separately by the owner.
+Names (no values) added to `.env.template`. API key + webhook secret supplied
+separately by the owner and set in Coolify. Single store confirmed — no
+`storeId` / `RAPIDO_STORE_ID`.
 
 ## Testing
 
-- **Unit:** `map-order-to-rapido` (paid vs unpaid COD, deposit/exchange-credit
-  cases, phone normalization, bad zone), `verify-rapido-signature` (good / bad /
+- **Unit:** `buildRapidoPayload` in dollup-admin (paid vs unpaid COD,
+  deposit/exchange-credit cases, phone normalization, bad zone throws),
+  `verify-rapido-signature` + `validateRapidoPayload` in the backend (good / bad /
   missing).
 - **Manual end-to-end:** one real Home Delivery order, once the key + webhook
   secret are set and the webhook URL `https://api.dollupboutique.com/hooks/rapido`
@@ -139,8 +153,7 @@ API key + webhook secret supplied separately by the owner.
 
 ## Assumptions
 
-- **Single store** — `storeId` omitted unless the owner confirms multiple stores
-  (then add `RAPIDO_STORE_ID` to the payload).
+- **Single store** (confirmed) — `storeId` omitted from the payload.
 - **`"Home Delivery"`** is the exact `metadata.delivery_method` string — verified
   against a live order during build.
 - **Status values** — store whatever string the webhook sends (`READY_FOR_PICKUP`,
