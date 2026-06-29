@@ -40,4 +40,34 @@ describe("validateRapidoPayload", () => {
       error: "payload must be an object",
     })
   })
+  it("rejects a zero parcelCount", () => {
+    expect(validateRapidoPayload({ ...valid, parcelCount: 0 })).toEqual({
+      ok: false,
+      error: "parcelCount must be a positive integer",
+    })
+  })
+  it("rejects a non-numeric parcelCount", () => {
+    expect(validateRapidoPayload({ ...valid, parcelCount: "1" })).toEqual({
+      ok: false,
+      error: "parcelCount must be a positive integer",
+    })
+  })
+  it("rejects an item missing productName", () => {
+    expect(validateRapidoPayload({ ...valid, items: [{ unitPrice: 350, quantity: 2 }] })).toEqual({
+      ok: false,
+      error: "each item needs a productName",
+    })
+  })
+  it("rejects an item with negative unitPrice", () => {
+    expect(validateRapidoPayload({ ...valid, items: [{ productName: "Lip gloss", unitPrice: -10, quantity: 2 }] })).toEqual({
+      ok: false,
+      error: "each item needs a unitPrice >= 0",
+    })
+  })
+  it("rejects an item with quantity 0", () => {
+    expect(validateRapidoPayload({ ...valid, items: [{ productName: "Lip gloss", unitPrice: 350, quantity: 0 }] })).toEqual({
+      ok: false,
+      error: "each item needs a quantity >= 1",
+    })
+  })
 })

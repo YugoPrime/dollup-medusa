@@ -35,6 +35,9 @@ export function validateRapidoPayload(
   if (typeof p.zone !== "string" || p.zone.trim() === "") {
     return { ok: false, error: "zone is required" }
   }
+  if (typeof p.parcelCount !== "number" || !Number.isInteger(p.parcelCount) || p.parcelCount < 1) {
+    return { ok: false, error: "parcelCount must be a positive integer" }
+  }
   if (typeof p.codAmount !== "number" || p.codAmount < 0) {
     return { ok: false, error: "codAmount must be >= 0" }
   }
@@ -46,6 +49,21 @@ export function validateRapidoPayload(
   }
   if (!Array.isArray(p.items) || p.items.length === 0) {
     return { ok: false, error: "items must be a non-empty array" }
+  }
+  for (const item of p.items) {
+    if (typeof item !== "object" || item === null) {
+      return { ok: false, error: "each item needs a productName" }
+    }
+    const itemObj = item as Record<string, unknown>
+    if (typeof itemObj.productName !== "string" || itemObj.productName.trim() === "") {
+      return { ok: false, error: "each item needs a productName" }
+    }
+    if (typeof itemObj.unitPrice !== "number" || itemObj.unitPrice < 0) {
+      return { ok: false, error: "each item needs a unitPrice >= 0" }
+    }
+    if (typeof itemObj.quantity !== "number" || !Number.isInteger(itemObj.quantity) || itemObj.quantity < 1) {
+      return { ok: false, error: "each item needs a quantity >= 1" }
+    }
   }
   return { ok: true, value: p as unknown as RapidoOrderPayload }
 }
