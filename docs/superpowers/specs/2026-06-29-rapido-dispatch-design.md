@@ -112,7 +112,7 @@ card shows one COD figure and Rapido collects another.
 | `codAmount`         | unpaid → `total − deposit − exchangeCredit`; paid → `0`      |
 | `deliveryFeeBearer` | `"merchant"`                                                 |
 | `externalOrderRef`  | `order.id` (echoed back in webhooks)                         |
-| `items[]`           | line items → `{ productName, unitPrice, quantity }`          |
+| `items[]`           | line items → `{ productName, unitPrice, quantity }`; **`productName` is masked to `"Fashion item"` — the real title is never sent, to keep sensitive items (toys/intimates) off the courier side** |
 
 COD "paid" rule reuses the prep card's `isOrderPaid` logic: paid unless
 `saleType === "unpaid"` or (`saleType == null` and `payment_status !== "captured"`).
