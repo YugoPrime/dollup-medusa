@@ -14,6 +14,8 @@ export type RapidoOrderPayload = {
   deliveryFeeBearer: "merchant" | "customer"
   externalOrderRef: string
   items: RapidoItem[]
+  // Optional. true → Rapido stages the order as DRAFT (not released for pickup).
+  draft?: boolean
 }
 
 export function validateRapidoPayload(
@@ -46,6 +48,9 @@ export function validateRapidoPayload(
   }
   if (typeof p.externalOrderRef !== "string" || p.externalOrderRef.trim() === "") {
     return { ok: false, error: "externalOrderRef is required" }
+  }
+  if (p.draft !== undefined && typeof p.draft !== "boolean") {
+    return { ok: false, error: "draft must be a boolean" }
   }
   if (!Array.isArray(p.items) || p.items.length === 0) {
     return { ok: false, error: "items must be a non-empty array" }
