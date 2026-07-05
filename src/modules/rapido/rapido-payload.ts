@@ -7,6 +7,8 @@ export type RapidoItem = {
 export type RapidoOrderPayload = {
   recipientName: string
   recipientPhone: string
+  // Optional backup number (8 digits) the driver can call if the main fails.
+  recipientPhoneAlt?: string
   deliveryAddress: string
   zone: string
   parcelCount: number
@@ -30,6 +32,12 @@ export function validateRapidoPayload(
   }
   if (typeof p.recipientPhone !== "string" || !/^\d{8}$/.test(p.recipientPhone)) {
     return { ok: false, error: "recipientPhone must be 8 digits" }
+  }
+  if (
+    p.recipientPhoneAlt !== undefined &&
+    (typeof p.recipientPhoneAlt !== "string" || !/^\d{8}$/.test(p.recipientPhoneAlt))
+  ) {
+    return { ok: false, error: "recipientPhoneAlt must be 8 digits" }
   }
   if (typeof p.deliveryAddress !== "string" || p.deliveryAddress.trim() === "") {
     return { ok: false, error: "deliveryAddress is required" }
