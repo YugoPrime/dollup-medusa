@@ -70,6 +70,69 @@ moduleIntegrationTestRunner<EventDrawModuleService>({
         expect(stored.redeemed_at).not.toBeNull()
       })
 
+      it("forced collision: mapped unique-violation on insert still retries to a full, distinct batch", async () => {
+        // Persist a code up front — this is the code we'll force the batch
+        // generator to collide with.
+        const [dupeCode] = await service.generateCodeBatch(1, "collision-seed")
+
+        // `service` here is a container-resolved handle that re-resolves a
+        // fresh underlying instance on every property access, so patching
+        // an own property on it (or `jest.spyOn`-ing it) never reaches the
+        // instance actually executing inside `generateCodeBatch`. Patching
+        // the shared class prototype instead affects every instance,
+        // including ones resolved later in the same call.
+        const ServiceClass = EventDrawModuleService as any
+        const originalRandomCode = ServiceClass.prototype.randomCode
+        const originalListEventCodes = ServiceClass.prototype.listEventCodes
+
+        // Force the very first rolled candidate to be that already-taken
+        // code; every later roll falls through to the real RNG.
+        let randomCalls = 0
+        ServiceClass.prototype.randomCode = function randomCode(this: unknown) {
+          randomCalls++
+          return randomCalls === 1 ? dupeCode : originalRandomCode.call(this)
+        }
+
+        // Simulate the pre-check losing its check-then-act race: report the
+        // forced-duplicate code as "free" on its one pre-check lookup (as if
+        // a concurrent caller inserted it a moment after the check), so the
+        // insert actually reaches Postgres and trips the real unique-index
+        // violation. That's the exact path `isUniqueViolation` regressed on
+        // (Medusa maps it to a `MedusaError` before it reaches our catch),
+        // so a full, distinct batch coming back here proves the mapped-error
+        // catch-and-retry branch fired, not just the cheap pre-check.
+        let precheckRaced = false
+        ServiceClass.prototype.listEventCodes = async function listEventCodes(
+          this: unknown,
+          ...args: any[]
+        ) {
+          const [filters] = args
+          if (!precheckRaced && filters?.code === dupeCode) {
+            precheckRaced = true
+            return [] as any
+          }
+          return originalListEventCodes.apply(this, args)
+        }
+
+        try {
+          const codes = await service.generateCodeBatch(5, "batch-forced-collision")
+
+          expect(codes).toHaveLength(5)
+          expect(new Set(codes).size).toBe(5)
+          // The forced duplicate must have been retried away, not returned.
+          expect(codes).not.toContain(dupeCode)
+          // More rolls than `count` happened — proves at least one retry.
+          expect(randomCalls).toBeGreaterThan(5)
+          expect(precheckRaced).toBe(true)
+        } finally {
+          ServiceClass.prototype.randomCode = originalRandomCode
+          ServiceClass.prototype.listEventCodes = originalListEventCodes
+        }
+
+        const stored = await service.listEventCodes({ batch_id: "batch-forced-collision" })
+        expect(stored).toHaveLength(5)
+      })
+
       it("concurrent batch generation: 2N distinct codes persisted, neither call throws", async () => {
         const [batchA, batchB] = await Promise.all([
           service.generateCodeBatch(25, "batch-concurrent-a"),

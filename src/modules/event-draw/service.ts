@@ -16,15 +16,23 @@ import EventSettings from "./models/event-settings"
 
 /**
  * True on a Postgres unique-index violation, regardless of whether MikroORM
- * wrapped it as a typed exception or the raw driver error slipped through.
- * `EventCode.code` has a unique index (see models/event-code.ts) — this is
- * what a concurrent `generateCodeBatch` collision on the same random code
- * looks like.
+ * wrapped it as a typed exception, the raw driver error slipped through, or
+ * Medusa's repository layer (`mikroOrmBaseRepositoryFactory` -> `dbErrorMapper`)
+ * already intercepted it first and re-threw it as a `MedusaError`
+ * (INVALID_DATA, "... already exists.") built via the 2-arg constructor —
+ * which leaves `.code` undefined, so the raw driver-code check alone can't
+ * see it. `EventCode.code` has a unique index (see models/event-code.ts) —
+ * this is what a concurrent `generateCodeBatch` collision on the same
+ * random code looks like.
  */
 function isUniqueViolation(err: unknown): boolean {
   if (err instanceof UniqueConstraintViolationException) return true
-  const code = (err as { code?: string })?.code
-  return code === "23505"
+  if ((err as { code?: string })?.code === "23505") return true
+  return (
+    err instanceof MedusaError &&
+    err.type === MedusaError.Types.INVALID_DATA &&
+    /already exists/i.test(err.message)
+  )
 }
 
 class EventDrawModuleService extends MedusaService({
@@ -50,13 +58,17 @@ class EventDrawModuleService extends MedusaService({
   /**
    * Generates `count` unique codes and persists them under `batchId`.
    *
-   * Collision-safe: rather than a pre-check-then-insert (which has a
-   * check-then-act race under concurrent batch generation), each insert is
-   * attempted directly and a unique-index collision (another caller — or
-   * this loop's own earlier iteration in a rare 32^4 birthday clash — took
-   * the code first) is caught and retried with a freshly rolled code. This
-   * guarantees no raw DB error ever escapes the method, and every code
-   * returned is confirmed persisted.
+   * Belt-and-braces collision handling:
+   *  - A cheap pre-check (`listEventCodes({ code })`) skips the round trip
+   *    to a DB constraint error in the common single-caller case.
+   *  - The pre-check is inherently check-then-act (racy under concurrent
+   *    `generateCodeBatch` calls, or this loop's own earlier iteration in a
+   *    rare 32^4 birthday clash), so every insert is still wrapped in a
+   *    catch that detects a *mapped* unique-index violation — Medusa's
+   *    repository layer intercepts the raw Postgres error and re-throws it
+   *    as a `MedusaError` (see `isUniqueViolation`) — and retries with a
+   *    freshly rolled code. This guarantees no raw DB error ever escapes
+   *    the method, and every code returned is confirmed persisted.
    *
    * All-or-nothing: if the retry guard is exhausted before `count` codes
    * are persisted, throws `UNEXPECTED_STATE` — callers never observe a
@@ -75,13 +87,20 @@ class EventDrawModuleService extends MedusaService({
       const code = this.randomCode()
       if (seen.has(code)) continue
       seen.add(code)
+
+      const existing = await this.listEventCodes({ code })
+      if (existing.length > 0) {
+        // Cheap pre-check caught it — someone already holds this code.
+        continue
+      }
+
       try {
         await this.createEventCodes({ code, batch_id: batchId })
         created.push(code)
       } catch (err) {
         if (isUniqueViolation(err)) {
-          // Someone else (or a parallel generateCodeBatch call) already
-          // holds this code — roll a new one and keep going.
+          // Pre-check lost the race (concurrent caller inserted between our
+          // check and our insert) — roll a new one and keep going.
           continue
         }
         throw err
