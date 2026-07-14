@@ -187,11 +187,11 @@ class EventDrawModuleService extends MedusaService({
   }
 
   /**
-   * Redeems the code (single-use, via the atomic `redeemCode`) then creates
-   * the entry with `spins_earned = 1`. The entry itself needs no extra
-   * atomicity guard here — `redeemCode` already guarantees the code can
-   * back at most one entry, so this method can only ever run its
-   * `createEventEntries` once per code.
+   * Validates input, then redeems the code and creates the entry in a
+   * single transaction (`createEntryTxn_`) so a failure creating the entry
+   * rolls back the code redemption — otherwise the card code would be
+   * burned (`redeemed_at` set) with no entry to show for it, and the
+   * customer's code becomes permanently unusable.
    */
   async createEntry(input: {
     code: string
@@ -208,17 +208,54 @@ class EventDrawModuleService extends MedusaService({
     if (!phone) {
       throw new MedusaError(MedusaError.Types.INVALID_DATA, "A phone/WhatsApp number is required")
     }
-    // redeemCode enforces single-use + throws NOT_ALLOWED "already used"
-    const { code } = await this.redeemCode(input.code)
-    const entry = await this.createEventEntries({
-      code,
+    return await this.createEntryTxn_(input.code, {
       email,
       phone,
       consent: !!input.consent,
-      spins_earned: 1,
-      spins_used: 0,
       ip: input.ip ?? null,
     })
+  }
+
+  /**
+   * Single-transaction redeem + create. `@InjectTransactionManager()` opens
+   * one transaction and hands its `context` (carrying `transactionManager`)
+   * down as the trailing `sharedContext` arg to `redeemCodeById_` and
+   * `createEventEntries` — both `InjectManager`-wrapped generated/decorated
+   * methods that, per Medusa's `InjectManager`/`InjectTransactionManager`
+   * decorator pair, detect an already-present `transactionManager` on the
+   * incoming context and join it instead of opening (and committing) their
+   * own. So if `createEventEntries` throws, the whole transaction —
+   * including the `redeemCodeById_` UPDATE — rolls back, and the code's
+   * `redeemed_at` reverts to null (reusable) rather than being burned with
+   * no entry created.
+   */
+  @InjectTransactionManager()
+  private async createEntryTxn_(
+    rawCode: string,
+    data: { email: string; phone: string; consent: boolean; ip: string | null },
+    @MedusaContext() context: Context<SqlEntityManager> = {},
+  ): Promise<EventEntryDTO> {
+    const code = this.normalizeCode(rawCode)
+    const [found] = await this.listEventCodes({ code }, {}, context)
+    if (!found) {
+      throw new MedusaError(MedusaError.Types.INVALID_DATA, "Code not found")
+    }
+    const affected = await this.redeemCodeById_(found.id, context)
+    if (affected === 0) {
+      throw new MedusaError(MedusaError.Types.NOT_ALLOWED, "Code already used")
+    }
+    const entry = await this.createEventEntries(
+      {
+        code,
+        email: data.email,
+        phone: data.phone,
+        consent: data.consent,
+        spins_earned: 1,
+        spins_used: 0,
+        ip: data.ip,
+      },
+      context,
+    )
     return entry as EventEntryDTO
   }
 
@@ -320,10 +357,19 @@ class EventDrawModuleService extends MedusaService({
     return this.getSettings()
   }
 
-  /** Weighted-random slice pick. `rng()` must return a value in [0, 1). */
+  /**
+   * Weighted-random slice pick. `rng()` must return a value in [0, 1).
+   * Throws if every weight is zero/negative — `entries` would be empty and
+   * `entries[entries.length - 1]` would silently index `entries[-1]`
+   * (`undefined`), crashing the destructure below with a TypeError instead
+   * of a clean, callers-can-catch `MedusaError`.
+   */
   private pickSlice(weights: Record<string, number>, rng: () => number): string {
     const entries = Object.entries(weights).filter(([, w]) => w > 0)
     const total = entries.reduce((s, [, w]) => s + w, 0)
+    if (total <= 0) {
+      throw new MedusaError(MedusaError.Types.INVALID_DATA, "Wheel has no active slices")
+    }
     let r = rng() * total
     for (const [slice, w] of entries) {
       r -= w
@@ -334,13 +380,39 @@ class EventDrawModuleService extends MedusaService({
 
   /**
    * Spins the wheel for `entryId`. `rng` is injectable (defaults to
-   * `Math.random`) so tests can force a deterministic slice.
+   * `Math.random`) so tests can force a deterministic slice. Delegates to
+   * `spinTxn_` to run the consume + reward (+ draw-entry) writes as one
+   * transaction — see that method's doc comment for the atomicity
+   * mechanism.
+   */
+  async spin(
+    entryId: string,
+    rng: () => number = Math.random,
+  ): Promise<{ slice: string; type: string; points: number }> {
+    return await this.spinTxn_(entryId, rng)
+  }
+
+  /**
+   * Single-transaction consume-spin + reward (+ conditional draw-entry).
+   * `@InjectTransactionManager()` opens one transaction and threads its
+   * `context` (carrying `transactionManager`) into `consumeSpin_(entryId,
+   * context)` and as the trailing `sharedContext` arg to
+   * `createEventRewards(data, context)` / `createEventDrawEntries(data,
+   * context)`. Per Medusa's `InjectManager`/`InjectTransactionManager`
+   * decorator pair, a sub-call that receives a context whose
+   * `transactionManager` is already set joins that transaction instead of
+   * opening (and committing) its own — so if `createEventRewards` or
+   * `createEventDrawEntries` throws, the whole transaction, including the
+   * `spins_used` increment done by `consumeSpin_`, rolls back. Without this
+   * threading each generated/decorated sub-call forks its own transaction
+   * and commits independently, leaving a torn-write window where a spin is
+   * consumed but no reward (or draw entry) is ever recorded.
    *
-   * Concurrency-safe by construction: `consumeSpin_` atomically increments
-   * `spins_used` in a single conditional `UPDATE ... WHERE id = ? AND
-   * spins_used < spins_earned` (see its doc comment) and hands back the
-   * *pre-increment* value as `consumedIndex` — there is no separate read
-   * step in application code that a concurrent caller could interleave
+   * Concurrency-safe by construction regardless: `consumeSpin_` atomically
+   * increments `spins_used` in a single conditional `UPDATE ... WHERE id =
+   * ? AND spins_used < spins_earned` (see its doc comment) and hands back
+   * the *pre-increment* value as `consumedIndex` — there is no separate
+   * read step in application code that a concurrent caller could interleave
    * with. A caller that finds no spins left gets `null` back and this
    * method throws `NOT_ALLOWED` before touching rewards or draw entries at
    * all, so at most one of N concurrent spins past the allowance can ever
@@ -351,11 +423,13 @@ class EventDrawModuleService extends MedusaService({
    * a second backstop against a duplicate reward row landing at the same
    * index, in case `consumeSpin_`'s guarantee is ever violated.
    */
-  async spin(
+  @InjectTransactionManager()
+  private async spinTxn_(
     entryId: string,
-    rng: () => number = Math.random,
+    rng: () => number,
+    @MedusaContext() context: Context<SqlEntityManager> = {},
   ): Promise<{ slice: string; type: string; points: number }> {
-    const consumedIndex = await this.consumeSpin_(entryId)
+    const consumedIndex = await this.consumeSpin_(entryId, context)
     if (consumedIndex === null) {
       throw new MedusaError(MedusaError.Types.NOT_ALLOWED, "No spins left")
     }
@@ -366,14 +440,17 @@ class EventDrawModuleService extends MedusaService({
     const idempotencyKey = `${entryId}:${consumedIndex}`
 
     try {
-      await this.createEventRewards({
-        entry_id: entryId,
-        slice,
-        type: def.type,
-        points: def.points,
-        status: "issued",
-        idempotency_key: idempotencyKey,
-      })
+      await this.createEventRewards(
+        {
+          entry_id: entryId,
+          slice,
+          type: def.type,
+          points: def.points,
+          status: "issued",
+          idempotency_key: idempotencyKey,
+        },
+        context,
+      )
     } catch (err) {
       if (isUniqueViolation(err)) {
         // Should be unreachable — consumeSpin_ guarantees each index is
@@ -388,10 +465,13 @@ class EventDrawModuleService extends MedusaService({
     }
 
     if (def.type === "draw_entry") {
-      await this.createEventDrawEntries({
-        entry_id: entryId,
-        draw_period: settings.active_draw_period,
-      })
+      await this.createEventDrawEntries(
+        {
+          entry_id: entryId,
+          draw_period: settings.active_draw_period,
+        },
+        context,
+      )
     }
 
     return { slice, type: def.type, points: def.points }

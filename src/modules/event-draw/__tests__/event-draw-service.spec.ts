@@ -285,5 +285,107 @@ moduleIntegrationTestRunner<EventDrawModuleService>({
         expect(rewards).toHaveLength(1)
       })
     })
+
+    describe("transaction atomicity", () => {
+      it("spin rolls back the spin consumption when reward creation fails", async () => {
+        await service.updateSettings({ weights: { pts_50: 1 } })
+        const [code] = await service.generateCodeBatch(1, "b-spin-rollback")
+        const entry = await service.createEntry({
+          code, email: "rb@p.com", phone: "1", consent: true,
+        })
+
+        // `service` is a container-resolved handle that re-resolves a fresh
+        // underlying instance on every property access (see the
+        // forced-collision test above for the full explanation), so we
+        // patch the shared class prototype rather than the resolved
+        // instance, and restore it in `finally` no matter what.
+        const ServiceClass = EventDrawModuleService as any
+        const originalCreateEventRewards = ServiceClass.prototype.createEventRewards
+        ServiceClass.prototype.createEventRewards = async function createEventRewards() {
+          throw new Error("forced reward-write failure")
+        }
+
+        try {
+          await expect(service.spin(entry.id, () => 0)).rejects.toThrow(
+            /forced reward-write failure/,
+          )
+        } finally {
+          ServiceClass.prototype.createEventRewards = originalCreateEventRewards
+        }
+
+        // The consume-spin UPDATE must have rolled back with the reward
+        // write it shared a transaction with — spins_used stays at 0 and no
+        // spin was silently burned.
+        const after = await service.retrieveEventEntry(entry.id)
+        expect(after.spins_used).toBe(0)
+        const rewards = await service.listEventRewards({ entry_id: entry.id })
+        expect(rewards).toHaveLength(0)
+      })
+
+      it("createEntry rolls back the code redemption when entry creation fails", async () => {
+        const [code] = await service.generateCodeBatch(1, "b-entry-rollback")
+
+        const ServiceClass = EventDrawModuleService as any
+        const originalCreateEventEntries = ServiceClass.prototype.createEventEntries
+        ServiceClass.prototype.createEventEntries = async function createEventEntries() {
+          throw new Error("forced entry-write failure")
+        }
+
+        try {
+          await expect(
+            service.createEntry({ code, email: "e@r.com", phone: "1", consent: true }),
+          ).rejects.toThrow(/forced entry-write failure/)
+        } finally {
+          ServiceClass.prototype.createEventEntries = originalCreateEventEntries
+        }
+
+        // The redeem UPDATE must have rolled back with the entry-create it
+        // shared a transaction with — the code is still unredeemed and can
+        // be retried, instead of being permanently burned with no entry.
+        const [stored] = await service.listEventCodes({ code })
+        expect(stored.redeemed_at).toBeNull()
+
+        // And it's genuinely reusable now that the rollback restored it.
+        const entry = await service.createEntry({
+          code, email: "e2@r.com", phone: "1", consent: true,
+        })
+        expect(entry.email).toBe("e2@r.com")
+      })
+
+      it("getSettings under concurrent first-callers: all resolve to the same row, only one persisted", async () => {
+        const results = await Promise.allSettled([
+          service.getSettings(),
+          service.getSettings(),
+          service.getSettings(),
+        ])
+        for (const r of results) {
+          expect(r.status).toBe("fulfilled")
+        }
+        const periods = new Set(
+          (results as PromiseFulfilledResult<Awaited<ReturnType<typeof service.getSettings>>>[])
+            .map((r) => r.value.active_draw_period),
+        )
+        expect(periods.size).toBe(1)
+
+        const rows = await (service as any).listEventSettings({ singleton: "default" })
+        expect(rows).toHaveLength(1)
+      })
+
+      it("pickSlice guard: an all-zero weight table throws INVALID_DATA, not a TypeError", async () => {
+        await service.updateSettings({
+          weights: { pts_50: 0, pts_100: 0, pts_200: 0, draw_entry: 0, gift: 0 },
+        })
+        const [code] = await service.generateCodeBatch(1, "b-zero-weights")
+        const entry = await service.createEntry({
+          code, email: "z@p.com", phone: "1", consent: true,
+        })
+        await expect(service.spin(entry.id, () => 0)).rejects.toThrow(
+          /no active slices/i,
+        )
+        // The guard must fire before any write — the spin was not consumed.
+        const after = await service.retrieveEventEntry(entry.id)
+        expect(after.spins_used).toBe(0)
+      })
+    })
   },
 })
