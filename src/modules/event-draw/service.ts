@@ -4,7 +4,7 @@ import {
   MedusaError,
   MedusaService,
 } from "@medusajs/framework/utils"
-import { UniqueConstraintViolationException } from "@medusajs/framework/mikro-orm/postgresql"
+import { raw, UniqueConstraintViolationException } from "@medusajs/framework/mikro-orm/postgresql"
 import type { Context } from "@medusajs/framework/types"
 import type { SqlEntityManager } from "@medusajs/framework/mikro-orm/postgresql"
 
@@ -33,6 +33,20 @@ function isUniqueViolation(err: unknown): boolean {
     err.type === MedusaError.Types.INVALID_DATA &&
     /already exists/i.test(err.message)
   )
+}
+
+export type EventEntryDTO = {
+  id: string
+  code: string
+  email: string
+  phone: string
+  consent: boolean
+  spins_earned: number
+  spins_used: number
+  review_bonus_claimed: boolean
+  social_bonus_claimed: boolean
+  customer_id: string | null
+  ip: string | null
 }
 
 class EventDrawModuleService extends MedusaService({
@@ -141,6 +155,78 @@ class EventDrawModuleService extends MedusaService({
       "EventCode",
       { id, redeemed_at: null },
       { redeemed_at: new Date() },
+    )
+  }
+
+  /**
+   * Redeems the code (single-use, via the atomic `redeemCode`) then creates
+   * the entry with `spins_earned = 1`. The entry itself needs no extra
+   * atomicity guard here — `redeemCode` already guarantees the code can
+   * back at most one entry, so this method can only ever run its
+   * `createEventEntries` once per code.
+   */
+  async createEntry(input: {
+    code: string
+    email: string
+    phone: string
+    consent: boolean
+    ip?: string
+  }): Promise<EventEntryDTO> {
+    const email = (input.email ?? "").trim().toLowerCase()
+    const phone = (input.phone ?? "").trim()
+    if (!email || !/.+@.+\..+/.test(email)) {
+      throw new MedusaError(MedusaError.Types.INVALID_DATA, "A valid email is required")
+    }
+    if (!phone) {
+      throw new MedusaError(MedusaError.Types.INVALID_DATA, "A phone/WhatsApp number is required")
+    }
+    // redeemCode enforces single-use + throws NOT_ALLOWED "already used"
+    const { code } = await this.redeemCode(input.code)
+    const entry = await this.createEventEntries({
+      code,
+      email,
+      phone,
+      consent: !!input.consent,
+      spins_earned: 1,
+      spins_used: 0,
+      ip: input.ip ?? null,
+    })
+    return entry as EventEntryDTO
+  }
+
+  /**
+   * Claims a bonus spin of the given kind. Atomic + idempotent: the flag
+   * flip and the `spins_earned` increment (capped at 3) happen in a single
+   * conditional `UPDATE ... WHERE id = ? AND <flag> = false`, mirroring
+   * `redeemCodeById_`. Two concurrent claims of the *same* kind can only
+   * have one UPDATE match the `<flag> = false` guard — the loser's row is
+   * already flagged by the time it runs and its UPDATE affects 0 rows, so
+   * it's a no-op. The increment itself is expressed as a raw SQL fragment
+   * (`LEAST(spins_earned + 1, 3)`) evaluated by Postgres against the
+   * current row under its row lock, not read-then-written in application
+   * code — so this is also race-safe across *different* kinds (e.g. a
+   * concurrent "review" and "social" claim on the same entry), since the
+   * second UPDATE blocks on the row lock and sees the first's committed
+   * value before computing its own increment.
+   */
+  async claimBonusSpin(entryId: string, kind: "review" | "social"): Promise<EventEntryDTO> {
+    const flag = kind === "review" ? "review_bonus_claimed" : "social_bonus_claimed"
+    await this.claimBonusSpinById_(entryId, flag)
+    const entry = await this.retrieveEventEntry(entryId)
+    return entry as EventEntryDTO
+  }
+
+  @InjectTransactionManager()
+  private async claimBonusSpinById_(
+    id: string,
+    flag: "review_bonus_claimed" | "social_bonus_claimed",
+    @MedusaContext() context: Context<SqlEntityManager> = {},
+  ): Promise<number> {
+    const manager = context.transactionManager!
+    return await manager.nativeUpdate(
+      "EventEntry",
+      { id, [flag]: false },
+      { [flag]: true, spins_earned: raw("LEAST(spins_earned + 1, 3)") },
     )
   }
 }

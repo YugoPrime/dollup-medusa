@@ -150,5 +150,75 @@ moduleIntegrationTestRunner<EventDrawModuleService>({
         expect(storedB).toHaveLength(25)
       })
     })
+
+    describe("entry + bonus spins", () => {
+      async function freshEntry() {
+        const [code] = await service.generateCodeBatch(1, "b-entry")
+        return service.createEntry({
+          code, email: "a@b.com", phone: "+23050001111", consent: true,
+        })
+      }
+
+      it("creates an entry with 1 spin and marks the code redeemed", async () => {
+        const entry = await freshEntry()
+        expect(entry).toMatchObject({ email: "a@b.com", spins_earned: 1, spins_used: 0 })
+        const [code] = await service.listEventCodes({ code: entry.code })
+        expect(code.redeemed_at).not.toBeNull()
+      })
+
+      it("rejects a second entry on the same code", async () => {
+        const entry = await freshEntry()
+        await expect(
+          service.createEntry({ code: entry.code, email: "c@d.com", phone: "x", consent: true }),
+        ).rejects.toThrow(/already used/i)
+      })
+
+      it("adds a review bonus spin once (idempotent)", async () => {
+        const entry = await freshEntry()
+        const after = await service.claimBonusSpin(entry.id, "review")
+        expect(after.spins_earned).toBe(2)
+        expect(after.review_bonus_claimed).toBe(true)
+        const again = await service.claimBonusSpin(entry.id, "review")
+        expect(again.spins_earned).toBe(2) // no double count
+      })
+
+      it("caps total spins at 3", async () => {
+        const entry = await freshEntry()
+        await service.claimBonusSpin(entry.id, "review")
+        const capped = await service.claimBonusSpin(entry.id, "social")
+        expect(capped.spins_earned).toBe(3)
+      })
+
+      it("requires email and phone", async () => {
+        const [code] = await service.generateCodeBatch(1, "b-req")
+        await expect(
+          service.createEntry({ code, email: "", phone: "", consent: true }),
+        ).rejects.toThrow(/email/i)
+      })
+
+      it("concurrent claims of the same bonus kind: spins_earned incremented exactly once", async () => {
+        const entry = await freshEntry()
+        const [a, b] = await Promise.all([
+          service.claimBonusSpin(entry.id, "review"),
+          service.claimBonusSpin(entry.id, "review"),
+        ])
+        expect(a.review_bonus_claimed).toBe(true)
+        expect(b.review_bonus_claimed).toBe(true)
+        // Whichever call "won" the race, the final stored state must reflect
+        // exactly one increment — not two.
+        const final = await service.retrieveEventEntry(entry.id)
+        expect(final.spins_earned).toBe(2)
+      })
+
+      it("review + social claims cap at 3, never exceeding the hard cap", async () => {
+        const entry = await freshEntry()
+        await service.claimBonusSpin(entry.id, "review")
+        await service.claimBonusSpin(entry.id, "social")
+        const final = await service.retrieveEventEntry(entry.id)
+        expect(final.spins_earned).toBe(3)
+        expect(final.review_bonus_claimed).toBe(true)
+        expect(final.social_bonus_claimed).toBe(true)
+      })
+    })
   },
 })
