@@ -35,6 +35,34 @@ function isUniqueViolation(err: unknown): boolean {
   )
 }
 
+type SliceDef = { type: "points" | "draw_entry" | "gift"; points: number }
+
+// Wheel slice catalog — the fixed set of outcomes a spin can land on.
+const SLICE_CATALOG: Record<string, SliceDef> = {
+  pts_50: { type: "points", points: 50 },
+  pts_100: { type: "points", points: 100 },
+  pts_200: { type: "points", points: 200 },
+  draw_entry: { type: "draw_entry", points: 0 },
+  gift: { type: "gift", points: 0 },
+}
+
+// Default relative weights for `EventSettings` on first read (out of 100).
+const DEFAULT_WEIGHTS: Record<string, number> = {
+  pts_50: 45,
+  pts_100: 25,
+  pts_200: 8,
+  draw_entry: 20,
+  gift: 2,
+}
+
+// Draw period key, e.g. "2026-07" — computed from an injected clock so
+// callers (and tests) can control it deterministically.
+function periodOf(d: Date): string {
+  const y = d.getUTCFullYear()
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0")
+  return `${y}-${m}`
+}
+
 export type EventEntryDTO = {
   id: string
   code: string
@@ -228,6 +256,181 @@ class EventDrawModuleService extends MedusaService({
       { id, [flag]: false },
       { [flag]: true, spins_earned: raw("LEAST(spins_earned + 1, 3)") },
     )
+  }
+
+  /**
+   * Reads the singleton wheel config, lazily creating it with defaults on
+   * first call. `now` is an injectable clock (defaults to `new Date()`) so
+   * tests can pin the initial `active_draw_period` deterministically.
+   *
+   * Lazy-create race: two concurrent first-callers can both pass the
+   * `!row` check and both attempt `createEventSettings`. The
+   * `EventSettings.singleton` unique index (`WHERE deleted_at IS NULL`)
+   * lets only one insert land — Medusa's repository layer maps the loser's
+   * Postgres unique-violation to a `MedusaError(INVALID_DATA, "... already
+   * exists.")` rather than letting the raw driver error escape. We detect
+   * that with the same `isUniqueViolation` helper `generateCodeBatch` uses,
+   * and on that specific failure re-read the row the winner just inserted
+   * instead of propagating the error — so no raw error (or mapped
+   * already-exists error) ever escapes `getSettings`, and both callers
+   * converge on the same persisted row.
+   */
+  async getSettings(now: Date = new Date()): Promise<{
+    weights: Record<string, number>
+    active_draw_period: string
+  }> {
+    let [row] = await this.listEventSettings({ singleton: "default" })
+    if (!row) {
+      try {
+        row = await this.createEventSettings({
+          singleton: "default",
+          weights_json: JSON.stringify(DEFAULT_WEIGHTS),
+          active_draw_period: periodOf(now),
+        })
+      } catch (err) {
+        if (!isUniqueViolation(err)) {
+          throw err
+        }
+        // Lost the create race — the winner's row is already committed.
+        ;[row] = await this.listEventSettings({ singleton: "default" })
+        if (!row) {
+          // Should be unreachable (the unique violation proves a row exists),
+          // but never swallow a genuinely unexpected state.
+          throw err
+        }
+      }
+    }
+    return {
+      weights: JSON.parse(row.weights_json) as Record<string, number>,
+      active_draw_period: row.active_draw_period,
+    }
+  }
+
+  async updateSettings(input: {
+    weights?: Record<string, number>
+    active_draw_period?: string
+  }): Promise<{ weights: Record<string, number>; active_draw_period: string }> {
+    const current = await this.getSettings()
+    const [row] = await this.listEventSettings({ singleton: "default" })
+    await this.updateEventSettings({
+      id: row!.id,
+      weights_json: JSON.stringify(input.weights ?? current.weights),
+      active_draw_period: input.active_draw_period ?? current.active_draw_period,
+    })
+    return this.getSettings()
+  }
+
+  /** Weighted-random slice pick. `rng()` must return a value in [0, 1). */
+  private pickSlice(weights: Record<string, number>, rng: () => number): string {
+    const entries = Object.entries(weights).filter(([, w]) => w > 0)
+    const total = entries.reduce((s, [, w]) => s + w, 0)
+    let r = rng() * total
+    for (const [slice, w] of entries) {
+      r -= w
+      if (r < 0) return slice
+    }
+    return entries[entries.length - 1][0]
+  }
+
+  /**
+   * Spins the wheel for `entryId`. `rng` is injectable (defaults to
+   * `Math.random`) so tests can force a deterministic slice.
+   *
+   * Concurrency-safe by construction: `consumeSpin_` atomically increments
+   * `spins_used` in a single conditional `UPDATE ... WHERE id = ? AND
+   * spins_used < spins_earned` (see its doc comment) and hands back the
+   * *pre-increment* value as `consumedIndex` — there is no separate read
+   * step in application code that a concurrent caller could interleave
+   * with. A caller that finds no spins left gets `null` back and this
+   * method throws `NOT_ALLOWED` before touching rewards or draw entries at
+   * all, so at most one of N concurrent spins past the allowance can ever
+   * reach reward creation for a given index.
+   *
+   * `idempotency_key = ${entryId}:${consumedIndex}` is unique per (entry,
+   * spin-slot) and backed by `EventReward.idempotency_key`'s unique index —
+   * a second backstop against a duplicate reward row landing at the same
+   * index, in case `consumeSpin_`'s guarantee is ever violated.
+   */
+  async spin(
+    entryId: string,
+    rng: () => number = Math.random,
+  ): Promise<{ slice: string; type: string; points: number }> {
+    const consumedIndex = await this.consumeSpin_(entryId)
+    if (consumedIndex === null) {
+      throw new MedusaError(MedusaError.Types.NOT_ALLOWED, "No spins left")
+    }
+
+    const settings = await this.getSettings()
+    const slice = this.pickSlice(settings.weights, rng)
+    const def = SLICE_CATALOG[slice] ?? SLICE_CATALOG.pts_50
+    const idempotencyKey = `${entryId}:${consumedIndex}`
+
+    try {
+      await this.createEventRewards({
+        entry_id: entryId,
+        slice,
+        type: def.type,
+        points: def.points,
+        status: "issued",
+        idempotency_key: idempotencyKey,
+      })
+    } catch (err) {
+      if (isUniqueViolation(err)) {
+        // Should be unreachable — consumeSpin_ guarantees each index is
+        // handed to exactly one caller — but never let a raw DB error
+        // escape; the spin itself was already (correctly) consumed.
+        throw new MedusaError(
+          MedusaError.Types.UNEXPECTED_STATE,
+          "Reward already recorded for this spin",
+        )
+      }
+      throw err
+    }
+
+    if (def.type === "draw_entry") {
+      await this.createEventDrawEntries({
+        entry_id: entryId,
+        draw_period: settings.active_draw_period,
+      })
+    }
+
+    return { slice, type: def.type, points: def.points }
+  }
+
+  /**
+   * Atomically consumes one spin: `UPDATE EventEntry SET spins_used =
+   * spins_used + 1 WHERE id = ? AND spins_used < spins_earned`, evaluated
+   * and applied by Postgres as a single statement under the row's write
+   * lock — never a read-then-write in application code. Returns the
+   * *pre-increment* `spins_used` value (the 0-based index of the spin just
+   * consumed) via `RETURNING`, or `null` if the row didn't match the guard
+   * (no spins left, or the entry doesn't exist).
+   *
+   * Under N concurrent calls for the same entry with only one spin left,
+   * Postgres serializes the competing `UPDATE`s on the row lock: the first
+   * to commit increments `spins_used` and satisfies the guard; every
+   * subsequent one re-evaluates `spins_used < spins_earned` against the
+   * now-committed value, fails the guard, and affects 0 rows — so exactly
+   * one caller ever gets a non-null index back, no matter how many race.
+   */
+  @InjectTransactionManager()
+  private async consumeSpin_(
+    id: string,
+    @MedusaContext() context: Context<SqlEntityManager> = {},
+  ): Promise<number | null> {
+    const manager = context.transactionManager!
+    const rows = await manager.execute<{ spins_used: number }[]>(
+      `UPDATE "event_entry"
+         SET "spins_used" = "spins_used" + 1
+       WHERE "id" = ?
+         AND "spins_used" < "spins_earned"
+       RETURNING "spins_used"`,
+      [id],
+    )
+    if (!rows.length) {
+      return null
+    }
+    return rows[0].spins_used - 1
   }
 }
 

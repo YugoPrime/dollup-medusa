@@ -220,5 +220,70 @@ moduleIntegrationTestRunner<EventDrawModuleService>({
         expect(final.social_bonus_claimed).toBe(true)
       })
     })
+
+    describe("settings + spin", () => {
+      it("returns default weights on first read", async () => {
+        const s = await service.getSettings()
+        expect(s.weights.pts_50).toBeGreaterThan(0)
+        expect(s.active_draw_period).toMatch(/^\d{4}-\d{2}$/)
+      })
+
+      it("spin consumes a spin and records a reward deterministically", async () => {
+        const [code] = await service.generateCodeBatch(1, "b-spin")
+        const entry = await service.createEntry({ code, email: "s@p.com", phone: "1", consent: true })
+        // force rng=0 → first slice in the weighted order
+        const result = await service.spin(entry.id, () => 0)
+        expect(result.slice).toBeDefined()
+        const after = await service.retrieveEventEntry(entry.id)
+        expect(after.spins_used).toBe(1)
+        const rewards = await service.listEventRewards({ entry_id: entry.id })
+        expect(rewards).toHaveLength(1)
+      })
+
+      it("draw_entry slice creates a draw ticket for the active period", async () => {
+        await service.updateSettings({ weights: { draw_entry: 1 } }) // only draw slice
+        const [code] = await service.generateCodeBatch(1, "b-draw")
+        const entry = await service.createEntry({ code, email: "d@p.com", phone: "1", consent: true })
+        const result = await service.spin(entry.id, () => 0.5)
+        expect(result.type).toBe("draw_entry")
+        const tickets = await service.listEventDrawEntries({ entry_id: entry.id })
+        expect(tickets).toHaveLength(1)
+      })
+
+      it("rejects a spin when none are left", async () => {
+        await service.updateSettings({ weights: { pts_50: 1 } })
+        const [code] = await service.generateCodeBatch(1, "b-none")
+        const entry = await service.createEntry({ code, email: "n@p.com", phone: "1", consent: true })
+        await service.spin(entry.id, () => 0) // uses the only base spin
+        await expect(service.spin(entry.id, () => 0)).rejects.toThrow(/no spins/i)
+      })
+
+      it("concurrent spins: exactly one consumes the only spin and records exactly one reward", async () => {
+        await service.updateSettings({ weights: { pts_50: 1 } }) // points-only slice
+        const [code] = await service.generateCodeBatch(1, "b-concurrent-spin")
+        const entry = await service.createEntry({
+          code, email: "cs@p.com", phone: "1", consent: true,
+        })
+
+        const results = await Promise.allSettled([
+          service.spin(entry.id, () => 0),
+          service.spin(entry.id, () => 0),
+          service.spin(entry.id, () => 0),
+        ])
+
+        const fulfilled = results.filter((r) => r.status === "fulfilled")
+        const rejected = results.filter((r) => r.status === "rejected")
+        expect(fulfilled).toHaveLength(1)
+        expect(rejected).toHaveLength(2)
+        for (const r of rejected as PromiseRejectedResult[]) {
+          expect(r.reason.message).toMatch(/no spins/i)
+        }
+
+        const final = await service.retrieveEventEntry(entry.id)
+        expect(final.spins_used).toBe(1)
+        const rewards = await service.listEventRewards({ entry_id: entry.id })
+        expect(rewards).toHaveLength(1)
+      })
+    })
   },
 })
