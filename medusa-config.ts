@@ -135,6 +135,10 @@ module.exports = defineConfig({
     {
       resolve: "./src/modules/event-draw",
     },
+    // On-site product reviews (Scratch & Win) — order-linked, moderated.
+    {
+      resolve: "./src/modules/reviews",
+    },
     {
       resolve: "./src/modules/stories",
     },
