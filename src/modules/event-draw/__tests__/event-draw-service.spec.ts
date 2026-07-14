@@ -240,6 +240,19 @@ moduleIntegrationTestRunner<EventDrawModuleService>({
         expect(rewards).toHaveLength(1)
       })
 
+      it("spin() returns the reward_id of the exact EventReward row it created", async () => {
+        const [code] = await service.generateCodeBatch(1, "b-spin-reward-id")
+        const entry = await service.createEntry({
+          code, email: "rid@p.com", phone: "1", consent: true,
+        })
+        const result = await service.spin(entry.id, () => 0)
+        expect(result.reward_id).toBeTruthy()
+
+        const [reward] = await service.listEventRewards({ entry_id: entry.id })
+        expect(reward.id).toBe(result.reward_id)
+        expect(reward.idempotency_key).toBe(`${entry.id}:0`)
+      })
+
       it("draw_entry slice creates a draw ticket for the active period", async () => {
         await service.updateSettings({ weights: { draw_entry: 1 } }) // only draw slice
         const [code] = await service.generateCodeBatch(1, "b-draw")

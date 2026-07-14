@@ -2,6 +2,7 @@ import { medusaIntegrationTestRunner } from "@medusajs/test-utils"
 import { ApiKeyType, Modules } from "@medusajs/framework/utils"
 
 import { EVENT_DRAW_MODULE } from "../../src/modules/event-draw"
+import { LOYALTY_MODULE } from "../../src/modules/loyalty"
 
 jest.setTimeout(90 * 1000)
 
@@ -63,6 +64,29 @@ medusaIntegrationTestRunner({
       expect(spin.data.points).toBe(100)
       expect(spin.data.spins_remaining).toBe(1)
       expect(spin.data.credited).toBe(100)
+
+      // Independent verification: read the ACTUAL loyalty account balance
+      // via the loyalty service directly, rather than trusting the echoed
+      // `credited` value on the spin response. This is what would have
+      // caught a reward-attribution bug where the route credited a
+      // different reward's id than the one this spin actually created (see
+      // the reward_id-threading comment in
+      // src/api/store/event/spin/route.ts) — the response could still
+      // report `credited: 100` while the wrong EventReward row got marked
+      // "credited" and the real one got stranded at "issued".
+      const eventSvc: any = getContainer().resolve(EVENT_DRAW_MODULE)
+      const loyalty: any = getContainer().resolve(LOYALTY_MODULE)
+      const [creditedEntry] = await eventSvc.listEventEntries({ id: entryId })
+      expect(creditedEntry.customer_id).toBeTruthy()
+      const account = await loyalty.getAccount(creditedEntry.customer_id)
+      expect(account.points_balance).toBe(100)
+
+      const [creditedReward] = await eventSvc.listEventRewards({
+        entry_id: entryId,
+        status: "credited",
+      })
+      expect(creditedReward).toBeTruthy()
+      expect(creditedReward.points).toBe(100)
 
       // kept in the same `it` as the happy path to avoid a multi-test Redis
       // teardown flake (see credit-event-spin.spec.ts for the same pattern)

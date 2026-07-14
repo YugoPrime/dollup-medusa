@@ -388,7 +388,7 @@ class EventDrawModuleService extends MedusaService({
   async spin(
     entryId: string,
     rng: () => number = Math.random,
-  ): Promise<{ slice: string; type: string; points: number }> {
+  ): Promise<{ slice: string; type: string; points: number; reward_id: string }> {
     return await this.spinTxn_(entryId, rng)
   }
 
@@ -428,7 +428,7 @@ class EventDrawModuleService extends MedusaService({
     entryId: string,
     rng: () => number,
     @MedusaContext() context: Context<SqlEntityManager> = {},
-  ): Promise<{ slice: string; type: string; points: number }> {
+  ): Promise<{ slice: string; type: string; points: number; reward_id: string }> {
     const consumedIndex = await this.consumeSpin_(entryId, context)
     if (consumedIndex === null) {
       throw new MedusaError(MedusaError.Types.NOT_ALLOWED, "No spins left")
@@ -439,8 +439,18 @@ class EventDrawModuleService extends MedusaService({
     const def = SLICE_CATALOG[slice] ?? SLICE_CATALOG.pts_50
     const idempotencyKey = `${entryId}:${consumedIndex}`
 
+    let reward: { id: string }
     try {
-      await this.createEventRewards(
+      // `createEventRewards` is called here with a single object (not an
+      // array) — per Medusa's generated `create()` (see
+      // `medusa-internal-service.js`: `Array.isArray(data) ? entities :
+      // entities[0]`), a single-object input returns the single created
+      // entity directly, not wrapped in an array. Capturing it here is what
+      // lets the route below credit the EXACT reward this spin created,
+      // instead of re-querying `listEventRewards(... DESC ... take: 1)`,
+      // which under two overlapping spins on the same entry (double-click /
+      // client retry) can race and return the OTHER request's reward id.
+      reward = await this.createEventRewards(
         {
           entry_id: entryId,
           slice,
@@ -474,7 +484,7 @@ class EventDrawModuleService extends MedusaService({
       )
     }
 
-    return { slice, type: def.type, points: def.points }
+    return { slice, type: def.type, points: def.points, reward_id: reward.id }
   }
 
   /**
