@@ -17,5 +17,25 @@ moduleIntegrationTestRunner<EventDrawModuleService>({
         expect(codes[0]).toMatchObject({ code: "DUB-AAAA", batch_id: "b1", redeemed_at: null })
       })
     })
+
+    describe("code batch + redemption", () => {
+      it("generates the requested number of unique codes", async () => {
+        const codes = await service.generateCodeBatch(5, "batch-x")
+        expect(new Set(codes).size).toBe(5)
+        const stored = await service.listEventCodes({ batch_id: "batch-x" })
+        expect(stored).toHaveLength(5)
+      })
+
+      it("redeems a code once, then rejects re-redemption", async () => {
+        const [code] = await service.generateCodeBatch(1, "batch-y")
+        const first = await service.redeemCode(code.toLowerCase()) // case-insensitive
+        expect(first.code).toBe(code)
+        await expect(service.redeemCode(code)).rejects.toThrow(/already/i)
+      })
+
+      it("rejects an unknown code", async () => {
+        await expect(service.redeemCode("DUB-NOPE")).rejects.toThrow(/not found|invalid/i)
+      })
+    })
   },
 })
