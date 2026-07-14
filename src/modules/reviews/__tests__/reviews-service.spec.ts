@@ -1,4 +1,5 @@
 import { moduleIntegrationTestRunner } from "@medusajs/test-utils"
+import { MedusaError } from "@medusajs/framework/utils"
 import { REVIEWS_MODULE } from "../index"
 import ReviewsModuleService from "../service"
 
@@ -21,6 +22,21 @@ moduleIntegrationTestRunner<ReviewsModuleService>({
       await expect(
         service.createReview({ email: "r@x.com", rating: 9, body: "hi there" }),
       ).rejects.toThrow(/1.?5/)
+    })
+
+    it("rejects an invalid moderate status", async () => {
+      const r = await service.createReview({
+        email: "r@x.com", rating: 5, body: "Love the fit!",
+      })
+      await expect(
+        service.moderate(r.id, "garbage" as any),
+      ).rejects.toThrow(MedusaError)
+    })
+
+    it("rejects a non-string body with a MedusaError, not a raw TypeError", async () => {
+      await expect(
+        service.createReview({ email: "r@x.com", rating: 5, body: 123 as any }),
+      ).rejects.toThrow(MedusaError)
     })
   },
 })

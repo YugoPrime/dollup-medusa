@@ -12,8 +12,8 @@ class ReviewsModuleService extends MedusaService({ ProductReview }) {
     order_id?: string; product_id?: string; email: string; rating: number; body: string
   }): Promise<ProductReviewDTO> {
     const rating = Number(input.rating)
-    const body = (input.body ?? "").trim()
-    const email = (input.email ?? "").trim().toLowerCase()
+    const body = (typeof input.body === "string" ? input.body : "").trim()
+    const email = (typeof input.email === "string" ? input.email : "").trim().toLowerCase()
     if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
       throw new MedusaError(MedusaError.Types.INVALID_DATA, "Rating must be 1–5")
     }
@@ -29,6 +29,9 @@ class ReviewsModuleService extends MedusaService({ ProductReview }) {
   }
 
   async moderate(id: string, status: "published" | "rejected"): Promise<ProductReviewDTO> {
+    if (status !== "published" && status !== "rejected") {
+      throw new MedusaError(MedusaError.Types.INVALID_DATA, "Invalid status")
+    }
     const row = await this.updateProductReviews({ id, status })
     return row as ProductReviewDTO
   }
