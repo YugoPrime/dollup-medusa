@@ -131,6 +131,10 @@ module.exports = defineConfig({
     {
       resolve: "./src/modules/loyalty",
     },
+    // Scratch & Win event module — codes, entries, rewards, draw tickets.
+    {
+      resolve: "./src/modules/event-draw",
+    },
     {
       resolve: "./src/modules/stories",
     },
