@@ -4,7 +4,7 @@ import { model } from "@medusajs/framework/utils"
 const EventCode = model
   .define("EventCode", {
     id: model.id({ prefix: "evtcode" }).primaryKey(),
-    code: model.text(),          // e.g. "DUB-7K3P" (uppercased, normalized)
+    code: model.text(),          // e.g. "DUB-7K3PQZ" (uppercased, normalized)
     batch_id: model.text(),      // print batch grouping
     redeemed_at: model.dateTime().nullable(),
   })
