@@ -11,9 +11,16 @@ export const EMPTY_PAYLOAD: DrawPayload = {
 
 let cache: { at: number; payload: DrawPayload } | null = null
 
+// In-flight fetch, shared by every caller that arrives while it is pending.
+// Without this, every concurrent request on a cold/expired cache starts its
+// own `fetcher()` call (thundering herd) instead of piggybacking on the one
+// already running.
+let inFlight: Promise<DrawPayload> | null = null
+
 /** Exported for tests only. */
 export function __resetCacheForTests(): void {
   cache = null
+  inFlight = null
 }
 
 /**
@@ -27,12 +34,30 @@ export async function cached(fetcher: () => Promise<DrawPayload>): Promise<DrawP
   const now = Date.now()
   if (cache && now - cache.at < TTL_MS) return cache.payload
 
-  try {
-    const payload = await fetcher()
-    cache = { at: now, payload }
-    return payload
-  } catch (err) {
-    console.error("[anniversary-draw] failed to load entries", err)
-    return cache?.payload ?? EMPTY_PAYLOAD
+  // Piggyback on an already-running fetch instead of starting a new one.
+  // Concurrent callers all await the same promise, so a burst of requests at
+  // the TTL boundary results in exactly one `fetcher()` call.
+  if (inFlight) return inFlight
+
+  const run = async (): Promise<DrawPayload> => {
+    try {
+      const payload = await fetcher()
+      cache = { at: Date.now(), payload }
+      return payload
+    } catch (err) {
+      console.error("[anniversary-draw] failed to load entries", err)
+      // Stamp `at` with a fresh timestamp even on failure. Otherwise the
+      // stale `at` stays older than the TTL forever, so the very next call
+      // sees the cache as expired and retries immediately — a failed
+      // backend gets hammered with one query per request instead of one
+      // retry per TTL window.
+      cache = { at: Date.now(), payload: cache?.payload ?? EMPTY_PAYLOAD }
+      return cache.payload
+    } finally {
+      inFlight = null
+    }
   }
+
+  inFlight = run()
+  return inFlight
 }
