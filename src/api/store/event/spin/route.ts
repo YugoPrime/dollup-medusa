@@ -23,37 +23,30 @@ import { creditEventSpinPoints } from "../../../../workflows/credit-event-spin"
  * the wrong reward and stranding the real one at status "issued".
  *
  * body: { entry_id }
- * 200 { slice, type, points, spins_remaining, credited }
+ * 200 { slice, type, points, spins_remaining, credited, credit_pending }
  * 400 { message } — validation error (bad entry id)
  * 409 { message } — no spins left
+ *
+ * `credit_pending: true` on an otherwise-200 response means the spin was
+ * consumed and the reward row was written (status "issued"), but crediting
+ * the loyalty points afterward failed — see the credit try/catch below.
+ * That failure must NOT be reported as a spin failure: the spin already
+ * happened, so a client that retried on a misleading 400/409 would burn a
+ * second spin for a reward it already won. `credit_pending: false` (or the
+ * field omitted) means credit succeeded normally.
  */
 export const POST = async (req: MedusaStoreRequest, res: MedusaResponse) => {
   const svc = req.scope.resolve<EventDrawModuleService>(EVENT_DRAW_MODULE)
   const entryId = (req.body as any)?.entry_id
 
+  let result: {
+    slice: string
+    type: string
+    points: number
+    reward_id: string
+  }
   try {
-    const result = await svc.spin(entryId)
-
-    let credited = 0
-    if (result.type === "points" && result.points > 0) {
-      const entry = await svc.retrieveEventEntry(entryId)
-      const out = await creditEventSpinPoints(req.scope, {
-        entryId,
-        email: entry.email,
-        points: result.points,
-        rewardId: result.reward_id,
-      })
-      credited = out.credited
-    }
-
-    const entry = await svc.retrieveEventEntry(entryId)
-    res.json({
-      slice: result.slice,
-      type: result.type,
-      points: result.points,
-      spins_remaining: entry.spins_earned - entry.spins_used,
-      credited,
-    })
+    result = await svc.spin(entryId)
   } catch (e) {
     const status =
       e instanceof MedusaError && e.type === MedusaError.Types.NOT_ALLOWED
@@ -62,5 +55,35 @@ export const POST = async (req: MedusaStoreRequest, res: MedusaResponse) => {
     res
       .status(status)
       .json({ message: e instanceof Error ? e.message : "Spin failed." })
+    return
   }
+
+  // The spin is consumed and the reward is written from here on — any
+  // failure below must still surface as a 200 (see doc comment above).
+  let credited = 0
+  let creditPending = false
+  if (result.type === "points" && result.points > 0) {
+    try {
+      const entryForCredit = await svc.retrieveEventEntry(entryId)
+      const out = await creditEventSpinPoints(req.scope, {
+        entryId,
+        email: entryForCredit.email,
+        points: result.points,
+        rewardId: result.reward_id,
+      })
+      credited = out.credited
+    } catch {
+      creditPending = true
+    }
+  }
+
+  const entry = await svc.retrieveEventEntry(entryId)
+  res.json({
+    slice: result.slice,
+    type: result.type,
+    points: result.points,
+    spins_remaining: entry.spins_earned - entry.spins_used,
+    credited,
+    credit_pending: creditPending,
+  })
 }

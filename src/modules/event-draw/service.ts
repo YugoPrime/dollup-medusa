@@ -93,7 +93,7 @@ class EventDrawModuleService extends MedusaService({
   private randomCode(): string {
     const a = EventDrawModuleService.ALPHABET
     let s = ""
-    for (let i = 0; i < 4; i++) s += a[Math.floor(Math.random() * a.length)]
+    for (let i = 0; i < 6; i++) s += a[Math.floor(Math.random() * a.length)]
     return `DUB-${s}`
   }
 
@@ -105,7 +105,7 @@ class EventDrawModuleService extends MedusaService({
    *    to a DB constraint error in the common single-caller case.
    *  - The pre-check is inherently check-then-act (racy under concurrent
    *    `generateCodeBatch` calls, or this loop's own earlier iteration in a
-   *    rare 32^4 birthday clash), so every insert is still wrapped in a
+   *    rare 32^6 birthday clash), so every insert is still wrapped in a
    *    catch that detects a *mapped* unique-index violation — Medusa's
    *    repository layer intercepts the raw Postgres error and re-throws it
    *    as a `MedusaError` (see `isUniqueViolation`) — and retries with a

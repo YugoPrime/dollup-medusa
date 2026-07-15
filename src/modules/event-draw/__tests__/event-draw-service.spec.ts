@@ -37,9 +37,9 @@ moduleIntegrationTestRunner<EventDrawModuleService>({
         await expect(service.redeemCode("DUB-NOPE")).rejects.toThrow(/not found|invalid/i)
       })
 
-      it("code format matches DUB-XXXX with the ambiguous-char-free alphabet", async () => {
+      it("code format matches DUB-XXXXXX with the ambiguous-char-free alphabet", async () => {
         const codes = await service.generateCodeBatch(20, "batch-format")
-        const pattern = /^DUB-[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{4}$/
+        const pattern = /^DUB-[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/
         for (const code of codes) {
           expect(code).toMatch(pattern)
         }

@@ -155,6 +155,67 @@ medusaIntegrationTestRunner({
       )
       expect(winRes.status).toBe(200)
       expect(winRes.data.winner.is_winner).toBe(true)
+
+      // ── draw: POST with a missing/invalid draw_entry_id → 400 ───────────
+      const badDraw = await api
+        .post("/admin/event/draw", {}, auth())
+        .catch((e: { response: unknown }) => e.response)
+      expect((badDraw as { status: number }).status).toBe(400)
+
+      // ── draw: POST with an unknown draw_entry_id → 404 ───────────────────
+      const notFoundDraw = await api
+        .post(
+          "/admin/event/draw",
+          { draw_entry_id: "evtdrawentry_does_not_exist" },
+          auth(),
+        )
+        .catch((e: { response: unknown }) => e.response)
+      expect((notFoundDraw as { status: number }).status).toBe(404)
+
+      // ── rewards: GET returns rewards + count, filterable by type/status ─
+      const giftReward = await svc.createEventRewards({
+        entry_id: entry.id,
+        slice: "gift",
+        type: "gift",
+        points: 0,
+        status: "issued",
+        idempotency_key: `${entry.id}:gift`,
+      })
+      const pointsReward = await svc.createEventRewards({
+        entry_id: entry.id,
+        slice: "pts_50",
+        type: "points",
+        points: 50,
+        status: "credited",
+        idempotency_key: `${entry.id}:points`,
+      })
+
+      const rewardsRes = await api.get("/admin/event/rewards", auth())
+      expect(rewardsRes.status).toBe(200)
+      expect(typeof rewardsRes.data.count).toBe("number")
+      const ids = (rewardsRes.data.rewards as Array<{ id: string }>).map(
+        (r) => r.id,
+      )
+      expect(ids).toContain(giftReward.id)
+      expect(ids).toContain(pointsReward.id)
+
+      const giftIssuedRes = await api.get(
+        "/admin/event/rewards?type=gift&status=issued",
+        auth(),
+      )
+      expect(giftIssuedRes.status).toBe(200)
+      const giftIssuedIds = (
+        giftIssuedRes.data.rewards as Array<{ id: string; type: string; status: string }>
+      ).map((r) => r.id)
+      expect(giftIssuedIds).toContain(giftReward.id)
+      expect(giftIssuedIds).not.toContain(pointsReward.id)
+      for (const r of giftIssuedRes.data.rewards as Array<{
+        type: string
+        status: string
+      }>) {
+        expect(r.type).toBe("gift")
+        expect(r.status).toBe("issued")
+      }
     })
   },
 })
