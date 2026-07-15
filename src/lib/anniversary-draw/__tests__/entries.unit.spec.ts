@@ -113,7 +113,7 @@ describe("buildPayload", () => {
   })
 
   it("uses the draw window constants", () => {
-    expect(DRAW_START.toISOString()).toBe("2026-07-17T00:00:00.000Z")
-    expect(DRAW_END.toISOString()).toBe("2026-07-31T23:59:59.000Z")
+    expect(DRAW_START.toISOString()).toBe("2026-07-16T20:00:00.000Z")
+    expect(DRAW_END.toISOString()).toBe("2026-07-31T19:59:59.000Z")
   })
 })

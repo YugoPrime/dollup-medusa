@@ -5,9 +5,15 @@ import { maskName } from "./mask-name"
 /**
  * Draw window, fixed by the campaign (Mauritius, UTC+4).
  * Constants rather than env: these dates are the campaign, not configuration.
+ *
+ * The `+04:00` offset is deliberate and must NOT be "simplified" to `Z` —
+ * that would shift the window by 4 hours (silently dropping midnight-4am
+ * orders on launch day and including 4 extra hours after close). Written
+ * in local time so the constants are self-documenting; the equivalent UTC
+ * instants are 2026-07-16T20:00:00.000Z and 2026-07-31T19:59:59.000Z.
  */
-export const DRAW_START = new Date("2026-07-17T00:00:00Z")
-export const DRAW_END = new Date("2026-07-31T23:59:59Z")
+export const DRAW_START = new Date("2026-07-17T00:00:00+04:00")
+export const DRAW_END = new Date("2026-07-31T23:59:59+04:00")
 
 export type RawOrder = {
   id: string
