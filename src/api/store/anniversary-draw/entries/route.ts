@@ -32,6 +32,11 @@ const ORDER_FIELDS = [
   "shipping_address.last_name",
 ]
 
+// Cap on the order query. If this is hit, the bubble wall may be incomplete
+// and could disagree with draw_winner.py (which paginates through all orders
+// to pick the official winner). Silent truncation here would be invisible.
+const ORDER_TAKE = 1000
+
 export const GET = async (req: MedusaStoreRequest, res: MedusaResponse) => {
   const payload = await cached(async () => {
     const query = req.scope.resolve(ContainerRegistrationKeys.QUERY)
@@ -41,8 +46,17 @@ export const GET = async (req: MedusaStoreRequest, res: MedusaResponse) => {
       filters: {
         created_at: { $gte: DRAW_START, $lte: DRAW_END },
       } as never,
-      pagination: { take: 1000 },
+      pagination: { take: ORDER_TAKE },
     })
+
+    // Silent truncation at the cap would be invisible. Log a warning if we hit it
+    // so the condition is visible in logs rather than silently breaking the draw.
+    if ((orders?.length ?? 0) >= ORDER_TAKE) {
+      console.warn(
+        `[anniversary-draw] hit the ${ORDER_TAKE}-order cap — the wall may be missing entries ` +
+          `and could disagree with draw_winner.py. Raise the cap or paginate.`,
+      )
+    }
 
     return buildPayload((orders ?? []) as RawOrder[], {
       channelId: process.env.ANNIVERSARY_DRAW_CHANNEL_ID ?? null,
