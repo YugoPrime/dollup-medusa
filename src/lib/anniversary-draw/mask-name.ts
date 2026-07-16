@@ -35,7 +35,12 @@ function fromEmail(email: string | null | undefined): string {
     .split(/[._+-]+/)
     .map((w) => clean(w))
     .filter(Boolean)
-  return words.join(" ")
+  if (words.length === 0) return ""
+  // Same rule as the name path: first word in full, every subsequent word
+  // reduced to an initial. "jean.luc.ahkine" -> "Jean L A", never a full surname.
+  const [firstWord, ...rest] = words
+  const initials = rest.map((w) => w[0]).filter(Boolean)
+  return [firstWord, ...initials].join(" ")
 }
 
 export function maskName(input: {

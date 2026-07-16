@@ -13,6 +13,16 @@ describe("maskName", () => {
     expect(maskName({ email: "rahvi.b99@gmail.com" })).toBe("Rahvi B")
   })
 
+  it("reduces every word after the first in the email prefix to an initial", () => {
+    // Full surname in an email prefix is strictly more identifying than the
+    // name path's "Jane D." — must never reach the wall as "Jane Doe".
+    expect(maskName({ email: "jane.doe@gmail.com" })).toBe("Jane D")
+  })
+
+  it("reduces a 3+ word email prefix the same way", () => {
+    expect(maskName({ email: "jean_luc.ahkine+promo@yahoo.fr" })).toBe("Jean L A P")
+  })
+
   it("falls back to a generic label when nothing is usable", () => {
     expect(maskName({})).toBe("Doll Up client")
     expect(maskName({ firstName: "   ", email: "   " })).toBe("Doll Up client")
