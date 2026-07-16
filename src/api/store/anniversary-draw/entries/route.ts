@@ -23,11 +23,18 @@ import {
 
 // Only what masking and bucketing need. Anything more would be PII we'd then
 // have to be careful to drop.
+//
+// `metadata` is load-bearing, not incidental: eligibility (buildPayload's
+// isWebsiteOrder) keys off the presence of `metadata.cart_type`. Trimming
+// this field as "unused PII" would silently make every order non-eligible —
+// see src/lib/anniversary-draw/entries.ts for the full rationale. metadata
+// itself DOES contain PII on some orders (phone numbers, notes) and must
+// never be forwarded past buildPayload into the response payload.
 const ORDER_FIELDS = [
   "id",
   "created_at",
   "email",
-  "sales_channel.id",
+  "metadata",
   "shipping_address.first_name",
   "shipping_address.last_name",
 ]
@@ -59,7 +66,6 @@ export const GET = async (req: MedusaStoreRequest, res: MedusaResponse) => {
     }
 
     return buildPayload((orders ?? []) as RawOrder[], {
-      channelId: process.env.ANNIVERSARY_DRAW_CHANNEL_ID ?? null,
       winnerOrderId: process.env.ANNIVERSARY_DRAW_WINNER_ID ?? null,
     })
   })
