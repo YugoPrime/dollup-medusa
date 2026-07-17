@@ -10,17 +10,19 @@ describe("maskName", () => {
   })
 
   it("falls back to the email prefix when there is no name", () => {
-    expect(maskName({ email: "rahvi.b99@gmail.com" })).toBe("Rahvi B")
+    expect(maskName({ email: "rahvi.b99@gmail.com" })).toBe("Rahvi B.")
   })
 
   it("reduces every word after the first in the email prefix to an initial", () => {
     // Full surname in an email prefix is strictly more identifying than the
     // name path's "Jane D." — must never reach the wall as "Jane Doe".
-    expect(maskName({ email: "jane.doe@gmail.com" })).toBe("Jane D")
+    expect(maskName({ email: "jane.doe@gmail.com" })).toBe("Jane D.")
   })
 
   it("reduces a 3+ word email prefix the same way", () => {
-    expect(maskName({ email: "jean_luc.ahkine+promo@yahoo.fr" })).toBe("Jean L A P")
+    // "+promo" is dropped before splitting, so the tag can't land in the
+    // surname position; "ahkine" is the surname and gets initialised.
+    expect(maskName({ email: "jean_luc.ahkine+promo@yahoo.fr" })).toBe("Jean A.")
   })
 
   it("falls back to a generic label when nothing is usable", () => {
@@ -47,6 +49,39 @@ describe("maskName", () => {
 
   it("returns the generic label when stripping leaves nothing", () => {
     expect(maskName({ firstName: "🎉🎉", lastName: "🎉" })).toBe("Doll Up client")
+  })
+
+
+  // --- REGRESSION: the 2026-07-17 live leak -------------------------------
+  // The wall published full surnames because customers type their whole name
+  // into the first-name box and leave last-name empty. Masking must be
+  // positional, never dependent on which field the words arrived in.
+  it("masks a full name typed into the first-name field alone", () => {
+    expect(maskName({ firstName: "Hashna Dhula", lastName: "" })).toBe("Hashna D.")
+    expect(maskName({ firstName: "Kate Meunier", lastName: null })).toBe("Kate M.")
+    expect(maskName({ firstName: "Estelle Lee" })).toBe("Estelle L.")
+  })
+
+  it("masks a full name typed into the last-name field alone", () => {
+    expect(maskName({ firstName: "", lastName: "Hashna Dhula" })).toBe("Hashna D.")
+  })
+
+  it("masks three-part names down to first + final initial", () => {
+    expect(maskName({ firstName: "Marie Anne Lee", lastName: "" })).toBe("Marie L.")
+    expect(maskName({ firstName: "Marie", lastName: "Li Ying Pin" })).toBe("Marie P.")
+  })
+
+  it("never emits more than one full word", () => {
+    for (const n of [
+      maskName({ firstName: "Hashna Dhula" }),
+      maskName({ firstName: "Marie Anne Lee" }),
+      maskName({ firstName: "A B C D E" }),
+      maskName({ email: "jane.doe@gmail.com" }),
+    ]) {
+      const words = n.split(" ")
+      const fullWords = words.filter((w) => !/^\p{L}\.$/u.test(w))
+      expect(fullWords.length).toBeLessThanOrEqual(1)
+    }
   })
 
   it("truncates to 18 characters", () => {
