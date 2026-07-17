@@ -175,6 +175,39 @@ describe("buildPayload", () => {
     })
   })
 
+
+  it("drops cancelled orders entirely — no bubble, no ticket", () => {
+    // Regression: a customer cancelled order #556 on launch day. It kept its
+    // bubble AND stayed lit as "in the draw", so a cancelled order could have
+    // won the Rs 2,000.
+    const out = buildPayload(
+      [
+        order({ id: "live", metadata: { cart_type: "instock" } }),
+        order({ id: "gone", metadata: { cart_type: "instock" }, canceled_at: "2026-07-17T12:59:27Z" }),
+      ],
+      {},
+    )
+    expect(out.count).toBe(1)
+    expect(out.entryCount).toBe(1)
+    expect(out.entries.map((e) => e.id)).toEqual([bubbleId("live")])
+  })
+
+  it("drops cancelled DM orders too", () => {
+    const out = buildPayload(
+      [order({ id: "dm", metadata: { source: "dm_admin" }, canceled_at: "2026-07-17T12:00:00Z" })],
+      {},
+    )
+    expect(out.count).toBe(0)
+  })
+
+  it("never resolves a winner to a cancelled order", () => {
+    const out = buildPayload(
+      [order({ id: "gone", metadata: { cart_type: "instock" }, canceled_at: "2026-07-17T12:59:27Z" })],
+      { winnerOrderId: "gone" },
+    )
+    expect(out.winnerId).toBeNull()
+  })
+
   it("uses the draw window constants", () => {
     expect(DRAW_START.toISOString()).toBe("2026-07-16T20:00:00.000Z")
     expect(DRAW_END.toISOString()).toBe("2026-07-31T19:59:59.000Z")

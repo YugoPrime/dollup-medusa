@@ -18,6 +18,8 @@ export const DRAW_END = new Date("2026-07-31T23:59:59+04:00")
 export type RawOrder = {
   id: string
   created_at: string | Date
+  /** Set by Medusa when an order is cancelled. Cancelled orders are dropped. */
+  canceled_at?: string | Date | null
   email?: string | null
   metadata?: Record<string, unknown> | null
   shipping_address?: { first_name?: string | null; last_name?: string | null } | null
@@ -95,6 +97,12 @@ export function buildPayload(
   const { winnerOrderId } = opts
 
   const entries: DrawEntry[] = orders
+    // Cancelled orders are not purchases. They must not appear on the wall at
+    // all — not even as a non-eligible bubble — and above all must not hold a
+    // draw ticket. A customer cancelled #556 on launch day and their bubble
+    // stayed lit as "in the draw"; the Rs 2,000 could have gone to an order
+    // that no longer existed.
+    .filter((o) => !o.canceled_at)
     .map((o) => ({
       id: bubbleId(o.id),
       name: maskName({

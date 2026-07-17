@@ -33,6 +33,9 @@ import {
 const ORDER_FIELDS = [
   "id",
   "created_at",
+  // Required: buildPayload drops cancelled orders. Without this field every
+  // cancelled order silently keeps its bubble AND its draw ticket.
+  "canceled_at",
   "email",
   "metadata",
   "shipping_address.first_name",
