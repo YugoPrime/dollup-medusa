@@ -81,12 +81,15 @@ try {
       }
     }
 
-    # --- Tunnel pre-flight ----------------------------------------------
-    $tunnelOk = Test-NetConnection 127.0.0.1 -Port 5432 -InformationLevel Quiet -WarningAction SilentlyContinue
-    if (-not $tunnelOk) {
-      Write-Host "[render-poller-tick] $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') SSH tunnel down - skipping tick (next fire in 5 min)"
-      # Don't telegram-alert on every 5min tick - too noisy. The daily
-      # 18:30 batch will alert if the tunnel is still down at that time.
+    # --- Tunnel pre-flight (self-healing) -------------------------------
+    # Repair the tunnel on demand rather than just skipping. Quiet mode keeps
+    # the 5-min ticks from spamming the transcript.
+    $ensure = Join-Path $scriptDir "ensure-tunnel.ps1"
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ensure -Quiet
+    if ($LASTEXITCODE -ne 0) {
+      Write-Host "[render-poller-tick] $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') SSH tunnel down and auto-repair failed - skipping tick (next fire in 5 min)"
+      # Don't telegram-alert on every 5min tick - too noisy. The watchdog and
+      # the daily 18:30 batch will escalate if the tunnel is still down.
       exit 2
     }
 

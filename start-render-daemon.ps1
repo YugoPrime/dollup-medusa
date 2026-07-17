@@ -59,12 +59,14 @@ try {
   # forwarded by the PM2-managed SSH tunnel to Coolify. If PM2 (or the
   # tunnel) is down, the renderer will spend 5 minutes timing out on
   # KnexTimeoutError, fail silently to disk, and tomorrow's stories
-  # won't be ready. Catch this here instead.
-  $tunnelOk = Test-NetConnection 127.0.0.1 -Port 5432 -InformationLevel Quiet -WarningAction SilentlyContinue
-  if (-not $tunnelOk) {
-    $msg = "[start-render-daemon] $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') SSH tunnel down (127.0.0.1:5432 not listening) - aborting before knex timeout"
+  # won't be ready. Self-heal the tunnel first (ensure-tunnel.ps1 revives
+  # the PM2 daemon + tunnel on demand); only abort+alert if repair fails.
+  $ensure = Join-Path $scriptDir "ensure-tunnel.ps1"
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ensure
+  if ($LASTEXITCODE -ne 0) {
+    $msg = "[start-render-daemon] $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') SSH tunnel down and auto-repair failed - aborting before knex timeout"
     Write-Host $msg
-    $alertMsg = [char]0x26A0 + [char]0xFE0F + " <b>Stories render aborted</b>`n`nSSH tunnel to Coolify is down (127.0.0.1:5432 not listening).`n`nFix: <code>pm2 resurrect</code> then re-run <code>start-render-daemon.ps1</code>."
+    $alertMsg = [char]0x26A0 + [char]0xFE0F + " <b>Stories render aborted</b>`n`nSSH tunnel to Coolify is down and auto-repair failed.`n`nManual fix: <code>pm2 resurrect</code> then re-run <code>start-render-daemon.ps1</code>. Check Tailscale + SSH to root@100.65.8.93."
     Send-TelegramAlert $alertMsg
     exit 2
   }
