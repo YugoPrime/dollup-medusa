@@ -29,6 +29,9 @@ module.exports = defineConfig({
       adminCors: process.env.ADMIN_CORS!,
       authCors: process.env.AUTH_CORS!,
       jwtSecret: process.env.JWT_SECRET || "supersecret",
+      // Admin JWT lifetime. Medusa defaults to 24h, which logged the admin
+      // out daily; extend it so the session lasts a month. `ms` format.
+      jwtExpiresIn: process.env.JWT_EXPIRES_IN || "30d",
       cookieSecret: process.env.COOKIE_SECRET || "supersecret",
     }
   },
@@ -39,6 +42,40 @@ module.exports = defineConfig({
         redisUrl: process.env.EVENTS_REDIS_URL || process.env.REDIS_URL,
       },
     },
+    // Redis-backed caching + workflow engine (production checklist). Both are
+    // gated on REDIS_URL, like locking below, so test environments without a
+    // Redis server still boot with the in-memory defaults. The Redis workflow
+    // engine also persists workflow state across redeploys — with the
+    // in-memory engine every restart dropped in-flight executions.
+    ...(process.env.CACHE_REDIS_URL || process.env.REDIS_URL
+      ? [
+          {
+            resolve: "@medusajs/medusa/caching",
+            options: {
+              providers: [
+                {
+                  resolve: "@medusajs/caching-redis",
+                  id: "caching-redis",
+                  is_default: true,
+                  options: {
+                    redisUrl:
+                      process.env.CACHE_REDIS_URL || process.env.REDIS_URL,
+                  },
+                },
+              ],
+            },
+          },
+          {
+            resolve: "@medusajs/medusa/workflow-engine-redis",
+            options: {
+              redis: {
+                redisUrl:
+                  process.env.WORKFLOW_REDIS_URL || process.env.REDIS_URL,
+              },
+            },
+          },
+        ]
+      : []),
     // locking-redis is only registered when a Redis URL is available so the
     // backend boots cleanly in test environments that have no Redis server.
     ...(process.env.LOCKING_REDIS_URL || process.env.REDIS_URL
