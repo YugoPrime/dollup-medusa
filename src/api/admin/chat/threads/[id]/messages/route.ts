@@ -88,12 +88,18 @@ export const POST = async (req: MedusaRequest, res: MedusaResponse) => {
     const messages: any[] = []
     let updatedThread: any = thread
     if (hasText) {
+      // The admin composer sends tag: "HUMAN_AGENT" when the thread is outside
+      // Messenger's 24h customer-engagement window. sendOutbound expresses the same
+      // intent as allowOutsideWindow, so map one onto the other rather than making
+      // the client know about both.
+      const allowOutsideWindow = body.tag === "HUMAN_AGENT"
       const out = await chat.sendOutbound({
         threadId: id,
         body: text,
         senderKind: "staff",
         senderUserId: userId,
         takeoverPauseHours,
+        allowOutsideWindow,
       })
       messages.push(out.message)
       updatedThread = out.thread
