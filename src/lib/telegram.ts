@@ -32,6 +32,13 @@ export async function sendTelegram(
     body.parse_mode = opts.parseMode ?? "HTML"
   }
 
+  // Bounded so a hung request can never hold a caller hostage — e.g. the AI
+  // concierge subscriber fires this from inside a per-thread lock, and an
+  // unbounded fetch here would delay that thread's next message for as long
+  // as Telegram's servers took to answer (or never answer).
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 10_000)
+
   try {
     const res = await fetch(
       `https://api.telegram.org/bot${token}/sendMessage`,
@@ -39,6 +46,7 @@ export async function sendTelegram(
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
+        signal: controller.signal,
       },
     )
     if (!res.ok) {
@@ -47,7 +55,12 @@ export async function sendTelegram(
     }
     return { ok: true }
   } catch (err) {
+    // Covers both a network error and an abort-on-timeout — either way this
+    // never throws, matching every other failure mode this function already
+    // handles.
     return { ok: false, status: 0, message: (err as Error).message }
+  } finally {
+    clearTimeout(timeout)
   }
 }
 

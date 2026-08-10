@@ -28,6 +28,7 @@ const HOLDING_LINES: Record<string, string> = {
   kreol: "Mo pe pass sa ar lekip la — nou pou revini ver ou byento.",
   mixed: "Je passe ça à l'équipe — on revient vers vous très vite.",
 }
+const INBOX_URL = "https://admin.dollupboutique.com/inbox"
 
 type HistoryRow = {
   sender_kind: string
@@ -108,179 +109,277 @@ export default async function aiAgentOnInboundMessage({
     await locking.execute(
       `ai-agent:${threadId}`,
       async () => {
-        const [message] = await chat.listMessages({ id: messageId })
-        const [thread] = await chat.listThreads({ id: threadId })
-        if (!message || !thread) return
-
-        const settings = await agent.getSettings()
-        const guard = evaluateGuards({
-          settings: settings as never,
-          thread: thread as never,
-          message: message as never,
-          now: new Date(),
-        })
-
-        if (!guard.run) {
+        let message: any
+        let thread: any
+        try {
+          ;[message] = await chat.listMessages({ id: messageId })
+          ;[thread] = await chat.listThreads({ id: threadId })
+        } catch (err) {
+          // Couldn't even fetch the message/thread — nothing downstream ran,
+          // so nothing downstream had a chance to persist a row either. This
+          // is the one branch with no thread to read a channel off of.
           await persistAgentRun(agent, logger, {
             thread_id: threadId,
             message_id: messageId,
-            channel: (thread as any).channel,
+            channel: "unknown",
+            status: "failed",
+            error: (err as Error).message,
+          })
+          return
+        }
+        if (!message || !thread) {
+          // Not an error — the row genuinely doesn't exist (deleted, stale
+          // event). Still worth a row: without one, this looks in
+          // ai_agent_run identical to the message never having arrived.
+          await persistAgentRun(agent, logger, {
+            thread_id: threadId,
+            message_id: messageId,
+            channel: thread?.channel ?? "unknown",
             status: "skipped",
-            skip_reason: guard.skipReason,
+            skip_reason: "message_missing",
           })
           return
         }
 
-        // Assemble the cached prefix + the last N turns of this thread.
-        const entries = await agent.listKnowledgeEntries({ is_active: true })
-        const systemBlocks = buildSystemBlocks(entries as never)
-        const rows = (await chat.listMessages(
-          { thread_id: threadId },
-          { order: { created_at: "DESC" }, take: HISTORY_TURNS },
-        )) as HistoryRow[]
-        const history = rows
-          .slice()
-          .reverse()
-          .filter((m) => typeof m.body === "string" && m.body.trim())
-          .map((m) => ({
-            role: m.direction === "inbound" ? ("user" as const) : ("assistant" as const),
-            content: m.body as string,
-          }))
-
-        // runAgent never throws — every failure inside it (bad key, timeout,
-        // network error, malformed terminal call) is captured into
-        // outcome.error / outcome.terminal so it always reaches the
-        // escalation decision and the audit row below.
-        const outcome = await runAgent({ scope: container, systemBlocks, history })
-
-        const hardTrigger = matchesHardTrigger((message as any).body ?? "")
-        const decision = shouldEscalate({
-          confidence: outcome.reply?.confidence ?? null,
-          threshold: Number(settings.confidence_threshold ?? 0.7),
-          toolEscalated: outcome.terminal === "escalate",
-          hardTrigger,
-          errored: outcome.terminal === "timeout" || outcome.error !== null,
-        })
-
-        const shadow = settings.mode === "shadow"
-
-        // The run itself already succeeded (outcome exists) by this point.
-        // Everything from here down is delivery: sending the reply, storing
-        // the draft, or escalating. A failure here must not erase the run —
-        // it must be recorded as status "failed" with the error attached,
-        // never lost. runStatus/runError below are what actually gets
-        // persisted; they start optimistic and are downgraded on failure.
-        let runStatus: "replied" | "escalated" | "failed" = decision.escalate
-          ? "escalated"
-          : "replied"
-        let runError = outcome.error
-
-        let spend: {
-          spend_usd_micros: number
-          crossed70: boolean
-          exhausted: boolean
-        } | null = null
+        // Everything from here down that can throw for reasons unrelated to
+        // the agent's own judgement (a DB hiccup fetching settings, knowledge,
+        // or history) is wrapped so it still lands an AgentRun row instead of
+        // vanishing into the outer catch's plain log line. Once runAgent has
+        // actually returned, every step below already persists its own row
+        // and never rethrows (see the delivery try/catch and persistAgentRun
+        // itself) — so in practice this catch is only ever reached by a
+        // pre-run failure.
         try {
-          spend = await agent.addSpend(outcome.costMicros)
-        } catch (err) {
-          logger.error(
-            `[ai-agent] addSpend failed for thread ${threadId}: ${(err as Error).message}`,
-          )
-        }
+          // Idempotency. The lock this callback runs inside only prevents
+          // *concurrent* runs on this thread — it says nothing about this
+          // exact message being processed again LATER, e.g. if the event bus
+          // redelivers message_id after a crash between a successful send and
+          // the job's ack. That is a different problem from the lock's, and
+          // the next reader should not assume the lock already covers it.
+          // ai_agent_run doubles as the marker that closes it: if this
+          // message already produced a terminal, customer-facing outcome,
+          // don't run — and don't reply — a second time. "skipped"/"failed"
+          // runs are left alone so a genuine retry (guard said no, or
+          // delivery broke) can still go through.
+          const priorRuns = (await agent.listAgentRuns({ message_id: messageId })) as Array<{
+            status: string
+          }>
+          if (priorRuns.some((r) => r.status === "replied" || r.status === "escalated")) {
+            return
+          }
 
-        try {
-          if (decision.escalate) {
-            await chat.updateThreads({ id: threadId, needs_human: true } as never)
+          const settings = await agent.getSettings()
+          const guard = evaluateGuards({
+            settings: settings as never,
+            thread: thread as never,
+            message: message as never,
+            now: new Date(),
+          })
 
-            // One holding line per thread per 6h, and never in shadow mode —
-            // shadow mode must not put a single word in front of a customer.
-            if (!shadow) {
-              const already = wasHoldingLineSentRecently(rows, HOLDING_LINE_COOLDOWN_MS, Date.now())
-              if (!already) {
-                const lang = outcome.reply?.language ?? "fr"
-                await chat.sendOutbound({
-                  threadId,
-                  body: HOLDING_LINES[lang] ?? HOLDING_LINES.fr,
-                  senderKind: "ai",
-                })
+          if (!guard.run) {
+            await persistAgentRun(agent, logger, {
+              thread_id: threadId,
+              message_id: messageId,
+              channel: (thread as any).channel,
+              status: "skipped",
+              skip_reason: guard.skipReason,
+            })
+            return
+          }
+
+          // Assemble the cached prefix + the last N turns of this thread.
+          const entries = await agent.listKnowledgeEntries({ is_active: true })
+          const systemBlocks = buildSystemBlocks(entries as never)
+          const rows = (await chat.listMessages(
+            { thread_id: threadId },
+            { order: { created_at: "DESC" }, take: HISTORY_TURNS },
+          )) as HistoryRow[]
+          const history = rows
+            .slice()
+            .reverse()
+            .filter((m) => typeof m.body === "string" && m.body.trim())
+            .map((m) => ({
+              role: m.direction === "inbound" ? ("user" as const) : ("assistant" as const),
+              content: m.body as string,
+            }))
+
+          // runAgent never throws — every failure inside it (bad key, timeout,
+          // network error, malformed terminal call) is captured into
+          // outcome.error / outcome.terminal so it always reaches the
+          // escalation decision and the audit row below.
+          const outcome = await runAgent({ scope: container, systemBlocks, history })
+
+          const hardTrigger = matchesHardTrigger((message as any).body ?? "")
+          const decision = shouldEscalate({
+            confidence: outcome.reply?.confidence ?? null,
+            threshold: Number(settings.confidence_threshold ?? 0.7),
+            toolEscalated: outcome.terminal === "escalate",
+            hardTrigger,
+            errored: outcome.terminal === "timeout" || outcome.error !== null,
+          })
+
+          const shadow = settings.mode === "shadow"
+
+          // The run itself already succeeded (outcome exists) by this point.
+          // Everything from here down is delivery: sending the reply, storing
+          // the draft, or escalating. A failure here must not erase the run —
+          // it must be recorded as status "failed" with the error attached,
+          // never lost. runStatus/runError below are what actually gets
+          // persisted; they start optimistic and are downgraded on failure.
+          let runStatus: "replied" | "escalated" | "failed" = decision.escalate
+            ? "escalated"
+            : "replied"
+          let runError = outcome.error
+
+          let spend: {
+            spend_usd_micros: number
+            crossed70: boolean
+            exhausted: boolean
+          } | null = null
+          try {
+            spend = await agent.addSpend(outcome.costMicros)
+          } catch (err) {
+            logger.error(
+              `[ai-agent] addSpend failed for thread ${threadId}: ${(err as Error).message}`,
+            )
+          }
+
+          try {
+            if (decision.escalate) {
+              await chat.updateThreads({ id: threadId, needs_human: true } as never)
+
+              // One holding line per thread per 6h, and never in shadow mode —
+              // shadow mode must not put a single word in front of a customer.
+              if (!shadow) {
+                const already = wasHoldingLineSentRecently(
+                  rows,
+                  HOLDING_LINE_COOLDOWN_MS,
+                  Date.now(),
+                )
+                if (!already) {
+                  const lang = outcome.reply?.language ?? "fr"
+                  await chat.sendOutbound({
+                    threadId,
+                    body: HOLDING_LINES[lang] ?? HOLDING_LINES.fr,
+                    senderKind: "ai",
+                  })
+                }
+              }
+            } else if (outcome.reply) {
+              if (shadow) {
+                // Shadow mode: keep the draft on the inbound message for review.
+                // Never sent to the customer — the widget only ever renders
+                // direction/sender_kind/body, not draft_reply.
+                await chat.updateMessages({
+                  id: messageId,
+                  draft_reply: { text: outcome.reply.text, intent: outcome.reply.intent },
+                  draft_confidence: outcome.reply.confidence,
+                } as never)
+              } else {
+                await chat.sendOutbound({ threadId, body: outcome.reply.text, senderKind: "ai" })
               }
             }
-          } else if (outcome.reply) {
-            if (shadow) {
-              // Shadow mode: keep the draft on the inbound message for review.
-              // Never sent to the customer — the widget only ever renders
-              // direction/sender_kind/body, not draft_reply.
-              await chat.updateMessages({
-                id: messageId,
-                draft_reply: { text: outcome.reply.text, intent: outcome.reply.intent },
-                draft_confidence: outcome.reply.confidence,
-              } as never)
-            } else {
-              await chat.sendOutbound({ threadId, body: outcome.reply.text, senderKind: "ai" })
+          } catch (err) {
+            runStatus = "failed"
+            const deliveryError = (err as Error).message
+            runError = runError ? `${runError}; delivery failed: ${deliveryError}` : deliveryError
+            logger.error(
+              `[ai-agent] reply delivery failed for thread ${threadId}, message ${messageId}: ${deliveryError}`,
+            )
+
+            // Unlike the escalate branch (which already set needs_human before
+            // even attempting the holding line, and always pages Telegram
+            // below), a failed send on the DIRECT reply path had nothing else
+            // flagging it — the customer would otherwise be left with no
+            // answer and no trace beyond a row in a table nobody watches live.
+            // Make a failed send at least as visible as an escalation.
+            if (!decision.escalate && !shadow) {
+              try {
+                await chat.updateThreads({ id: threadId, needs_human: true } as never)
+              } catch (threadErr) {
+                logger.error(
+                  `[ai-agent] failed to flag thread ${threadId} needs_human after delivery failure: ${(threadErr as Error).message}`,
+                )
+              }
+              await sendTelegram(
+                [
+                  `🆘 <b>Chat — envoi échoué, un humain est demandé</b>`,
+                  "",
+                  `Canal : ${(thread as any).channel}`,
+                  `Raison : échec d'envoi (pas un choix du modèle) — ${escapeTelegramHtml(deliveryError)}`,
+                  "",
+                  `<a href="${INBOX_URL}">Ouvrir l'inbox</a>`,
+                ].join("\n"),
+              )
             }
           }
+
+          // Persisted regardless of what happened above — this call cannot be
+          // skipped by any earlier throw, and persistAgentRun itself never
+          // throws.
+          await persistAgentRun(agent, logger, {
+            thread_id: threadId,
+            message_id: messageId,
+            channel: (thread as any).channel,
+            status: runStatus,
+            intent: outcome.reply?.intent ?? null,
+            confidence: outcome.reply?.confidence ?? null,
+            escalation_reason: decision.reason,
+            language: outcome.reply?.language ?? null,
+            tools_used: outcome.toolsUsed,
+            model: AGENT_MODEL,
+            input_tokens: outcome.usage.input_tokens,
+            output_tokens: outcome.usage.output_tokens,
+            cache_read_input_tokens: outcome.usage.cache_read_input_tokens,
+            cost_usd_micros: outcome.costMicros,
+            latency_ms: outcome.latencyMs,
+            error: runError,
+          })
+
+          // Telegram from here down: internal staff notifications only, never
+          // customer-facing, so they are safe in shadow mode and safe to fire
+          // after everything above. sendTelegram never throws (dormant/soft-fails
+          // when unconfigured, and now internally timeboxed to 10s), and the
+          // customer's reply/holding-line send above has already completed by
+          // this point — notifying staff never blocks or races the
+          // customer-facing send.
+          if (decision.escalate) {
+            const preview = String((message as any).body ?? "").slice(0, 200)
+            await sendTelegram(
+              [
+                `🆘 <b>Chat — un humain est demandé</b>`,
+                "",
+                `Canal : ${(thread as any).channel}`,
+                `Raison : ${escapeTelegramHtml(decision.reason ?? "—")}`,
+                "",
+                `Message : ${escapeTelegramHtml(preview)}`,
+                "",
+                `<a href="${INBOX_URL}">Ouvrir l'inbox</a>`,
+              ].join("\n"),
+            )
+          }
+
+          if (spend?.crossed70) {
+            await sendTelegram(
+              `⚠️ <b>Budget IA à 70 %</b>\nDépensé : $${(spend.spend_usd_micros / 1_000_000).toFixed(2)} sur $${(settings.monthly_budget_usd_micros / 1_000_000).toFixed(2)} ce mois-ci.`,
+            )
+          }
+          if (spend?.exhausted) {
+            await sendTelegram(
+              `🛑 <b>Budget IA épuisé</b>\nL'agent est en pause jusqu'au mois prochain. L'inbox continue de fonctionner normalement.`,
+            )
+          }
         } catch (err) {
-          runStatus = "failed"
-          const deliveryError = (err as Error).message
-          runError = runError ? `${runError}; delivery failed: ${deliveryError}` : deliveryError
-          logger.error(
-            `[ai-agent] reply delivery failed for thread ${threadId}, message ${messageId}: ${deliveryError}`,
-          )
-        }
-
-        // Persisted regardless of what happened above — this call cannot be
-        // skipped by any earlier throw, and persistAgentRun itself never
-        // throws.
-        await persistAgentRun(agent, logger, {
-          thread_id: threadId,
-          message_id: messageId,
-          channel: (thread as any).channel,
-          status: runStatus,
-          intent: outcome.reply?.intent ?? null,
-          confidence: outcome.reply?.confidence ?? null,
-          escalation_reason: decision.reason,
-          language: outcome.reply?.language ?? null,
-          tools_used: outcome.toolsUsed,
-          model: AGENT_MODEL,
-          input_tokens: outcome.usage.input_tokens,
-          output_tokens: outcome.usage.output_tokens,
-          cache_read_input_tokens: outcome.usage.cache_read_input_tokens,
-          cost_usd_micros: outcome.costMicros,
-          latency_ms: outcome.latencyMs,
-          error: runError,
-        })
-
-        // Telegram from here down: internal staff notifications only, never
-        // customer-facing, so they are safe in shadow mode and safe to fire
-        // after everything above. sendTelegram never throws (dormant/soft-fails
-        // when unconfigured), and the customer's reply/holding-line send above
-        // has already completed by this point — notifying staff never blocks
-        // or races the customer-facing send.
-        if (decision.escalate) {
-          const preview = String((message as any).body ?? "").slice(0, 200)
-          await sendTelegram(
-            [
-              `🆘 <b>Chat — un humain est demandé</b>`,
-              "",
-              `Canal : ${(thread as any).channel}`,
-              `Raison : ${escapeTelegramHtml(decision.reason ?? "—")}`,
-              "",
-              `Message : ${escapeTelegramHtml(preview)}`,
-              "",
-              `<a href="https://admin.dollupboutique.com/inbox">Ouvrir l'inbox</a>`,
-            ].join("\n"),
-          )
-        }
-
-        if (spend?.crossed70) {
-          await sendTelegram(
-            `⚠️ <b>Budget IA à 70 %</b>\nDépensé : $${(spend.spend_usd_micros / 1_000_000).toFixed(2)} sur $${(settings.monthly_budget_usd_micros / 1_000_000).toFixed(2)} ce mois-ci.`,
-          )
-        }
-        if (spend?.exhausted) {
-          await sendTelegram(
-            `🛑 <b>Budget IA épuisé</b>\nL'agent est en pause jusqu'au mois prochain. L'inbox continue de fonctionner normalement.`,
-          )
+          // Reached only by a pre-run failure (idempotency check, settings,
+          // knowledge, or history) — runAgent was never called, so none of
+          // the persistAgentRun calls above ran either.
+          await persistAgentRun(agent, logger, {
+            thread_id: threadId,
+            message_id: messageId,
+            channel: (thread as any).channel,
+            status: "failed",
+            error: (err as Error).message,
+          })
         }
       },
       // Give the lock more room than the agent's own 30s wall clock.
