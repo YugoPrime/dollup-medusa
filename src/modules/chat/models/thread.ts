@@ -5,13 +5,17 @@ import { Message } from "./message"
 export const Thread = model
   .define("chat_thread", {
     id: model.id({ prefix: "thr" }).primaryKey(),
-    channel: model.enum(["whatsapp", "messenger", "instagram"]),
+    channel: model.enum(["whatsapp", "messenger", "instagram", "web"]),
     contact: model.belongsTo(() => Contact),
     status: model.enum(["open", "snoozed", "closed"]).default("open"),
     last_message_at: model.dateTime().nullable(),
     last_inbound_at: model.dateTime().nullable(),
     unread_count: model.number().default(0),
     assignee_id: model.text().nullable(),
+    // Set when a human replies; the agent stays silent on this thread until it passes.
+    ai_paused_until: model.dateTime().nullable(),
+    // Set when the agent escalates; drives the /inbox "Needs human" filter.
+    needs_human: model.boolean().default(false),
     messages: model.hasMany(() => Message, { mappedBy: "thread" }),
   })
   .indexes([{ on: ["channel", "contact_id"], unique: true }])

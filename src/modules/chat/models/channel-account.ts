@@ -2,7 +2,7 @@ import { model } from "@medusajs/framework/utils"
 
 export const ChannelAccount = model.define("chat_channel_account", {
   id: model.id({ prefix: "chacc" }).primaryKey(),
-  channel: model.enum(["whatsapp", "messenger", "instagram"]),
+  channel: model.enum(["whatsapp", "messenger", "instagram", "web"]),
   external_id: model.text(),
   display_name: model.text(),
   access_token_enc: model.text(),

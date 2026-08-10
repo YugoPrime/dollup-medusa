@@ -3,7 +3,7 @@ import { model } from "@medusajs/framework/utils"
 export const Contact = model
   .define("chat_contact", {
     id: model.id({ prefix: "ctc" }).primaryKey(),
-    channel: model.enum(["whatsapp", "messenger", "instagram"]),
+    channel: model.enum(["whatsapp", "messenger", "instagram", "web"]),
     external_id: model.text(),
     display_name: model.text().nullable(),
     profile_pic_url: model.text().nullable(),
