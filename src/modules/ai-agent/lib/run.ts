@@ -62,26 +62,39 @@ export async function runAgent(input: {
     latencyMs: Date.now() - started,
   })
 
-  const anthropic = getAnthropic()
   const messages: Array<{ role: "user" | "assistant"; content: unknown }> = input.history.map(
     (t) => ({ role: t.role, content: t.content }),
   )
 
   try {
+    // Inside the try: a missing/invalid ANTHROPIC_API_KEY throws here, and
+    // must land in the same catch as every other failure below, not reject
+    // the returned promise.
+    const anthropic = getAnthropic()
+
     for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
-      if (Date.now() - started > WALL_CLOCK_MS) {
+      const remaining = WALL_CLOCK_MS - (Date.now() - started)
+      if (remaining <= 0) {
         return finish({ terminal: "timeout", reply: null, escalation: null, error: null })
       }
 
-      const response = await anthropic.messages.create({
-        model: AGENT_MODEL,
-        max_tokens: MAX_TOKENS,
-        system: input.systemBlocks as never,
-        messages: messages as never,
-        tools: TOOL_DEFINITIONS as never,
-        thinking: { type: "adaptive" },
-        output_config: { effort: "low" },
-      } as never)
+      const response = await anthropic.messages.create(
+        {
+          model: AGENT_MODEL,
+          max_tokens: MAX_TOKENS,
+          system: input.systemBlocks as never,
+          messages: messages as never,
+          tools: TOOL_DEFINITIONS as never,
+          thinking: { type: "adaptive" },
+          output_config: { effort: "low" },
+        } as never,
+        // Bound the request itself to what's left of the 30s budget — the
+        // between-rounds check above only catches overruns from *previous*
+        // rounds; without this, a single slow round (or the final round,
+        // which has no check after it) can blow well past 30s while the
+        // widget's typing indicator has already given up.
+        { timeout: Math.max(5_000, remaining) },
+      )
 
       const u = (response as unknown as { usage?: Record<string, number> }).usage ?? {}
       usage.input_tokens += Number(u.input_tokens ?? 0)
