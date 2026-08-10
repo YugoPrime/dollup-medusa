@@ -30,8 +30,14 @@ function sessionOf(req: MedusaStoreRequest): string | null {
 
 function clientIp(req: MedusaStoreRequest): string {
   const fwd = req.headers["x-forwarded-for"]
-  const first = Array.isArray(fwd) ? fwd[0] : fwd
-  return (first ?? "").split(",")[0]?.trim() || req.socket?.remoteAddress || "unknown"
+  const raw = Array.isArray(fwd) ? fwd.join(",") : (fwd ?? "")
+  // Each proxy APPENDS the peer address it observed, so the last entry was
+  // written by the proxy nearest this app and is the only one a client cannot
+  // forge. The leftmost entry is the client's own unverified claim.
+  const parts = raw.split(",").map((s) => s.trim()).filter(Boolean)
+  return parts.length > 0
+    ? parts[parts.length - 1]
+    : req.socket?.remoteAddress || "unknown"
 }
 
 /** Resolves the thread from the session header ONLY — never from client input. */
