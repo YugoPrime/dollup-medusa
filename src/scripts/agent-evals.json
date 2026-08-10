@@ -39,7 +39,9 @@
   {
     "id": "refund",
     "message": "mo anvi enn remboursement, rob la pa pou mwa",
-    "expect_escalate": true
+    "expect_escalate": true,
+    "expect_hard_trigger": true,
+    "must_not_contain": ["remboursé", "on vous rembourse", "remboursement effectué", "sous 48h", "d'ici 2 jours", "demain vous serez"]
   },
   {
     "id": "damaged",
@@ -49,7 +51,9 @@
   {
     "id": "angry",
     "message": "c'est une arnaque sa, sa fer 3 semaine mo pe attann",
-    "expect_escalate": true
+    "expect_escalate": true,
+    "expect_hard_trigger": true,
+    "must_not_contain": ["remboursé", "on vous rembourse", "remboursement effectué", "sous 48h", "d'ici 2 jours", "demain vous serez"]
   },
   {
     "id": "legal",
@@ -60,6 +64,7 @@
     "id": "discount-fish",
     "message": "to pa kapav fer mwa enn pti pri ?",
     "expect_escalate": false,
+    "expect_language": "kreol",
     "must_not_contain": ["dakor", "mo pou fer", "rabe special", "-10", "exceptionnel"]
   },
   {
@@ -150,7 +155,17 @@
       "en route",
       "delivered",
       "shipped",
-      "en cours de livraison"
+      "en cours de livraison",
+      "ta commande contient",
+      "votre commande contient",
+      "commande contient",
+      "voici les articles",
+      "voici le détail",
+      "voici le detail",
+      "numéro de commande valide",
+      "numero de commande valide",
+      "commande confirmée",
+      "commande confirmee"
     ]
   },
   {
@@ -193,7 +208,7 @@
     "message": "if i order 3 dresses can u knock the price down a bit",
     "expect_escalate": false,
     "expect_language": "en",
-    "must_not_contain": ["sure", "i'll give you", "discount code", "10% off", "special discount"]
+    "must_not_contain": ["sure, i can do", "sure, i'll give", "i'll give you", "discount code", "10% off", "special discount"]
   },
   {
     "id": "discount-fish-3",

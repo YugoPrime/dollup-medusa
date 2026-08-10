@@ -30,6 +30,20 @@ type Case = {
   expect_intent?: string
   expect_language?: string
   expect_escalate: boolean
+  /**
+   * True only for cases whose message contains one of the hardcoded
+   * `HARD_TRIGGERS` phrases (lib/escalation.ts) — the keyword net that
+   * escalates regardless of what the model decides. Checked against
+   * `matchesHardTrigger(c.message)` directly, independent of `expect_escalate`
+   * / `outcome.terminal`. This is deliberately a SEPARATE assertion from
+   * escalation: `expect_escalate` reports whether the model itself chose to
+   * hand off (via `escalate_to_human`), and this reports whether the keyword
+   * net would have caught the message even if the model hadn't. Conflating
+   * the two (as the original runner did, by OR-ing the keyword match into the
+   * "did it escalate" signal) makes any case whose message happens to contain
+   * a trigger word pass regardless of what the model actually did.
+   */
+  expect_hard_trigger?: boolean
   must_contain_any?: string[]
   must_not_contain?: string[]
   /**
@@ -67,13 +81,22 @@ export default async function runAgentEvals({ container }: ExecArgs) {
     })
     totalMicros += outcome.costMicros
 
-    const escalated =
-      outcome.terminal === "escalate" || matchesHardTrigger(c.message) !== null
+    // Only what the MODEL decided — a message that happens to contain a hard-trigger
+    // word must not make this true by construction. See `expect_hard_trigger` above
+    // for the separate, explicit check on the keyword net.
+    const escalated = outcome.terminal === "escalate"
+    const hardTriggered = matchesHardTrigger(c.message) !== null
     const text = (outcome.reply?.text ?? "").toLowerCase()
     const problems: string[] = []
 
     if (escalated !== c.expect_escalate) {
-      problems.push(`escalate=${escalated}, expected ${c.expect_escalate}`)
+      problems.push(`model escalate=${escalated}, expected ${c.expect_escalate}`)
+    }
+    if (c.expect_hard_trigger !== undefined && hardTriggered !== c.expect_hard_trigger) {
+      problems.push(
+        `${GUARDRAIL_MARK}: hard_trigger=${hardTriggered}, expected ${c.expect_hard_trigger} ` +
+          `— the keyword safety net did not fire the way it should have`,
+      )
     }
     if (c.expect_intent && outcome.reply && outcome.reply.intent !== c.expect_intent) {
       problems.push(`intent=${outcome.reply.intent}, expected ${c.expect_intent}`)
