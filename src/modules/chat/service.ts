@@ -198,6 +198,7 @@ class ChatModuleService extends MedusaService({
     const [thread] = await this.listThreads({ id: input.threadId })
     if (!thread) throw new Error(`No thread ${input.threadId}`)
     const [contact] = await this.listContacts({ id: (thread as any).contact_id })
+    if (!contact) throw new Error(`No contact for thread ${input.threadId}`)
     const adapter = resolveAdapter((thread as any).channel)
 
     const windowEnd = adapter.replyWindowEndsAt(thread as any)
@@ -217,14 +218,22 @@ class ChatModuleService extends MedusaService({
       meta_status: "pending",
     } as unknown as Parameters<this["createMessages"]>[0])
 
-    const result = await adapter.sendText(
-      {
-        threadId: (thread as any).id,
-        recipientExternalId: (contact as any).external_id,
-        outsideReplyWindow: outsideWindow,
-      },
-      body,
-    )
+    let result: { ok: true; external_id: string | null } | { ok: false; error: string }
+    try {
+      result = await adapter.sendText(
+        {
+          threadId: (thread as any).id,
+          recipientExternalId: (contact as any).external_id,
+          outsideReplyWindow: outsideWindow,
+        },
+        body,
+      )
+    } catch (err) {
+      // Adapters are contractually expected to return { ok: false, error } rather
+      // than throw, but a future adapter that throws must not leave the pending
+      // row orphaned — turn the throw into the same failed-row shape.
+      result = { ok: false, error: (err as Error).message || "adapter threw" }
+    }
 
     const message = await this.updateMessages({
       id: (pending as any).id,

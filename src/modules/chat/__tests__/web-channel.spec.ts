@@ -109,6 +109,35 @@ moduleIntegrationTestRunner<ChatModuleService>({
         })
         expect(out.message.meta_status).toBe("sent")
       })
+
+      it("rejects (not orphans) when the thread's contact is gone", async () => {
+        // Soft-delete the contact after the thread exists, rather than trying to
+        // construct a thread with a genuinely dangling contact_id — chat_thread.contact
+        // is a real belongsTo FK, so a hard-dangling row can't be created through the
+        // service. deleteContacts is Medusa's generated soft delete: the row's
+        // deleted_at is set, the FK stays valid, but listContacts (used by
+        // sendOutbound) no longer returns it — which is exactly the "no contact"
+        // condition the guard exists for.
+        const { thread, contact } = await service.ingestInboundWeb({
+          sessionId: newSessionId(),
+          text: "hi",
+        })
+        await service.deleteContacts(contact.id)
+
+        await expect(
+          service.sendOutbound({
+            threadId: thread.id,
+            body: "should never send",
+            senderKind: "ai",
+          }),
+        ).rejects.toThrow(/no contact/i)
+
+        // And critically: no orphaned pending row was left behind — the guard
+        // fires before createMessages, so the message table has nothing for
+        // this thread beyond the original inbound message.
+        const messages = await service.listMessages({ thread_id: thread.id })
+        expect(messages.every((m) => m.meta_status !== "pending")).toBe(true)
+      })
     })
   },
 })
