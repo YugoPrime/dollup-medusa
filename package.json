@@ -29,6 +29,7 @@
     "email:dev": "email dev --dir src/modules/notification-resend/templates/previews --port 3030"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.116.0",
     "@aws-sdk/client-s3": "^3.1044.0",
     "@googleapis/sheets": "^13.0.1",
     "@medusajs/admin-sdk": "2.13.1",
