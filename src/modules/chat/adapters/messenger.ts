@@ -5,7 +5,6 @@ const GRAPH = `https://graph.facebook.com/${process.env.META_GRAPH_VERSION ?? "v
 
 export const messengerAdapter: ChannelAdapter = {
   channel: "messenger",
-  requiresAccount: true,
 
   replyWindowEndsAt(thread) {
     if (!thread.last_inbound_at) return null
@@ -17,8 +16,6 @@ export const messengerAdapter: ChannelAdapter = {
   // same error-string format. NOTE (see task-0.2-report.md): the existing
   // method does not decrypt ChannelAccount.access_token_enc at all — it
   // reads the page token straight from process.env.META_PAGE_ACCESS_TOKEN.
-  // ctx.accessTokenEnc is intentionally unused here to reproduce that real
-  // (if surprising) mechanism rather than inventing a decryption scheme.
   async sendText(ctx: SendCtx, body: string): Promise<SendResult> {
     const text = body?.trim()
     if (!text) {

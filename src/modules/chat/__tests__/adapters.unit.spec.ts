@@ -1,16 +1,12 @@
 import { resolveAdapter } from "../adapters"
 
 describe("resolveAdapter", () => {
-  it("returns the web adapter, which needs no ChannelAccount", () => {
-    const a = resolveAdapter("web")
-    expect(a.channel).toBe("web")
-    expect(a.requiresAccount).toBe(false)
+  it("returns the web adapter", () => {
+    expect(resolveAdapter("web").channel).toBe("web")
   })
 
-  it("returns the messenger adapter, which does need a ChannelAccount", () => {
-    const a = resolveAdapter("messenger")
-    expect(a.channel).toBe("messenger")
-    expect(a.requiresAccount).toBe(true)
+  it("returns the messenger adapter", () => {
+    expect(resolveAdapter("messenger").channel).toBe("messenger")
   })
 
   it("web has no reply window", () => {

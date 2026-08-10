@@ -2,8 +2,6 @@ import type { ChannelAdapter } from "./types"
 
 export const webAdapter: ChannelAdapter = {
   channel: "web",
-  // The widget authenticates by session id, not by a business account token.
-  requiresAccount: false,
   // The widget polls whenever it is open; there is no engagement window to respect.
   replyWindowEndsAt: () => null,
   // No external call: sendOutbound has already written the message row, and the

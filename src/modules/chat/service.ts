@@ -124,6 +124,131 @@ class ChatModuleService extends MedusaService({
     return { message, thread, contact }
   }
 
+  async ingestInboundWeb(input: {
+    sessionId: string
+    text: string
+  }): Promise<{ message: any; thread: any; contact: any }> {
+    const contact = (await this.findOrCreateContact({
+      channel: "web" as any,
+      external_id: input.sessionId,
+    })) as any
+
+    let [thread] = await this.listThreads({
+      channel: "web",
+      contact_id: contact.id,
+    })
+    if (!thread) {
+      thread = (await this.createThreads({
+        channel: "web",
+        contact_id: contact.id,
+        status: "open",
+        unread_count: 0,
+        needs_human: false,
+      } as unknown as Parameters<this["createThreads"]>[0])) as any
+    }
+
+    const message = await this.createMessages({
+      thread_id: (thread as any).id,
+      direction: "inbound",
+      external_id: null,
+      sender_kind: "customer",
+      body: input.text,
+      attachments: null,
+      meta_status: "delivered",
+    } as unknown as Parameters<this["createMessages"]>[0])
+
+    const now = new Date()
+    thread = (await this.updateThreads({
+      id: (thread as any).id,
+      last_message_at: now,
+      last_inbound_at: now,
+      unread_count: ((thread as any).unread_count ?? 0) + 1,
+    } as unknown as Parameters<this["updateThreads"]>[0])) as any
+
+    return { message, thread, contact }
+  }
+
+  /**
+   * Channel-agnostic outbound send. Resolves the adapter by thread.channel,
+   * writes exactly one message row whatever the outcome, and applies the
+   * takeover pause when a human is the sender — so every channel gets the
+   * same behaviour for free.
+   *
+   * No ChannelAccount lookup: no adapter reads that row. Messenger's token comes
+   * from process.env.META_PAGE_ACCESS_TOKEN, and web needs no credential at all.
+   */
+  async sendOutbound(input: {
+    threadId: string
+    body: string
+    senderKind: "staff" | "ai"
+    senderUserId?: string | null
+    /** Hours the agent stays silent after a staff reply. */
+    takeoverPauseHours?: number
+    /**
+     * Send even though the channel's reply window has closed. Messenger then
+     * tags the message HUMAN_AGENT, which requires the page to be allowlisted.
+     * Defaults false so a closed window is a loud failure, not a silent one.
+     */
+    allowOutsideWindow?: boolean
+  }): Promise<{ message: any; thread: any }> {
+    const body = input.body?.trim()
+    if (!body) throw new Error("Cannot send empty message")
+
+    const { resolveAdapter } = await import("./adapters/index.js")
+    const [thread] = await this.listThreads({ id: input.threadId })
+    if (!thread) throw new Error(`No thread ${input.threadId}`)
+    const [contact] = await this.listContacts({ id: (thread as any).contact_id })
+    const adapter = resolveAdapter((thread as any).channel)
+
+    const windowEnd = adapter.replyWindowEndsAt(thread as any)
+    const outsideWindow = windowEnd !== null && Date.now() > windowEnd.getTime()
+    if (outsideWindow && !input.allowOutsideWindow) {
+      throw new Error(
+        `Outside the ${(thread as any).channel} reply window — pass allowOutsideWindow to send (page must be allowlisted for HUMAN_AGENT)`,
+      )
+    }
+
+    const pending = await this.createMessages({
+      thread_id: (thread as any).id,
+      direction: "outbound",
+      sender_kind: input.senderKind,
+      sender_user_id: input.senderUserId ?? null,
+      body,
+      meta_status: "pending",
+    } as unknown as Parameters<this["createMessages"]>[0])
+
+    const result = await adapter.sendText(
+      {
+        threadId: (thread as any).id,
+        recipientExternalId: (contact as any).external_id,
+        outsideReplyWindow: outsideWindow,
+      },
+      body,
+    )
+
+    const message = await this.updateMessages({
+      id: (pending as any).id,
+      ...(result.ok
+        ? { external_id: result.external_id, meta_status: "sent" }
+        : { meta_status: "failed", meta_error: result.error }),
+    } as unknown as Parameters<this["updateMessages"]>[0])
+
+    // A human taking over silences the agent on this thread. Applied here so it
+    // holds for every channel, not just whichever one the composer uses.
+    const pauseHours = input.takeoverPauseHours ?? 12
+    const threadPatch: Record<string, unknown> = { last_message_at: new Date() }
+    if (input.senderKind === "staff") {
+      threadPatch.ai_paused_until = new Date(Date.now() + pauseHours * 3600_000)
+      threadPatch.needs_human = false
+    }
+    const updatedThread = await this.updateThreads({
+      id: (thread as any).id,
+      ...threadPatch,
+    } as unknown as Parameters<this["updateThreads"]>[0])
+
+    return { message, thread: updatedThread }
+  }
+
   /**
    * Send an outbound text message on a Messenger thread.
    *
