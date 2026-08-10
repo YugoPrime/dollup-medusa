@@ -193,6 +193,9 @@ module.exports = defineConfig({
       resolve: "./src/modules/chat",
     },
     {
+      resolve: "./src/modules/ai-agent",
+    },
+    {
       resolve: "./src/modules/leads",
     },
     {
