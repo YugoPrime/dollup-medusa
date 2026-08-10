@@ -148,6 +148,17 @@ describe("evaluateGuards", () => {
       evaluateGuards({ settings: settings({ mode: "shadow" }), thread, message, now: NOW }),
     ).toEqual({ run: true })
   })
+
+  it("reports not_customer_message even when the budget is also exhausted", () => {
+    expect(
+      evaluateGuards({
+        settings: settings({ spend_usd_micros: 22_000_000 }),
+        thread,
+        message: { direction: "outbound", sender_kind: "ai", body: "…" },
+        now: NOW,
+      }),
+    ).toEqual({ run: false, skipReason: "not_customer_message" })
+  })
 })
 
 describe("matchesHardTrigger", () => {
@@ -156,7 +167,7 @@ describe("matchesHardTrigger", () => {
     ["I want a refund please", "refund"],
     ["this is a SCAM", "scam"],
     ["la robe est arrivée abîmée", "abîmé"],
-    ["mo pou al get avocat", "avocat"],
+    ["je vais contacter mon avocat", "mon avocat"],
     ["c'est une arnaque", "arnaque"],
   ])("matches %s", (text, expected) => {
     expect(matchesHardTrigger(text)).toBe(expected)
@@ -172,6 +183,22 @@ describe("matchesHardTrigger", () => {
     expect(matchesHardTrigger("combien pour la livraison ?")).toBeNull()
     expect(matchesHardTrigger("ki pri sa robe la ?")).toBeNull()
     expect(matchesHardTrigger("bonjour")).toBeNull()
+  })
+
+  it("does not fire on 'blanc cassé' (off-white) — a colour question, not a damage claim", () => {
+    expect(matchesHardTrigger("avez-vous cette robe en blanc cassé ?")).toBeNull()
+  })
+
+  it("does not fire on 'couleur avocat' (avocado green) — a colour question, not a legal threat", () => {
+    expect(matchesHardTrigger("je cherche un sac couleur avocat")).toBeNull()
+  })
+
+  it("still fires on 'mon avocat' when someone actually means a lawyer", () => {
+    expect(matchesHardTrigger("je vais contacter mon avocat")).toBe("mon avocat")
+  })
+
+  it("regression guard: damage claims still escalate after the 'cassé' entry was removed", () => {
+    expect(matchesHardTrigger("la robe est arrivée abîmée")).toBe("abîmé")
   })
 
   it("handles empty and non-string input without throwing", () => {

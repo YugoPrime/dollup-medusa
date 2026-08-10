@@ -25,7 +25,12 @@ type GuardInput = {
  * Decides whether the agent runs at all, before any token is spent.
  *
  * Ordered most-specific-first so the recorded skip_reason names the real cause
- * rather than whichever gate happened to be checked first.
+ * rather than whichever gate happened to be checked first. `not_customer_message`
+ * comes first of all: it is the cheapest check and the most fundamental — if the
+ * message isn't from a customer (the agent's own reply, a staff note), nothing
+ * else about the thread or settings is relevant to why the agent didn't run.
+ * Checking it last would let an unrelated gate (e.g. `over_budget`) shadow the
+ * real reason in the audit trail whenever both happen to be true at once.
  *
  * Deliberately does NOT gate on `mode`: shadow mode still runs the agent, it just
  * doesn't send the reply. That is the entire point of shadow mode — a week of
@@ -33,6 +38,10 @@ type GuardInput = {
  */
 export function evaluateGuards(input: GuardInput): { run: boolean; skipReason?: SkipReason } {
   const { settings, thread, message, now } = input
+
+  if (message.direction !== "inbound" || message.sender_kind !== "customer") {
+    return { run: false, skipReason: "not_customer_message" }
+  }
 
   if (!settings.enabled) return { run: false, skipReason: "disabled" }
 
@@ -52,10 +61,6 @@ export function evaluateGuards(input: GuardInput): { run: boolean; skipReason?: 
     settings.spend_period === currentPeriod(now) ? Number(settings.spend_usd_micros ?? 0) : 0
   if (spend >= Number(settings.monthly_budget_usd_micros ?? 0)) {
     return { run: false, skipReason: "over_budget" }
-  }
-
-  if (message.direction !== "inbound" || message.sender_kind !== "customer") {
-    return { run: false, skipReason: "not_customer_message" }
   }
 
   return { run: true }

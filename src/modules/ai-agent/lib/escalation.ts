@@ -5,6 +5,15 @@
  *
  * Each pair is [canonical spelling for the audit trail, accent-stripped form to
  * match on].
+ *
+ * Deliberately NOT single words when a single word is also common fashion
+ * vocabulary: "cassé" collides with "blanc cassé" (off-white, a routine
+ * colour question) so it is dropped entirely — "abîmé" and "damaged" already
+ * cover damage claims without that collision. "avocat" collides with
+ * "couleur avocat" (avocado green) so it is narrowed to the phrasings someone
+ * actually uses when threatening legal action. This trades recall for fewer
+ * false escalations on ordinary questions; the model's own escalation tool is
+ * the backstop for anything phrased unusually.
  */
 const HARD_TRIGGERS: Array<[canonical: string, normalized: string]> = [
   ["refund", "refund"],
@@ -14,9 +23,9 @@ const HARD_TRIGGERS: Array<[canonical: string, normalized: string]> = [
   ["plainte", "plainte"],
   ["damaged", "damaged"],
   ["abîmé", "abime"],
-  ["cassé", "casse"],
   ["lawyer", "lawyer"],
-  ["avocat", "avocat"],
+  ["mon avocat", "mon avocat"],
+  ["un avocat", "un avocat"],
   ["scam", "scam"],
   ["arnaque", "arnaque"],
   ["police", "police"],
