@@ -1,5 +1,7 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import { CHAT_MODULE } from "../../../../../../modules/chat"
+import { AI_AGENT_MODULE } from "../../../../../../modules/ai-agent"
+import type AiAgentModuleService from "../../../../../../modules/ai-agent/service"
 
 export const GET = async (req: MedusaRequest, res: MedusaResponse) => {
   const chat: any = req.scope.resolve(CHAT_MODULE)
@@ -47,7 +49,18 @@ export const POST = async (req: MedusaRequest, res: MedusaResponse) => {
     res.status(404).json({ error: "thread not found" })
     return
   }
-  if (thread.channel !== "messenger") {
+  // Any channel with a registered adapter can take a staff reply — Messenger
+  // was the only one wired when this route was written, but chat.sendOutbound
+  // is channel-agnostic now (it resolves the adapter itself). Only a channel
+  // with no adapter at all (future Instagram/WhatsApp sub-projects) should
+  // still 501 here, so probe resolveAdapter up front rather than hard-coding
+  // "messenger".
+  const { resolveAdapter } = await import(
+    "../../../../../../modules/chat/adapters/index.js"
+  )
+  try {
+    resolveAdapter(thread.channel)
+  } catch {
     res.status(501).json({
       error: `Outbound not yet implemented for ${thread.channel}`,
     })
@@ -56,15 +69,31 @@ export const POST = async (req: MedusaRequest, res: MedusaResponse) => {
 
   const userId = (req as any).auth?.actor_id ?? null
 
+  // The admin knob for how long a staff reply silences the agent
+  // (Settings → AI → takeover_pause_hours) lives on the ai-agent module, not
+  // chat. Resolve it here so sendOutbound gets the real configured value
+  // instead of always falling back to its own 12h default. Both modules are
+  // unconditionally registered in medusa-config.ts, but this is still
+  // defensive: a settings-read hiccup must not block a staff reply.
+  let takeoverPauseHours: number | undefined
+  try {
+    const agent = req.scope.resolve<AiAgentModuleService>(AI_AGENT_MODULE)
+    const settings = await agent.getSettings()
+    takeoverPauseHours = Number(settings.takeover_pause_hours)
+  } catch {
+    // Fall back to sendOutbound's own default rather than failing the send.
+  }
+
   try {
     const messages: any[] = []
     let updatedThread: any = thread
     if (hasText) {
-      const out = await chat.sendOutboundMessenger({
+      const out = await chat.sendOutbound({
         threadId: id,
-        text,
+        body: text,
+        senderKind: "staff",
         senderUserId: userId,
-        tag: body.tag ?? null,
+        takeoverPauseHours,
       })
       messages.push(out.message)
       updatedThread = out.thread

@@ -194,7 +194,7 @@ export default async function aiAgentOnInboundMessage({
             { thread_id: threadId },
             { order: { created_at: "DESC" }, take: HISTORY_TURNS },
           )) as HistoryRow[]
-          const history = rows
+          let history = rows
             .slice()
             .reverse()
             .filter((m) => typeof m.body === "string" && m.body.trim())
@@ -202,6 +202,18 @@ export default async function aiAgentOnInboundMessage({
               role: m.direction === "inbound" ? ("user" as const) : ("assistant" as const),
               content: m.body as string,
             }))
+
+          // The Anthropic API requires the first message in a conversation to
+          // be role "user". On a thread past HISTORY_TURNS messages, the
+          // DESC-then-reverse window above can start mid-conversation with an
+          // outbound (assistant) row — sending that as-is 400s the API call,
+          // which runAgent treats as a timeout/error and escalates. Drop
+          // leading assistant turns (there's no way to answer a message that
+          // isn't there anyway) until the transcript starts with a real user
+          // turn, or is empty.
+          while (history.length > 0 && history[0].role === "assistant") {
+            history = history.slice(1)
+          }
 
           // runAgent never throws — every failure inside it (bad key, timeout,
           // network error, malformed terminal call) is captured into

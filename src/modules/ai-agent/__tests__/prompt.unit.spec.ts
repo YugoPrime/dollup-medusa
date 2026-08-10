@@ -49,11 +49,16 @@ describe("buildSystemBlocks", () => {
     expect(blocks[0].text).toContain(BASE_SYSTEM_PROMPT.slice(0, 40))
   })
 
-  it("is at least 1024 characters, the floor below which nothing caches", () => {
-    // Sonnet 5 will not create a cache entry for a prefix under ~1024 tokens.
-    // Characters are a rough proxy but a useful tripwire: if the base prompt is
-    // ever trimmed below this, caching silently stops and every run pays full
-    // price for the whole prefix.
+  it("is at least 1024 characters — a rough proxy tripwire, NOT proof of the real token floor", () => {
+    // Sonnet 5 will not create a cache entry for a prefix under ~1024 TOKENS,
+    // not characters. This assertion checks characters because that's cheap to
+    // assert in a unit test with no tokenizer available, but characters and
+    // tokens are not the same unit — 1759 characters of French is roughly
+    // 500-650 tokens, well under the real 1024-token floor. This test only
+    // catches the base prompt being trimmed to something obviously tiny; it
+    // does NOT prove caching actually engages. Measure the real prompt with
+    // messages.count_tokens (see docs/AI-CONCIERGE-ROLLOUT.md section e.3)
+    // before trusting that caching works.
     expect(buildSystemBlocks([])[0].text.length).toBeGreaterThan(1024)
   })
 })

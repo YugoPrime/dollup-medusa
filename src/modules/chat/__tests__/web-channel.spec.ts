@@ -37,6 +37,23 @@ moduleIntegrationTestRunner<ChatModuleService>({
         const b = await service.ingestInboundWeb({ sessionId: newSessionId(), text: "b" })
         expect(b.thread.id).not.toBe(a.thread.id)
       })
+
+      it("reopens a closed thread on a new inbound message", async () => {
+        // Mirrors what chat-web-session-cleanup.ts does to an idle thread —
+        // closing it — then proves a returning visitor's next message pulls
+        // it back into /inbox's default status:"open" filter instead of
+        // silently landing in a closed, invisible thread.
+        const sessionId = newSessionId()
+        const first = await service.ingestInboundWeb({ sessionId, text: "un" })
+        await service.updateThreads({
+          id: first.thread.id,
+          status: "closed",
+        } as never)
+
+        const second = await service.ingestInboundWeb({ sessionId, text: "deux" })
+        expect(second.thread.id).toBe(first.thread.id)
+        expect(second.thread.status).toBe("open")
+      })
     })
 
     describe("sendOutbound on web", () => {

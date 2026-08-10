@@ -160,6 +160,13 @@ class ChatModuleService extends MedusaService({
     const now = new Date()
     thread = (await this.updateThreads({
       id: (thread as any).id,
+      // A new inbound message always reopens the thread. Without this, a
+      // returning visitor whose thread was auto-closed by the idle cleanup
+      // job lands outside /inbox's default status:"open" filter and
+      // getInboxSummary's open-thread count — the message is stored but
+      // effectively invisible to staff until someone thinks to filter by
+      // "closed".
+      status: "open",
       last_message_at: now,
       last_inbound_at: now,
       unread_count: ((thread as any).unread_count ?? 0) + 1,

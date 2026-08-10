@@ -206,21 +206,40 @@ mode (step 3 above), not after:
 
 2. **Does the message-locking mechanism actually work at runtime?** This
    depends on Redis being configured (`REDIS_URL`), the same thing the
-   event system already needs. If it doesn't work, two messages arriving
-   from the same customer close together could each get picked up
-   separately and answered twice — the customer sees two separate AI
-   replies to what was really one exchange. Send two messages back-to-back
-   in a quick test and confirm only one reply comes back per message, in
-   order.
+   event system already needs. `container.resolve(Modules.LOCKING)` in
+   `src/subscribers/ai-agent-on-inbound-message.ts` runs outside the
+   inner try/catch that persists an `AgentRun` row on failure — so if the
+   locking module fails to resolve (Redis unreachable, misconfigured
+   `REDIS_URL`/`LOCKING_REDIS_URL`), the agent doesn't double-reply, it
+   **doesn't run at all**, silently. You get one `logger.error` line in
+   the server logs and nothing else — no `AgentRun` row, no reply, no
+   escalation, no visible symptom in the admin UI. This looks identical to
+   the AI simply never being triggered, which makes it easy to mistake for
+   a different, unrelated problem. Send two messages back-to-back in a
+   quick test and confirm a reply comes back for each, in order — if
+   nothing comes back for either, check the server logs for
+   `[ai-agent] inbound message ... failed` before assuming something else
+   is wrong.
 
-3. **Is prompt caching actually working?** Every AI reply is logged in a
-   table you can see at `dollup-admin` → Settings → AI → Runs, including a
-   column called `cache_read_input_tokens`. From the **second** reply
-   onward in the same conversation thread, that number should be
-   non-zero. If it stays at zero across multiple runs, caching is broken,
-   and the real dollar cost will run at roughly **ten times** the budgeted
-   figure — burning through a month's $22 budget in a matter of days
-   instead of a month.
+3. **Is prompt caching actually working?** Sonnet 5 will not create a
+   cache entry for a system prefix under roughly **1024 tokens** — this
+   is a token floor, not a character count. Measure the actual prompt with
+   `messages.count_tokens` (or the Anthropic console's token counter)
+   **before** turning on shadow mode, not after — don't infer it from the
+   runs table once money has already been spent. The repo's tripwire test
+   (`src/modules/ai-agent/__tests__/prompt.unit.spec.ts`) asserts the
+   built prompt is over 1024 **characters**, which is only a rough proxy
+   for the token floor (roughly 500–650 tokens for 1759 characters of
+   French) — it is a useful "did someone accidentally shrink the prompt"
+   smoke test, but it is **not proof** the real prompt clears the actual
+   1024-token floor. Once you have a real measurement, also watch it live:
+   every AI reply is logged in a table you can see at `dollup-admin` →
+   Settings → AI → Runs, including a column called
+   `cache_read_input_tokens`. From the **second** reply onward in the same
+   conversation thread, that number should be non-zero. If it stays at
+   zero across multiple runs, caching is broken, and the real dollar cost
+   will run at roughly **ten times** the budgeted figure — burning through
+   a month's $22 budget in a matter of days instead of a month.
 
 ## f) How to stop it
 
