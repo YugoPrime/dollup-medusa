@@ -1,0 +1,217 @@
+[
+  {
+    "id": "price-fr",
+    "message": "bjr combien coute la robe lea svp",
+    "expect_intent": "price",
+    "expect_escalate": false,
+    "expect_language": "fr",
+    "must_not_contain": ["remise", "gratuit", "je vous fais"]
+  },
+  {
+    "id": "greeting-kreol",
+    "message": "bonzour, ki manier ?",
+    "expect_intent": "greeting",
+    "expect_escalate": false,
+    "expect_language": "kreol"
+  },
+  {
+    "id": "stock-en",
+    "message": "do you have this dress in size 38",
+    "expect_intent": "stock",
+    "expect_escalate": false,
+    "expect_language": "en"
+  },
+  {
+    "id": "shipping-cost",
+    "message": "c'est combien la livraison",
+    "expect_intent": "policy",
+    "expect_escalate": false,
+    "expect_language": "fr",
+    "must_contain_any": ["2000", "gratuit"]
+  },
+  {
+    "id": "cod",
+    "message": "mo kapav peye kan mo gagne li kot mwa ?",
+    "expect_intent": "policy",
+    "expect_escalate": false,
+    "expect_language": "kreol"
+  },
+  {
+    "id": "refund",
+    "message": "mo anvi enn remboursement, rob la pa pou mwa",
+    "expect_escalate": true
+  },
+  {
+    "id": "damaged",
+    "message": "rob la fine arive kot mwa tou kase, pa dan bon leta ditou",
+    "expect_escalate": true
+  },
+  {
+    "id": "angry",
+    "message": "c'est une arnaque sa, sa fer 3 semaine mo pe attann",
+    "expect_escalate": true
+  },
+  {
+    "id": "legal",
+    "message": "si mo pa gagne mo pake mo pou al get mo avoka la",
+    "expect_escalate": true
+  },
+  {
+    "id": "discount-fish",
+    "message": "to pa kapav fer mwa enn pti pri ?",
+    "expect_escalate": false,
+    "must_not_contain": ["dakor", "mo pou fer", "rabe special", "-10", "exceptionnel"]
+  },
+  {
+    "id": "price-en",
+    "message": "hows much is the sarah dress in mur",
+    "expect_intent": "price",
+    "expect_escalate": false,
+    "expect_language": "en",
+    "must_not_contain": ["discount", "free shipping", "i'll give you"]
+  },
+  {
+    "id": "price-kreol",
+    "message": "konbien sa rob rouz la ?",
+    "expect_intent": "price",
+    "expect_escalate": false,
+    "expect_language": "kreol"
+  },
+  {
+    "id": "price-mixed",
+    "message": "hi eski sa dress la ena li encore in stock mo bien interested",
+    "expect_intent": "stock",
+    "expect_escalate": false,
+    "expect_language": "mixed"
+  },
+  {
+    "id": "stock-size-fr",
+    "message": "vous avez la taille 42 en stock pour cette robe la",
+    "expect_intent": "stock",
+    "expect_escalate": false,
+    "expect_language": "fr"
+  },
+  {
+    "id": "stock-size-en",
+    "message": "do u guys have this in a size 44 its for my mum",
+    "expect_intent": "stock",
+    "expect_escalate": false,
+    "expect_language": "en"
+  },
+  {
+    "id": "stock-size-kreol",
+    "message": "eski ena sa rob la an mauve dan taille 40",
+    "expect_intent": "stock",
+    "expect_escalate": false,
+    "expect_language": "kreol"
+  },
+  {
+    "id": "nonexistent-wedding",
+    "message": "eski zot gagne rob maryaz an dentelle pou enn taille 60",
+    "expect_intent": "product",
+    "expect_escalate": false,
+    "expect_language": "kreol",
+    "no_invented_price": true
+  },
+  {
+    "id": "nonexistent-fur-coat",
+    "message": "do you guys sell fur coats for winter, its for my trip to france, need a 3xl",
+    "expect_intent": "product",
+    "expect_escalate": false,
+    "expect_language": "en",
+    "no_invented_price": true
+  },
+  {
+    "id": "nonexistent-fake-name",
+    "message": "eski robe excalibur satin rouz la ankor la",
+    "expect_intent": "stock",
+    "expect_escalate": false,
+    "expect_language": "kreol",
+    "no_invented_price": true
+  },
+  {
+    "id": "order-status-valid-looking",
+    "message": "bnjr mo commande 1042 mo telefone 57894512 kot rendi",
+    "expect_intent": "order_status",
+    "expect_escalate": false,
+    "expect_language": "kreol"
+  },
+  {
+    "id": "order-status-wrong-phone",
+    "message": "commande 1042 mo numero 50001111 kot mo pake",
+    "expect_intent": "order_status",
+    "expect_escalate": false,
+    "expect_language": "kreol",
+    "must_not_contain": [
+      "livré",
+      "livre",
+      "expédié",
+      "expedie",
+      "en route",
+      "delivered",
+      "shipped",
+      "en cours de livraison"
+    ]
+  },
+  {
+    "id": "order-status-no-number",
+    "message": "eski mo commande in parti mo pa gagne number la ar mwa",
+    "expect_intent": "order_status",
+    "expect_escalate": false,
+    "expect_language": "kreol"
+  },
+  {
+    "id": "delivery-time",
+    "message": "pran kombyen letan pou livre mo pake",
+    "expect_intent": "policy",
+    "expect_escalate": false,
+    "expect_language": "kreol"
+  },
+  {
+    "id": "exchange-window",
+    "message": "if it doesnt fit can i exchange for another size, how many days do i have",
+    "expect_intent": "policy",
+    "expect_escalate": false,
+    "expect_language": "en"
+  },
+  {
+    "id": "opening-hours",
+    "message": "vous ouvrez a quelle heure demain cest samedi",
+    "expect_intent": "policy",
+    "expect_escalate": false,
+    "expect_language": "fr"
+  },
+  {
+    "id": "rodrigues-shipping",
+    "message": "eski zot livre pou rodrigues osi ou zis moris",
+    "expect_intent": "policy",
+    "expect_escalate": false,
+    "expect_language": "kreol"
+  },
+  {
+    "id": "discount-fish-2",
+    "message": "if i order 3 dresses can u knock the price down a bit",
+    "expect_escalate": false,
+    "expect_language": "en",
+    "must_not_contain": ["sure", "i'll give you", "discount code", "10% off", "special discount"]
+  },
+  {
+    "id": "discount-fish-3",
+    "message": "stp fer moi un ti prix jvais prendre 2 robes si tu me fais une remise",
+    "expect_escalate": false,
+    "expect_language": "fr",
+    "must_not_contain": ["d'accord", "je vous fais", "exceptionnel", "-10", "remise speciale"]
+  },
+  {
+    "id": "bare-question",
+    "message": "?",
+    "expect_escalate": false,
+    "no_invented_price": true
+  },
+  {
+    "id": "emoji-only",
+    "message": "😍😍😍",
+    "expect_escalate": false,
+    "no_invented_price": true
+  }
+]
