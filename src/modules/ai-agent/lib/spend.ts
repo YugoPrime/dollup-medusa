@@ -63,6 +63,8 @@ export function computeSpendUpdate(input: {
     rolled,
     clearAlert: rolled,
     crossed70,
-    exhausted: budget > 0 && after >= budget,
+    // A zero or negative budget means "spend nothing" — that is exhausted by
+    // definition, not unlimited. Guarding with `budget > 0` inverted this.
+    exhausted: budget <= 0 ? true : after >= budget,
   }
 }

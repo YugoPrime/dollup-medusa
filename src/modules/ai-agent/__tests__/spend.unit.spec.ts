@@ -140,4 +140,40 @@ describe("computeSpendUpdate", () => {
     })
     expect(out.spend_usd_micros).toBe(1_000)
   })
+
+  it("is exhausted at a zero budget with zero spend — spend nothing means nothing", () => {
+    const out = computeSpendUpdate({
+      settings: settings({ monthly_budget_usd_micros: 0 }),
+      micros: 0,
+      now: NOW,
+    })
+    expect(out.exhausted).toBe(true)
+  })
+
+  it("is exhausted at a zero budget with some spend", () => {
+    const out = computeSpendUpdate({
+      settings: settings({ monthly_budget_usd_micros: 0 }),
+      micros: 500,
+      now: NOW,
+    })
+    expect(out.exhausted).toBe(true)
+  })
+
+  it("is exhausted at a negative budget", () => {
+    const out = computeSpendUpdate({
+      settings: settings({ monthly_budget_usd_micros: -1 }),
+      micros: 0,
+      now: NOW,
+    })
+    expect(out.exhausted).toBe(true)
+  })
+
+  it("is exhausted at a NaN budget (coerced to 0 by the `|| 0` fallback)", () => {
+    const out = computeSpendUpdate({
+      settings: settings({ monthly_budget_usd_micros: Number.NaN }),
+      micros: 0,
+      now: NOW,
+    })
+    expect(out.exhausted).toBe(true)
+  })
 })
