@@ -53,14 +53,18 @@ src/
 │   └── store/custom/route.ts
 ├── jobs/          # scheduled jobs (empty)
 ├── links/         # cross-module remote links (empty)
-├── modules/       # custom modules (empty)
+├── modules/       # custom modules — chat, ai-agent (see "Custom modules" below)
 ├── scripts/
 │   ├── seed.ts            # ⚠️ Europe demo seed — DO NOT run on prod
 │   └── setup-shipping.ts  # Mauritius region wiring (hardcoded IDs)
-├── subscribers/   # event subscribers (empty)
+├── subscribers/   # event subscribers — ai-agent-on-inbound-message.ts
 └── workflows/     # custom workflows (empty)
 ```
-The repo is essentially the starter + Mauritius shipping setup. No custom modules/workflows/subscribers yet.
+The repo started as the starter + Mauritius shipping setup; `chat` and `ai-agent` are the first custom modules.
+
+## Custom modules (`src/modules/`)
+- **`chat`** — conversation threads and messages, channel-agnostic. Channels: Messenger (original) and `web` (new — the storefront's chat widget). The storefront talks to it through `POST /store/chat/sessions` and `POST /store/chat/messages`, gated by `STORE_CHAT_ENABLED`. Human replies go out through `/inbox` in `dollup-admin`.
+- **`ai-agent`** — Claude-powered concierge that can draft or auto-send replies on `web`-channel threads. Gated by **both** `AI_AGENT_ENABLED` in the environment (hard kill switch) and the `enabled` flag on the settings row (everyday on/off, `dollup-admin` → Settings → AI). See `docs/AI-CONCIERGE-ROLLOUT.md` for the deploy runbook and `docs/superpowers/specs/2026-08-10-ai-concierge-website-widget-design.md` (workspace root, not this repo) for the design spec.
 
 ## Common commands
 ```
