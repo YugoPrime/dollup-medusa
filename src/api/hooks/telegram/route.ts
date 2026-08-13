@@ -25,6 +25,20 @@ import {
   editTelegramMessage,
 } from "../../../lib/telegram"
 
+/**
+ * Chat ids arrive as a number from Telegram and as a string from the
+ * environment, and env values routinely carry surrounding quotes or trailing
+ * whitespace from a copy-paste into a hosting panel. Compare the digits, not the
+ * formatting — a quoted "6711370386" is the same chat as 6711370386, and failing
+ * on that reads as a permission error rather than the typo it is.
+ */
+function normalizeChatId(value: unknown): string {
+  return String(value ?? "")
+    .trim()
+    .replace(/^["']|["']$/g, "")
+    .trim()
+}
+
 type CallbackQuery = {
   id?: unknown
   data?: unknown
@@ -59,10 +73,14 @@ export const POST = async (
     return
   }
 
-  const expectedChat = process.env.TELEGRAM_CHAT_ID
-  const fromChat = cb.message?.chat?.id
-  if (expectedChat && String(fromChat ?? "") !== String(expectedChat)) {
-    logger.warn(`[telegram-hook] tap from unexpected chat ${String(fromChat)}`)
+  const expectedChat = normalizeChatId(process.env.TELEGRAM_CHAT_ID)
+  const fromChat = normalizeChatId(cb.message?.chat?.id)
+  if (expectedChat && fromChat !== expectedChat) {
+    // Log both sides: a mismatch is almost always a config typo rather than an
+    // intruder, and knowing only the received id makes it needlessly hard to fix.
+    logger.warn(
+      `[telegram-hook] chat mismatch — expected "${expectedChat}", tap came from "${fromChat}"`,
+    )
     await answerTelegramCallback(cb.id, "Not allowed.")
     res.status(200).json({ ok: true })
     return
