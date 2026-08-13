@@ -1,5 +1,8 @@
 import { costMicros } from "../lib/cost"
+import { DEFAULT_MODEL, KNOWN_MODELS, MODEL_PRICING } from "../lib/pricing"
 
+// AI_AGENT_MODEL is unset in .env.test, so the no-model-argument cases below
+// price at DEFAULT_MODEL (claude-sonnet-5, $3/$15).
 describe("costMicros", () => {
   it("prices uncached input at $3/MTok and output at $15/MTok", () => {
     // 1M input + 1M output = $3 + $15 = $18 = 18_000_000 micro-dollars
@@ -64,5 +67,59 @@ describe("costMicros", () => {
     const cached = costMicros({ input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 10_000 })
     const uncached = costMicros({ input_tokens: 10_000, output_tokens: 0 })
     expect(cached * 10).toBe(uncached)
+  })
+})
+
+// The regression this parameter exists to prevent: AI_AGENT_MODEL used to be
+// configurable while these rates were hardcoded to Sonnet 5, so running on
+// Haiku billed 3x the real spend and exhausted the monthly budget after a third
+// of the conversations it was sized for.
+describe("costMicros — per model", () => {
+  const usage = {
+    input_tokens: 1_000_000,
+    output_tokens: 1_000_000,
+    cache_read_input_tokens: 1_000_000,
+    cache_creation_input_tokens: 1_000_000,
+  }
+
+  it("bills Haiku 4.5 at exactly one third of Sonnet 5 across every component", () => {
+    expect(costMicros(usage, "claude-haiku-4-5") * 3).toBe(
+      costMicros(usage, "claude-sonnet-5"),
+    )
+  })
+
+  it("bills Opus 5 above Sonnet 5", () => {
+    expect(costMicros(usage, "claude-opus-5")).toBeGreaterThan(
+      costMicros(usage, "claude-sonnet-5"),
+    )
+  })
+
+  it("uses the configured model when none is passed", () => {
+    expect(costMicros(usage)).toBe(costMicros(usage, DEFAULT_MODEL))
+  })
+
+  it("never bills an unknown model below the priciest known one", () => {
+    const unknown = costMicros(usage, "claude-not-a-real-model")
+    for (const model of KNOWN_MODELS) {
+      expect(unknown).toBeGreaterThanOrEqual(costMicros(usage, model))
+    }
+  })
+
+  it("derives each model's figure from the table rather than a copy of it", () => {
+    for (const model of KNOWN_MODELS) {
+      const { inputMicrosPerToken, outputMicrosPerToken } = MODEL_PRICING[model]
+      expect(costMicros({ input_tokens: 1000, output_tokens: 0 }, model)).toBe(
+        1000 * inputMicrosPerToken,
+      )
+      expect(costMicros({ input_tokens: 0, output_tokens: 1000 }, model)).toBe(
+        1000 * outputMicrosPerToken,
+      )
+    }
+  })
+
+  it("is zero for empty usage on every model", () => {
+    for (const model of KNOWN_MODELS) {
+      expect(costMicros({ input_tokens: 0, output_tokens: 0 }, model)).toBe(0)
+    }
   })
 })

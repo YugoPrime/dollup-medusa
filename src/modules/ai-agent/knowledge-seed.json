@@ -1,0 +1,107 @@
+[
+  {
+    "id": "01-commander",
+    "title": "Comment commander",
+    "body": "La cliente peut commander sur dollupboutique.com, ou par message sur Instagram, Facebook ou WhatsApp. Le site reste le moyen le plus simple : le stock affiché y est en temps réel et la confirmation est plus rapide. Sur le site : choisir l'article, la couleur et la taille, ajouter au panier, puis Checkout. Elle remplit ses coordonnées de livraison, accepte les conditions et choisit comment recevoir sa commande. La confirmation part une fois le stock vérifié."
+  },
+  {
+    "id": "02-modifier",
+    "title": "Modifier ou annuler une commande",
+    "body": "Une commande peut être modifiée dans les 24 heures suivant le checkout, à condition qu'elle ne soit pas déjà préparée, par WhatsApp au +230 5941 6359, en donnant le numéro de commande. Une fois la commande préparée, les changements ne sont plus possibles. Ne jamais confirmer soi-même une modification ni une annulation, et ne jamais affirmer qu'une commande est encore modifiable : transmettre la demande à l'équipe, qui vérifie où en est la préparation."
+  },
+  {
+    "id": "03-suivi",
+    "title": "Suivi de commande",
+    "body": "La cliente suit sa commande sur la page Track Order de dollupboutique.com, avec son numéro de commande et le téléphone utilisé au checkout. Les étapes affichées sont : commande passée, confirmée, préparée, expédiée, livrée. Dans la conversation, une commande ne peut être retrouvée qu'avec le numéro ET le téléphone correspondant."
+  },
+  {
+    "id": "04-paiement",
+    "title": "Moyens de paiement",
+    "body": "Nous acceptons Juice, le virement bancaire et le paiement à la livraison en espèces. Le paiement par carte n'est pas encore disponible ; il arrive bientôt. Ne jamais promettre une date pour le paiement par carte, et ne jamais proposer un moyen de paiement qui ne figure pas dans cette liste."
+  },
+  {
+    "id": "05-devise-tva",
+    "title": "Devise et TVA",
+    "body": "Nous facturons uniquement en roupies mauriciennes (MUR). Tous les prix affichés sur le site sont TTC, TVA comprise : le prix affiché est le prix payé, plus les frais de livraison s'il y en a. Les envois vers La Réunion sont suspendus pour le moment ; quand ils reprendront, le paiement se fera en euros."
+  },
+  {
+    "id": "06-frais-livraison",
+    "title": "Frais de livraison",
+    "body": "Livraison à domicile ou au bureau offerte à partir de Rs 1 500 d'achat à Maurice. En dessous de ce montant : Rs 150 pour la livraison à domicile, Rs 70 par la poste, Rs 110 par la poste en express. Le montant exact apparaît au moment du paiement."
+  },
+  {
+    "id": "07-delais",
+    "title": "Délais de livraison",
+    "body": "Les articles en stock partent le lendemain si la commande est passée avant 14h. Par la poste, compter 2 à 4 jours ouvrables en envoi normal et 1 à 2 jours ouvrables en express. Ne jamais annoncer une date de livraison précise : donner la fourchette et laisser l'équipe confirmer."
+  },
+  {
+    "id": "08-zones",
+    "title": "Zones de livraison",
+    "body": "Nous livrons partout à Maurice, à domicile comme au bureau, et par la poste. Rodrigues est desservie par la poste uniquement. Les envois vers La Réunion et l'international sont suspendus."
+  },
+  {
+    "id": "09-horaires-livraison",
+    "title": "Horaires de livraison",
+    "body": "Les livraisons se font du lundi au samedi, sans créneau horaire fixe. Le livreur appelle la cliente environ une heure avant d'arriver pour qu'elle puisse s'organiser. Pas de livraison le dimanche ni les jours fériés."
+  },
+  {
+    "id": "10-retrait",
+    "title": "Retrait en boutique",
+    "body": "Le retrait se fait à la boutique : Royal Road, Pereybere, Maurice, juste à côté de la plage publique, du lundi au samedi de 9h à 18h. Un retrait le week-end est parfois possible, au cas par cas. TOUTE demande de retrait passe par l'équipe, sans exception : l'heure doit être confirmée à chaque fois. Donner l'adresse et les horaires habituels si la cliente les demande, puis passer la main avec escalate_to_human pour que l'équipe fixe le créneau. Ne jamais confirmer soi-même une heure de retrait, ni dire qu'un retrait est possible ou impossible à un moment donné."
+  },
+  {
+    "id": "11-retours-delai",
+    "title": "Retours — délai",
+    "body": "Un retour peut être demandé dans les 15 jours suivant la réception de la commande. La demande passe toujours par l'équipe : ne jamais accepter, refuser ni valider un retour dans la conversation."
+  },
+  {
+    "id": "12-retours-exclusions",
+    "title": "Retours — articles non repris",
+    "body": "Pour des raisons d'hygiène, nous ne reprenons pas la lingerie, les soutiens-gorge, les culottes, les bodys, les maillots de bain et les bikinis. Les articles signalés non retournables et les cadeaux offerts ne sont pas repris non plus."
+  },
+  {
+    "id": "13-retours-frais",
+    "title": "Retours — frais",
+    "body": "Le retour se fait par Mauritius Post au tarif forfaitaire de Rs 70, à la charge de la cliente. Les frais de livraison payés sur la commande d'origine ne sont pas remboursés."
+  },
+  {
+    "id": "14-article-abime",
+    "title": "Article abîmé ou erreur de commande",
+    "body": "Si un article arrive abîmé ou que la commande est erronée, la cliente doit envoyer des photos et un message dans les 24 heures suivant la livraison. Nous proposons alors un remplacement, un échange ou un remboursement, selon ce qu'elle préfère. Ce cas passe toujours par l'équipe : demander les photos et le numéro de commande, puis transmettre."
+  },
+  {
+    "id": "15-tailles",
+    "title": "Tailles",
+    "body": "Chaque article a son propre guide des tailles, dans l'accordéon Size Chart de sa fiche produit, juste sous le prix. Les guides diffèrent entre robes, lingerie et maillots de bain : toujours renvoyer à celui de l'article concerné. Si la cliente hésite entre deux tailles, lui proposer de vérifier ensemble plutôt que de deviner."
+  },
+  {
+    "id": "16-provenance",
+    "title": "Provenance des articles",
+    "body": "Nos pièces viennent de Chine, de Hong Kong et de Thaïlande. La sélection est faite chaque saison pour le climat mauricien et les occasions festives ; tout ce que nous recevons ne se retrouve pas forcément sur le site."
+  },
+  {
+    "id": "17-contact",
+    "title": "Contact et horaires de l'équipe",
+    "body": "L'équipe répond du lundi au samedi, de 9h à 18h (heure de Maurice). WhatsApp et téléphone : +230 5941 6359. Email : hello@dollupboutique.com. Instagram, Facebook et TikTok : @dollupboutique. Les messages reçus le dimanche sont traités le jour ouvrable suivant."
+  },
+  {
+    "id": "18-precommandes",
+    "title": "Précommandes — suspendues",
+    "body": "Les précommandes ne sont PAS ouvertes en ce moment. Si une cliente pose une question sur une précommande, un acompte, un article à commander spécialement ou un délai fournisseur, répondre simplement que ce service n'est pas disponible pour l'instant et proposer les articles réellement en stock. Ne jamais décrire le fonctionnement d'une précommande, ne jamais parler d'acompte, ne jamais annoncer une réouverture ni une date. Si la cliente insiste, passer la main à l'équipe."
+  },
+  {
+    "id": "19-fidelite",
+    "title": "Programme de fidélité",
+    "body": "Chaque commande rapporte automatiquement des points. Les points sont utilisables à partir de 150 points, sur n'importe quelle commande future : 1 point = Rs 1 de réduction, dans la limite de 50 % du panier. Ne jamais créditer, ajuster ni promettre des points dans la conversation."
+  },
+  {
+    "id": "20-stock",
+    "title": "Stock, ruptures et réassort",
+    "body": "Le stock affiché sur le site est le stock réel et se met à jour en continu. Un article épuisé n'est pas réservable et ne peut pas être mis de côté. Certains modèles reviennent en réassort, d'autres non : nous ne pouvons jamais garantir le retour d'un article ni annoncer une date. Si une taille ou une couleur est épuisée, vérifier avec l'outil ce qui reste réellement disponible et proposer les options existantes ou un article similaire, jamais une promesse de réassort."
+  },
+  {
+    "id": "21-limites",
+    "title": "Ce que la conseillère ne fait jamais",
+    "body": "Ne jamais annoncer une date de livraison précise, créer, modifier ou annuler une commande, appliquer une remise ou un code promo, réserver un article, créditer des points, accorder un retrait en dehors des horaires, ni confirmer un remboursement. Ces actions relèvent uniquement de l'équipe. Toute demande d'exception — week-end, horaire spécial, cas particulier — se transmet avec escalate_to_human plutôt que de recevoir un oui ou un non. En cas de doute sur une politique, dire honnêtement que l'information sera vérifiée plutôt que d'inventer une réponse plausible."
+  }
+]
