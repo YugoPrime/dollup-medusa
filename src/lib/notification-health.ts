@@ -9,7 +9,17 @@
  * and no alert — it surfaced only when a customer said he never got his
  * delivery notice. This module exists so that never repeats.
  *
- * Two distinct broken states are detected, because status alone lies:
+ * Two independent signals feed the verdict:
+ *
+ *   1. The 24h sweep — reads real notification rows. Cheap and precise, but
+ *      blind on a day with no orders.
+ *
+ *   2. The canary — one synthetic send per run to an internal address. Proves
+ *      the pipe end-to-end regardless of traffic, and catches a revoked key or
+ *      unverified domain the sweep would never see on a quiet day.
+ *
+ * Within the sweep, two distinct broken states are detected, because `status`
+ * alone lies:
  *
  *   failure  — Medusa never handed it to a provider (the blackout signature).
  *
@@ -17,8 +27,7 @@
  *              sendable address. ResendNotificationProviderService.send()
  *              returns `{}` when Resend rejects the mail or answers without an
  *              id, and the notification module reads that as SUCCESS. Nothing
- *              was ever sent. Without this check a revoked key, an unverified
- *              domain or a suppressed recipient stays completely invisible.
+ *              was ever sent.
  *
  * A `success` with no external_id on a NON-sendable placeholder address
  * (`dm-<phone>@dollupboutique.local`) is the provider deliberately skipping —
@@ -50,6 +59,19 @@ export type NotificationHealth = {
   /** distinct real customer addresses that lost an email. */
   affectedRecipients: string[]
 }
+
+/**
+ * Result of the synthetic send.
+ *   ok        — Resend returned a message id. The pipe works.
+ *   threw     — createNotifications rejected (no provider registered, etc).
+ *   not_sent  — resolved, but no external_id came back: Resend refused it.
+ *   skipped   — canary intentionally disabled, verdict falls back to the sweep.
+ */
+export type CanaryOutcome =
+  | { status: "ok"; externalId: string }
+  | { status: "threw"; message: string }
+  | { status: "not_sent" }
+  | { status: "skipped" }
 
 export type HealthVerdict = "ok" | "degraded" | "outage"
 
@@ -105,9 +127,20 @@ export function summarizeNotificationHealth(
   return health
 }
 
-export function classifyNotificationHealth(
+export function canaryIsBroken(canary: CanaryOutcome): boolean {
+  return canary.status === "threw" || canary.status === "not_sent"
+}
+
+/**
+ * A broken canary is always an outage: it proves the pipe is dead right now,
+ * independent of how much traffic happened to flow through the window.
+ */
+export function classifyEmailHealth(
   health: NotificationHealth,
+  canary: CanaryOutcome = { status: "skipped" },
 ): HealthVerdict {
+  if (canaryIsBroken(canary)) return "outage"
+
   const broken = health.failed + health.phantom
   if (broken === 0) return "ok"
   // Nothing got through at all — the provider is almost certainly unregistered,
@@ -127,11 +160,14 @@ function escapeHtml(value: string): string {
  * Returns the Telegram HTML body, or null when there is nothing worth saying.
  * Kept separate from the job so severity wording is unit-testable.
  */
-export function buildNotificationHealthAlert(
-  health: NotificationHealth,
-  verdict: HealthVerdict,
-  windowHours: number,
-): string | null {
+export function buildEmailHealthAlert(input: {
+  health: NotificationHealth
+  verdict: HealthVerdict
+  windowHours: number
+  canary?: CanaryOutcome
+}): string | null {
+  const { health, verdict, windowHours } = input
+  const canary: CanaryOutcome = input.canary ?? { status: "skipped" }
   if (verdict === "ok") return null
 
   const broken = health.failed + health.phantom
@@ -139,57 +175,76 @@ export function buildNotificationHealthAlert(
 
   if (verdict === "outage") {
     lines.push("🚨 <b>CUSTOMER EMAIL IS DOWN</b>")
-    lines.push("")
-    lines.push(
-      `<b>${broken}</b> notification${broken === 1 ? "" : "s"} in the last ${windowHours}h and <b>not one</b> was delivered.`,
-    )
   } else {
     lines.push("⚠️ <b>Customer emails are failing</b>")
-    lines.push("")
-    lines.push(
-      `<b>${broken}</b> of <b>${health.total}</b> notification${health.total === 1 ? "" : "s"} in the last ${windowHours}h did not reach Resend.`,
-    )
   }
-
   lines.push("")
-  if (health.failed > 0) {
-    lines.push(`• <b>${health.failed}</b> failed — no provider took them`)
-  }
-  if (health.phantom > 0) {
-    lines.push(
-      `• <b>${health.phantom}</b> marked success but never reached Resend`,
-    )
-  }
-  if (health.pending > 0) {
-    lines.push(`• <b>${health.pending}</b> stuck pending (died mid-send)`)
-  }
-  if (health.delivered > 0) {
-    lines.push(`• ${health.delivered} delivered OK`)
+
+  // The canary is the strongest statement available, so it leads.
+  if (canaryIsBroken(canary)) {
+    lines.push("<b>Live test send just failed.</b>")
+    if (canary.status === "threw") {
+      lines.push(`<code>${escapeHtml(canary.message)}</code>`)
+    } else {
+      lines.push("Resend accepted no message id — nothing was sent.")
+    }
+    lines.push("")
+  } else if (canary.status === "ok") {
+    lines.push("Live test send worked, so the pipe is up right now.")
+    lines.push("")
   }
 
-  const templates = Object.entries(health.brokenByTemplate).sort(
-    (a, b) => b[1] - a[1],
-  )
-  if (templates.length > 0) {
-    lines.push("")
+  if (broken > 0) {
     lines.push(
-      "Lost: " +
-        templates.map(([t, n]) => `${escapeHtml(t)} ×${n}`).join(", "),
+      verdict === "outage" && health.delivered === 0
+        ? `<b>${broken}</b> notification${broken === 1 ? "" : "s"} in the last ${windowHours}h and <b>not one</b> was delivered.`
+        : `<b>${broken}</b> of <b>${health.total}</b> notification${health.total === 1 ? "" : "s"} in the last ${windowHours}h did not reach Resend.`,
     )
-  }
+    lines.push("")
+    if (health.failed > 0) {
+      lines.push(`• <b>${health.failed}</b> failed — no provider took them`)
+    }
+    if (health.phantom > 0) {
+      lines.push(
+        `• <b>${health.phantom}</b> marked success but never reached Resend`,
+      )
+    }
+    if (health.pending > 0) {
+      lines.push(`• <b>${health.pending}</b> stuck pending (died mid-send)`)
+    }
+    if (health.delivered > 0) {
+      lines.push(`• ${health.delivered} delivered OK`)
+    }
 
-  const affected = health.affectedRecipients
-  if (affected.length > 0) {
-    lines.push("")
-    lines.push(
-      `<b>${affected.length}</b> real customer${affected.length === 1 ? "" : "s"} affected:`,
+    const templates = Object.entries(health.brokenByTemplate).sort(
+      (a, b) => b[1] - a[1],
     )
-    for (const addr of affected.slice(0, 5)) {
-      lines.push(`  ${escapeHtml(addr)}`)
+    if (templates.length > 0) {
+      lines.push("")
+      lines.push(
+        "Lost: " +
+          templates.map(([t, n]) => `${escapeHtml(t)} ×${n}`).join(", "),
+      )
     }
-    if (affected.length > 5) {
-      lines.push(`  …and ${affected.length - 5} more`)
+
+    const affected = health.affectedRecipients
+    if (affected.length > 0) {
+      lines.push("")
+      lines.push(
+        `<b>${affected.length}</b> real customer${affected.length === 1 ? "" : "s"} affected:`,
+      )
+      for (const addr of affected.slice(0, 5)) {
+        lines.push(`  ${escapeHtml(addr)}`)
+      }
+      if (affected.length > 5) {
+        lines.push(`  …and ${affected.length - 5} more`)
+      }
     }
+  } else if (canaryIsBroken(canary)) {
+    // Quiet window, dead pipe — the case the sweep alone would have missed.
+    lines.push(
+      `No notifications in the last ${windowHours}h to corroborate, but the test send proves email is broken.`,
+    )
   }
 
   if (verdict === "outage") {
