@@ -25,6 +25,8 @@ export type ShippingSettingsDTO = {
   free_shipping_threshold_mur: number
   return_fee_mur: number
   preorder_eta_copy: string
+  /** Whole hour, Mauritius time. See src/lib/delivery-cutoff.ts. */
+  next_day_cutoff_hour: number
 }
 
 export type StoreSettingsDTO = {
@@ -60,8 +62,8 @@ export const DEFAULT_EMAIL_SETTINGS: Omit<EmailSettingsDTO, "id"> = {
 export const DEFAULT_SHIPPING_SETTINGS: Omit<ShippingSettingsDTO, "id"> = {
   free_shipping_threshold_mur: 1500,
   return_fee_mur: 70,
-  preorder_eta_copy:
-    "Confirm before noon to receive your order the next day across Mauritius.",
+  preorder_eta_copy: "Order before noon for next-day delivery across Mauritius.",
+  next_day_cutoff_hour: 12,
 }
 
 export const DEFAULT_STORE_SETTINGS: Omit<StoreSettingsDTO, "id"> = {
@@ -179,6 +181,9 @@ class StoreConfigModuleService extends MedusaService({
     if ("preorder_eta_copy" in input) {
       next.preorder_eta_copy = input.preorder_eta_copy
     }
+    if ("next_day_cutoff_hour" in input) {
+      next.next_day_cutoff_hour = input.next_day_cutoff_hour
+    }
 
     this.validateShippingSettings({ ...current, ...next })
 
@@ -254,6 +259,7 @@ class StoreConfigModuleService extends MedusaService({
     for (const key of [
       "free_shipping_threshold_mur",
       "return_fee_mur",
+      "next_day_cutoff_hour",
     ] as const) {
       const value = settings[key]
       if (

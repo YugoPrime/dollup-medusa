@@ -39,7 +39,10 @@ describe("store-config DTO contract", () => {
 
     expect(dto.free_shipping_threshold_mur).toBe(1500)
     expect(dto.return_fee_mur).toBe(70)
-    expect(Object.keys(dto)).toHaveLength(4)
+    // Silence on the daily Telegram prompt must mean noon, so the stored
+    // default has to match DEFAULT_CUTOFF_HOUR in src/lib/delivery-cutoff.ts.
+    expect(dto.next_day_cutoff_hour).toBe(12)
+    expect(Object.keys(dto)).toHaveLength(5)
   })
 
   it("keeps store defaults aligned with storefront contact info", () => {
@@ -50,6 +53,6 @@ describe("store-config DTO contract", () => {
 
     expect(dto.contact_phone).toBe("+230 5941 6359")
     expect(dto.contact_email).toBe("hello@dollupboutique.com")
-    expect(Object.keys(dto)).toHaveLength(9)
+    expect(Object.keys(dto)).toHaveLength(10)
   })
 })
