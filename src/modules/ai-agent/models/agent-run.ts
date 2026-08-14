@@ -8,7 +8,9 @@ export const AgentRun = model.define("ai_agent_run", {
   status: model.enum(["skipped", "replied", "escalated", "failed"]),
   skip_reason: model.text().nullable(),
   intent: model.text().nullable(),
-  confidence: model.number().nullable(),
+  // float, not number: model.number() maps to an integer column, which rounds
+  // 0.85 to 1 and makes this audit column useless for reviewing drafts.
+  confidence: model.float().nullable(),
   escalation_reason: model.text().nullable(),
   language: model.text().nullable(),
   tools_used: model.json().nullable(),

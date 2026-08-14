@@ -36,12 +36,21 @@ module.exports = defineConfig({
     }
   },
   modules: [
-    {
-      resolve: "@medusajs/medusa/event-bus-redis",
-      options: {
-        redisUrl: process.env.EVENTS_REDIS_URL || process.env.REDIS_URL,
-      },
-    },
+    // Gated like the three below it. Registered unconditionally, this module
+    // threw "No `redisUrl` provided in project config" during module loading
+    // whenever no Redis was configured, which took the entire app down before
+    // any route loaded — that is why every integration:http suite failed to
+    // boot. Production sets REDIS_URL, so this changes nothing there.
+    ...(process.env.EVENTS_REDIS_URL || process.env.REDIS_URL
+      ? [
+          {
+            resolve: "@medusajs/medusa/event-bus-redis",
+            options: {
+              redisUrl: process.env.EVENTS_REDIS_URL || process.env.REDIS_URL,
+            },
+          },
+        ]
+      : []),
     // Redis-backed caching + workflow engine (production checklist). Both are
     // gated on REDIS_URL, like locking below, so test environments without a
     // Redis server still boot with the in-memory defaults. The Redis workflow

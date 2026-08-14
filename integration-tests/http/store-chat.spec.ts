@@ -13,7 +13,14 @@ medusaIntegrationTestRunner({
     describe("/store/chat", () => {
       let publishableKey = ""
 
-      beforeAll(async () => {
+      // beforeEach, not beforeAll: medusaIntegrationTestRunner truncates the
+      // database between tests, which deletes the publishable key along with
+      // everything else. Bootstrapped once, only the first test in the file has
+      // a valid key — every later request is rejected by the publishable-key
+      // middleware with a 400 before reaching the route. That also produced a
+      // false pass on "returns 400 for empty text", which got its 400 from the
+      // middleware rather than from the validation it claims to test.
+      beforeEach(async () => {
         // /store/* is gated by Medusa's framework-level
         // ensurePublishableApiKeyMiddleware (registered globally on the
         // "/store" namespace in @medusajs/framework's ApiLoader): a request
@@ -24,24 +31,37 @@ medusaIntegrationTestRunner({
         // real key we log in as an admin and create one the same way the
         // dashboard would.
         //
-        // Registering via /auth/user/emailpass/register alone yields a
-        // working bearer token but no linked `user` record; POST
-        // /admin/api-keys reads req.auth_context.actor_id for `created_by`,
-        // so we also create the User row, mirroring the pattern already used
-        // by integration-tests/http/sourcing-suppliers.spec.ts for the same
-        // reason.
+        // The registration token alone is NOT enough for /admin/*: it is minted
+        // before any `user` exists, so it carries no actor_id and every admin
+        // route answers 401. Two things that look like the fix but are not:
+        //   - creating the User row straight off the user module (what
+        //     integration-tests/http/sourcing-suppliers.spec.ts does) makes a
+        //     user but never links it to the auth identity;
+        //   - POST /admin/users needs an authenticated actor itself, so the
+        //     registration token cannot bootstrap through it either.
+        // The actual link is app_metadata.user_id on the auth identity. Only a
+        // token issued AFTER that link carries actor_id, hence the second login.
         const email = "store-chat-spec@dollup.test"
-        const reg = await api.post("/auth/user/emailpass/register", {
-          email,
-          password: "supersecret",
-        })
-        const token = reg.data.token
+        const password = "supersecret"
+        await api.post("/auth/user/emailpass/register", { email, password })
 
         const userModule: any = getContainer().resolve("user")
-        const existing = await userModule.listUsers({ email })
-        if (existing.length === 0) {
-          await userModule.createUsers({ email })
-        }
+        const authModule: any = getContainer().resolve("auth")
+
+        const [user] = await userModule.createUsers([{ email }])
+        const identities = await authModule.listAuthIdentities(
+          {},
+          { relations: ["provider_identities"] },
+        )
+        const identity = identities.find((i: any) =>
+          i.provider_identities?.some((p: any) => p.entity_id === email),
+        )
+        await authModule.updateAuthIdentities([
+          { id: identity.id, app_metadata: { user_id: user.id } },
+        ])
+
+        const login = await api.post("/auth/user/emailpass", { email, password })
+        const token = login.data.token
 
         const created = await api.post(
           "/admin/api-keys",

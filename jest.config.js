@@ -3,17 +3,27 @@ loadEnv("test", process.cwd());
 
 module.exports = {
   transform: {
-    "^.+\\.[jt]s$": [
+    // .tsx included: notification-resend imports its React Email templates,
+    // which are .tsx, and booting the app pulls that module in. Without it the
+    // whole integration:http suite dies before the first test.
+    "^.+\\.[jt]sx?$": [
       "@swc/jest",
       {
         jsc: {
-          parser: { syntax: "typescript", decorators: true },
+          parser: { syntax: "typescript", tsx: true, decorators: true },
         },
       },
     ],
   },
   testEnvironment: "node",
-  moduleFileExtensions: ["js", "ts", "json"],
+  // src uses dynamic `import("./foo.js")` in a few places, which is correct at
+  // runtime (Medusa compiles TS to .js) but unresolvable here, where the file
+  // on disk is still .ts. Without this, any test touching chat's sendOutbound
+  // or ingestInboundMessenger dies on "Cannot find module".
+  moduleNameMapper: {
+    "^(\\.{1,2}/.*)\\.js$": "$1",
+  },
+  moduleFileExtensions: ["js", "ts", "tsx", "json"],
   modulePathIgnorePatterns: ["dist/", "<rootDir>/.medusa/"],
   setupFiles: ["./integration-tests/setup.js"],
 };

@@ -16,6 +16,8 @@ export const Message = model
       .default("pending"),
     meta_error: model.text().nullable(),
     draft_reply: model.json().nullable(),
-    draft_confidence: model.number().nullable(),
+    // float, not number: model.number() maps to integer. Nothing wrote this
+    // column until shadow mode existed; the agent writes fractions here.
+    draft_confidence: model.float().nullable(),
   })
   .indexes([{ on: ["external_id"], where: "external_id IS NOT NULL", unique: true }])
