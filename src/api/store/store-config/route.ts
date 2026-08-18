@@ -106,6 +106,10 @@ export const GET = async (req: MedusaStoreRequest, res: MedusaResponse) => {
         free_shipping_threshold_mur: shipping.free_shipping_threshold_mur,
         return_fee_mur: shipping.return_fee_mur,
         preorder_eta_copy: shipping.preorder_eta_copy,
+        // The storefront needs this to enforce and display the same cutoff the
+        // owner set from Telegram. Whitelisted like every other field here, so
+        // adding it to shipping settings alone would never have reached the site.
+        next_day_cutoff_hour: shipping.next_day_cutoff_hour,
         options,
       },
       store: {

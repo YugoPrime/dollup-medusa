@@ -64,6 +64,12 @@ export const POST = async (
       rapido_status: result.status,
       rapido_dispatched_at: new Date().toISOString(),
       rapido_fee_bearer: "merchant",
+      // Exactly what Rapido was told to collect at the door, in whole rupees
+      // (the payload carries cents). This is the authoritative COD figure —
+      // the delivered webhook settles this amount rather than re-deriving it,
+      // which would go wrong on deposit / exchange-credit orders where the
+      // cash owed is total minus the credit already taken.
+      rapido_cod_amount: Math.round(validation.value.codAmount / 100),
     }
     await orderModule.updateOrders(orderId, { metadata: newMetadata })
   } catch (err) {

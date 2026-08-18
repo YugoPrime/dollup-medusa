@@ -4,6 +4,8 @@ import {
   Modules,
 } from "@medusajs/framework/utils"
 import { verifyRapidoSignature } from "../../../modules/rapido/verify-rapido-signature"
+import { isDeliveredStatus } from "../../../modules/rapido/delivered-status"
+import { markOrderDeliveredFromCourier } from "../../../modules/rapido/mark-delivered"
 
 export const POST = async (req: MedusaRequest, res: MedusaResponse) => {
   const rawBody = req.body as Buffer
@@ -58,6 +60,27 @@ export const POST = async (req: MedusaRequest, res: MedusaResponse) => {
     if (event.trackingNumber) {
       newMetadata.rapido_tracking = event.trackingNumber
     }
+
+    if (isDeliveredStatus(event.status)) {
+      // Owns the metadata write itself (Medusa replaces metadata wholesale, so
+      // two writers would clobber each other). A failed *fulfillment* is
+      // swallowed in there and reported via outcome.error, since retrying it
+      // forever would achieve nothing; a failed read/write still throws to the
+      // catch below, where a 500 correctly asks Rapido to retry.
+      const outcome = await markOrderDeliveredFromCourier(
+        req.scope,
+        orderId,
+        newMetadata,
+      )
+      res.status(200).send(outcome.error ? "ok (degraded)" : "ok")
+      return
+    }
+
+    // Not a delivered status: record it and leave the order alone. Failed and
+    // returned deliveries land here on purpose — they're for a human to action.
+    console.info(
+      `[hooks/rapido] order ${orderId}: status "${event.status}" is not a delivered status; stored only`,
+    )
 
     const orderModule = req.scope.resolve(Modules.ORDER)
     await orderModule.updateOrders(orderId, { metadata: newMetadata })

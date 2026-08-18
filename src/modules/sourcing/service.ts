@@ -1138,6 +1138,26 @@ class SourcingModuleService extends MedusaService({
       "sloc_01KN48PYHQ0DTXXN2N0JWZSAYV"
     const r2PublicUrl = process.env.R2_PUBLIC_URL ?? ""
 
+    // Every product MUST belong to a shipping profile or it can't be fulfilled:
+    // "Mark Delivered" fails with "Shipping profile sp_... does not match the
+    // shipping profile of the order item ...". createProductsWorkflow does NOT
+    // auto-attach the default profile for programmatic creates, so we pass it
+    // explicitly. Resolved by name (two type=default profiles exist here:
+    // "Default Shipping Profile" + "Pre-Order Shipping") with an env override
+    // and a hardcoded fallback, matching the other environment IDs above.
+    // Backlog repaired by scripts/backfill-product-shipping-profiles.ts.
+    const shippingProfileId =
+      process.env.MEDUSA_DEFAULT_SHIPPING_PROFILE_ID ??
+      ((
+        await query.graph({
+          entity: "shipping_profile",
+          fields: ["id", "name"],
+        })
+      ).data.find(
+        (p: { name: string }) => p.name === "Default Shipping Profile",
+      )?.id as string | undefined) ??
+      "sp_01KN07JARKWGN9ZRHK9ABB5EGM"
+
     for (const item of items) {
       if (item.published_product_id) continue
 
@@ -1251,6 +1271,7 @@ class SourcingModuleService extends MedusaService({
           title: (item.working_name && item.working_name.trim()) || assignedRef,
           handle: assignedRef.toLowerCase(),
           status: "draft" as const,
+          shipping_profile_id: shippingProfileId,
           options: productOptions,
           variants: productVariants,
           sales_channels: [{ id: salesChannelId }],

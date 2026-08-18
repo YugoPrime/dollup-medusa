@@ -70,3 +70,105 @@ export function escapeTelegramHtml(value: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
 }
+
+/**
+ * Send a message with a single row of inline buttons.
+ *
+ * Buttons rather than free text so the answer needs one tap on a phone, carries
+ * no parsing risk, and cannot produce a value the rest of the system rejects.
+ * Returns the sent message id so the caller can edit it afterwards.
+ */
+export async function sendTelegramButtons(
+  text: string,
+  buttons: Array<{ text: string; callback_data: string }>,
+  opts: { chatId?: string } = {},
+): Promise<{ ok: true; messageId: number } | { ok: false; skipped?: true; message?: string }> {
+  const token = process.env.TELEGRAM_BOT_TOKEN
+  const chatId = opts.chatId ?? process.env.TELEGRAM_CHAT_ID
+  if (!token || !chatId) return { ok: false, skipped: true }
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 10_000)
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        parse_mode: "HTML",
+        disable_web_page_preview: true,
+        reply_markup: { inline_keyboard: [buttons] },
+      }),
+      signal: controller.signal,
+    })
+    const body = (await res.json().catch(() => null)) as
+      | { ok?: boolean; result?: { message_id?: number } }
+      | null
+    if (!res.ok || !body?.ok || typeof body.result?.message_id !== "number") {
+      return { ok: false, message: `sendMessage failed (${res.status})` }
+    }
+    return { ok: true, messageId: body.result.message_id }
+  } catch (err) {
+    return { ok: false, message: (err as Error).message }
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+/**
+ * Acknowledge a button tap. Telegram spins the button until this is called, so
+ * it runs on every callback — including ones we reject.
+ */
+export async function answerTelegramCallback(
+  callbackQueryId: string,
+  text: string,
+): Promise<void> {
+  const token = process.env.TELEGRAM_BOT_TOKEN
+  if (!token) return
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 10_000)
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ callback_query_id: callbackQueryId, text }),
+      signal: controller.signal,
+    })
+  } catch {
+    // Best effort — the setting is already saved by this point.
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+/** Replace a message's text and drop its buttons, so the day has one record. */
+export async function editTelegramMessage(
+  messageId: number,
+  text: string,
+  opts: { chatId?: string } = {},
+): Promise<void> {
+  const token = process.env.TELEGRAM_BOT_TOKEN
+  const chatId = opts.chatId ?? process.env.TELEGRAM_CHAT_ID
+  if (!token || !chatId) return
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 10_000)
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        message_id: messageId,
+        text,
+        parse_mode: "HTML",
+        reply_markup: { inline_keyboard: [] },
+      }),
+      signal: controller.signal,
+    })
+  } catch {
+    // Best effort — cosmetic only.
+  } finally {
+    clearTimeout(timeout)
+  }
+}
