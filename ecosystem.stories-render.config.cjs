@@ -21,6 +21,17 @@
 //
 // Note: PM2 cron uses the system local timezone. The laptop must be set
 // to Mauritius time (UTC+4) for "30 18 * * *" to fire at 18:30 MU.
+// Docker-internal container IPs are NOT stable: every VPS reboot reshuffles
+// them (2026-08-18: pg 10.0.1.10 -> 10.0.1.6, redis 10.0.1.6 -> 10.0.1.9 and
+// every poller tick failed with KnexTimeoutError while the tunnel looked
+// "up"). ensure-tunnel.ps1 resolves the live IPs via `docker inspect` over SSH
+// and writes them to tunnel-targets.json; this file only reads them.
+const path = require("path")
+let targets = { pgIp: "10.0.1.6", redisIp: "10.0.1.9" }
+try {
+  targets = { ...targets, ...require(path.join(__dirname, "tunnel-targets.json")) }
+} catch (_) {}
+
 module.exports = {
   apps: [
     {
@@ -44,9 +55,9 @@ module.exports = {
         "-o",
         "ExitOnForwardFailure=yes",
         "-L",
-        "5432:10.0.1.10:5432",
+        `5432:${targets.pgIp}:5432`,
         "-L",
-        "6379:10.0.1.6:6379",
+        `6379:${targets.redisIp}:6379`,
         "root@100.65.8.93",
       ],
       autorestart: true,
