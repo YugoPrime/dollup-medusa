@@ -4,6 +4,7 @@ import { createProductsWorkflow } from "@medusajs/medusa/core-flows"
 
 import { PREORDER_MODULE } from "../../../../modules/preorder"
 import type PreorderModuleService from "../../../../modules/preorder/service"
+import { pickVariantThumbnail } from "../../../../lib/variant-thumbnail"
 
 const PREORDER_SHIPPING_PROFILE_NAME = "Pre-Order Shipping"
 const SHEIN_CDN_REGEX = /^https:\/\/img\.ltwebstatic\.com\//
@@ -151,6 +152,10 @@ export async function createPreorderProduct(
       // data backfill (it scopes the whole Pre-Order channel, both paths).
       prices: [{ currency_code: "mur", amount: preview.finalPriceMur }],
       manage_inventory: false,
+      // Medusa stamps a line item's thumbnail from variant.thumbnail, falling
+      // back to the PRODUCT thumbnail — so without this every colourway shows
+      // colors[0]'s shot in the cart, checkout and order emails.
+      thumbnail: pickVariantThumbnail({ image_urls: color.images }),
       metadata: {
         image_urls: color.images,
         shein_url: color.sheinUrl,
