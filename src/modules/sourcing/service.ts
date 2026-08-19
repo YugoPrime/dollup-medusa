@@ -1229,8 +1229,15 @@ class SourcingModuleService extends MedusaService({
                 currency_code: "mur",
               },
             ],
+            // `thumbnail` mirrors image_urls[0]: Medusa stamps a line item's
+            // thumbnail from variant.thumbnail, falling back to the PRODUCT
+            // thumbnail. Without it every colourway showed the default shot in
+            // the cart, checkout and order emails. See lib/variant-thumbnail.
             ...(variantImageUrl
-              ? { metadata: { image_urls: [variantImageUrl] } }
+              ? {
+                  thumbnail: variantImageUrl,
+                  metadata: { image_urls: [variantImageUrl] },
+                }
               : {}),
           }
         })
