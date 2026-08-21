@@ -1,0 +1,9 @@
+﻿{
+    "_comment":  "Auto-written by ensure-tunnel.ps1 (docker inspect over SSH). Container IPs change on every VPS reboot - do not hand-edit, just re-run ensure-tunnel.ps1.",
+    "sshHost":  "root@100.65.8.93",
+    "pgContainer":  "w19wlamada7h8ioo7aihmb7u",
+    "redisContainer":  "nryk9bn0kzf1vzuvxa4yykxk",
+    "pgIp":  "10.0.1.6",
+    "redisIp":  "10.0.1.9",
+    "resolvedAt":  "2026-08-21T18:02:53+04:00"
+}

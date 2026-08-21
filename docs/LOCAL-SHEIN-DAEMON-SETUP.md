@@ -48,17 +48,19 @@ npx playwright install chromium
 
 ### 3. Ensure the SSH tunnel is running
 
-Both daemons connect to prod DB via the `coolify-db-tunnel` SSH tunnel. Verify it's running:
+Both daemons connect to prod DB via the SSH tunnel to Coolify. Verify and repair it in one step:
 
 ```powershell
-pm2 list
+.\ensure-tunnel.ps1
 ```
 
-You should see `coolify-db-tunnel` in the process table. If not, start it:
+Exit 0 means the tunnel is up **and** really carrying Postgres + Redis traffic
+(it runs a genuine `SELECT 1` / `PING`, not a port probe). If it is unhealthy it
+re-resolves the container IPs from the VPS via `docker inspect`, rewrites
+`tunnel-targets.json`, and restarts ssh automatically.
 
-```powershell
-pm2 start coolify-db-tunnel
-```
+> PM2 no longer supervises the tunnel (removed 2026-08-21). Task Scheduler calls
+> `ensure-tunnel.ps1` every 5 min (render poller) and every 15 min (watchdog).
 
 Refer to LOCAL-RENDERING-SETUP.md for full tunnel setup.
 
@@ -123,10 +125,10 @@ Get-Content .env.local-render | ForEach-Object {
   }
 }
 
-# Check tunnel
-$tunnel = pm2 list | Select-String "coolify-db-tunnel"
-if (-not $tunnel) {
-  Write-Error "coolify-db-tunnel PM2 process not running. Start it with: pm2 start coolify-db-tunnel"
+# Check tunnel (self-healing: re-resolves IPs and restarts ssh if needed)
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\ensure-tunnel.ps1 -Quiet
+if ($LASTEXITCODE -ne 0) {
+  Write-Error "SSH tunnel to Coolify is down and auto-repair failed. Run .\ensure-tunnel.ps1 for details."
   exit 2
 }
 
@@ -208,16 +210,23 @@ Both daemons update `preorder_settings.shein_daemon_last_seen_at` on every succe
 
 ## Troubleshooting
 
-### "coolify-db-tunnel not running"
-The SSH tunnel to prod is down. Check:
+### KnexTimeoutError / "tunnel down" / renders failing every 5 min
+The SSH tunnel is down **or** it is listening locally while pointing at stale
+container IPs. Coolify's docker subnet reshuffles IPs on every VPS reboot, and a
+plain port check cannot tell the difference - `ensure-tunnel.ps1` can:
+
 ```powershell
-pm2 list | Select-String tunnel
-pm2 logs coolify-db-tunnel --lines 50
+.\ensure-tunnel.ps1          # diagnoses, re-resolves IPs, restarts ssh
+node scripts	unnel-healthcheck.mjs   # just the verdict: real SELECT 1 + PING
+Get-Content logs\ssh-tunnel-err.log -Tail 20
 ```
-Restart:
-```powershell
-pm2 restart coolify-db-tunnel
-```
+
+`channel N: open failed: connect failed: Connection refused` in that log means
+the forward target moved - re-run `ensure-tunnel.ps1`.
+
+If it reports **ports still held / access denied**, a stale tunnel from the old
+PM2 setup is squatting on 5432 with a higher-integrity token. Kill it from an
+**Administrator** terminal using the PID the script names, then re-run it.
 
 ### Chromium not found / path errors
 Playwright wasn't installed. Run:
