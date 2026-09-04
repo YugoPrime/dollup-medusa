@@ -33,54 +33,67 @@ if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir | Out
 $logFile = Join-Path $logDir "stories-render-poller-task.log"
 Start-Transcript -Path $logFile -Append | Out-Null
 
+function Send-TelegramAlert {
+  param([string]$Text)
+  $token = $env:TELEGRAM_BOT_TOKEN
+  $chatId = $env:TELEGRAM_CHAT_ID
+  if (-not $token -or -not $chatId) { return }
+  try {
+    Invoke-RestMethod -Method Post `
+      -Uri "https://api.telegram.org/bot$token/sendMessage" `
+      -Body @{ chat_id = $chatId; text = $Text; parse_mode = "HTML" } `
+      -TimeoutSec 10 | Out-Null
+  } catch {
+    Write-Host "[render-poller-tick] telegram alert failed: $($_.Exception.Message)"
+  }
+}
+
 try {
+  # --- Env loading -------------------------------------------------------
+  # Loaded BEFORE the lock guard so that a failure in the guard itself can
+  # still reach Telegram. On 2026-09-03 a corrupt lock killed every tick for
+  # 26h in total silence, because the alert credentials weren't loaded yet.
+  $envFile = Join-Path $scriptDir ".env.local-render"
+  if (-not (Test-Path $envFile)) {
+    Write-Error "[render-poller-tick] .env.local-render not found at $envFile"
+    exit 1
+  }
+
+  Get-Content $envFile | ForEach-Object {
+    if ($_ -match "^\s*([^#=]+?)\s*=\s*(.*)$") {
+      [System.Environment]::SetEnvironmentVariable($Matches[1], $Matches[2])
+    }
+  }
+
+  # Force one-shot mode - we're called once every 5 min by Task Scheduler,
+  # not running as a long-poll loop.
+  $env:RENDER_ONCE = "true"
+
   # --- Concurrency guard via lock file -----------------------------------
+  # A hard power loss leaves this file metadata-committed but data-unflushed,
+  # so it comes back as NUL bytes instead of a PID. Anything that isn't a
+  # plain integer cannot be a live holder - treat it as stale rather than let
+  # Get-Process throw on the parameter bind and wedge every future tick.
   $lockFile = Join-Path $scriptDir ".render-poller.lock"
   if (Test-Path $lockFile) {
-    $existingPid = Get-Content $lockFile -ErrorAction SilentlyContinue
-    if ($existingPid -and (Get-Process -Id $existingPid -ErrorAction SilentlyContinue)) {
-      Write-Host "[render-poller-tick] $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') lock held by PID $existingPid - skipping this tick"
-      exit 0
+    $raw = Get-Content $lockFile -Raw -ErrorAction SilentlyContinue
+    $clean = if ($raw) { ($raw -replace "`0", '').Trim() } else { '' }
+    $existingPid = 0
+    if ($clean -match '^\d{1,10}$' -and [int]::TryParse($clean, [ref]$existingPid)) {
+      if (Get-Process -Id $existingPid -ErrorAction SilentlyContinue) {
+        Write-Host "[render-poller-tick] $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') lock held by PID $existingPid - skipping this tick"
+        exit 0
+      }
+      Write-Host "[render-poller-tick] $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') stale lock for PID $existingPid - reclaiming"
+    } else {
+      $size = (Get-Item $lockFile).Length
+      Write-Host "[render-poller-tick] $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') corrupt lock ($size bytes, no readable PID - crash artefact) - reclaiming"
     }
-    # Stale lock - holder is gone. Reclaim it.
-    Write-Host "[render-poller-tick] $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') stale lock for PID $existingPid - reclaiming"
     Remove-Item $lockFile -Force
   }
   Set-Content -Path $lockFile -Value $PID
 
   try {
-    # --- Env loading -----------------------------------------------------
-    $envFile = Join-Path $scriptDir ".env.local-render"
-    if (-not (Test-Path $envFile)) {
-      Write-Error "[render-poller-tick] .env.local-render not found at $envFile"
-      exit 1
-    }
-
-    Get-Content $envFile | ForEach-Object {
-      if ($_ -match "^\s*([^#=]+?)\s*=\s*(.*)$") {
-        [System.Environment]::SetEnvironmentVariable($Matches[1], $Matches[2])
-      }
-    }
-
-    # Force one-shot mode - we're called once every 5 min by Task Scheduler,
-    # not running as a long-poll loop.
-    $env:RENDER_ONCE = "true"
-
-    function Send-TelegramAlert {
-      param([string]$Text)
-      $token = $env:TELEGRAM_BOT_TOKEN
-      $chatId = $env:TELEGRAM_CHAT_ID
-      if (-not $token -or -not $chatId) { return }
-      try {
-        Invoke-RestMethod -Method Post `
-          -Uri "https://api.telegram.org/bot$token/sendMessage" `
-          -Body @{ chat_id = $chatId; text = $Text; parse_mode = "HTML" } `
-          -TimeoutSec 10 | Out-Null
-      } catch {
-        Write-Host "[render-poller-tick] telegram alert failed: $($_.Exception.Message)"
-      }
-    }
-
     # --- Tunnel pre-flight (self-healing) -------------------------------
     # Repair the tunnel on demand rather than just skipping. Quiet mode keeps
     # the 5-min ticks from spamming the transcript.
@@ -112,6 +125,15 @@ try {
       Remove-Item $lockFile -Force -ErrorAction SilentlyContinue
     }
   }
+}
+catch {
+  # Any unhandled terminating error - corrupt lock, unreadable env file, a
+  # missing helper script. Before 2026-09-04 these died into the transcript
+  # and nothing ever told us; the tunnel alert doesn't cover this path.
+  $err = $_.Exception.Message
+  Write-Host "[render-poller-tick] $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') tick crashed: $err"
+  Send-TelegramAlert ([char]0x274C + " <b>Stories render-poller tick crashed</b>`n`n<code>$err</code>`n`nThe 5-min poller is not rendering. Check <code>logs/stories-render-poller-task.log</code>.")
+  exit 1
 }
 finally {
   Stop-Transcript | Out-Null
