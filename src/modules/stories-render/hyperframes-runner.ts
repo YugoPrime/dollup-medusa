@@ -124,6 +124,14 @@ export async function spawnRender(args: SpawnRenderArgs): Promise<void> {
         process.env.PRODUCER_FORCE_SCREENSHOT ?? "true",
       PRODUCER_MAX_CONCURRENT_RENDERS:
         process.env.PRODUCER_MAX_CONCURRENT_RENDERS ?? "1",
+      // Force Chrome's --disable-gpu. `--no-browser-gpu` only swaps the GL
+      // backend to ANGLE/SwiftShader - Chrome STILL spawns a GPU process, and
+      // when that process wedges (seen 2026-08-30 on the render laptop) the
+      // page never reports a main frame, frame capture never starts, and every
+      // slot dies on the 180s timeout. We never want hardware GL here: the
+      // Coolify container has no GPU and the laptop renders in software
+      // anyway. Override by setting PRODUCER_DISABLE_GPU=false explicitly.
+      PRODUCER_DISABLE_GPU: process.env.PRODUCER_DISABLE_GPU ?? "true",
     }
     const proc = spawn(process.execPath, cliArgs, {
       detached,
@@ -140,6 +148,7 @@ export async function spawnRender(args: SpawnRenderArgs): Promise<void> {
       force_screenshot: childEnv.PRODUCER_FORCE_SCREENSHOT,
       streaming_encode: childEnv.PRODUCER_ENABLE_STREAMING_ENCODE,
       max_concurrent_renders: childEnv.PRODUCER_MAX_CONCURRENT_RENDERS,
+      disable_gpu: childEnv.PRODUCER_DISABLE_GPU,
       render_quality: process.env.RENDER_QUALITY ?? "standard",
       render_workers: process.env.RENDER_WORKERS ?? "1",
       render_fps: process.env.RENDER_FPS ?? "30",
