@@ -181,6 +181,9 @@ module.exports = defineConfig({
       resolve: "./src/modules/store-config",
     },
     {
+      resolve: "./src/modules/admin-push",
+    },
+    {
       resolve: "./src/modules/sourcing",
     },
     {
