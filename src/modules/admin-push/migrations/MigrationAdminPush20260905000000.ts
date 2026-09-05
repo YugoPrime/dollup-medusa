@@ -5,7 +5,7 @@ import { Migration } from "@medusajs/framework/mikro-orm/migrations"
  * device; `endpoint` is the push-service URL and is unique. See
  * docs/superpowers/specs/2026-09-05-admin-pwa-push-design.md.
  */
-export class Migration20260905000000 extends Migration {
+export class MigrationAdminPush20260905000000 extends Migration {
   async up(): Promise<void> {
     this.addSql(
       'create table if not exists "admin_push_subscription" (' +
