@@ -41,3 +41,5 @@ render-sample-*.mp4
 # One-off seed inputs (contain customer PII — never commit)
 /toys-seed.tsv
 *.local-seed.tsv
+# Local copy of the Web Push VAPID pair (docs/superpowers/plans/2026-09-05-admin-pwa-push-deploy.md)
+.vapid-keys.local
