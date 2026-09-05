@@ -1,12 +1,12 @@
-jest.mock("../../lib/web-push", () => ({
+jest.mock("../web-push", () => ({
   isWebPushConfigured: jest.fn(),
   getAdminUrl: jest.fn(() => "https://admin.dollupboutique.com"),
   sendWebPush: jest.fn(),
   buildOrderPlacedPayload: jest.fn(() => ({ title: "t", body: "b", url: "u", tag: "g" })),
 }))
 
-import { isWebPushConfigured, sendWebPush } from "../../lib/web-push"
-import webPushOnOrderPlaced, { config } from "../web-push-on-order-placed"
+import { isWebPushConfigured, sendWebPush } from "../web-push"
+import webPushOnOrderPlaced, { config } from "../../subscribers/web-push-on-order-placed"
 
 const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() }
 const subs = [
