@@ -63,6 +63,19 @@ describe("sendWebPush", () => {
     expect(await sendWebPush(logger, target, payload, env)).toMatchObject({ ok: false, gone: false, message: "boom" })
   })
 
+  it("surfaces the provider's response body over web-push's generic message", async () => {
+    ;(webpush.sendNotification as jest.Mock).mockRejectedValueOnce({
+      statusCode: 400,
+      body: "InvalidRegistration",
+      message: "Received unexpected response code",
+    })
+    expect(await sendWebPush(logger, target, payload, env)).toMatchObject({
+      ok: false,
+      gone: false,
+      message: "InvalidRegistration (HTTP 400)",
+    })
+  })
+
   it("returns not-configured without calling the push service", async () => {
     const res = await sendWebPush(logger, target, payload, {} as NodeJS.ProcessEnv)
     expect(res).toMatchObject({ ok: false, gone: false })

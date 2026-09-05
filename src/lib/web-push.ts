@@ -34,7 +34,7 @@ export function getAdminUrl(env: NodeJS.ProcessEnv = process.env): string {
 let configuredWith: string | null = null
 
 function ensureVapid(env: NodeJS.ProcessEnv): void {
-  const key = `${env.VAPID_SUBJECT}|${env.VAPID_PUBLIC_KEY}`
+  const key = `${env.VAPID_SUBJECT}|${env.VAPID_PUBLIC_KEY}|${env.VAPID_PRIVATE_KEY}`
   if (configuredWith === key) return
   webpush.setVapidDetails(env.VAPID_SUBJECT!, env.VAPID_PUBLIC_KEY!, env.VAPID_PRIVATE_KEY!)
   configuredWith = key
@@ -61,7 +61,15 @@ export async function sendWebPush(
     const e = err as { statusCode?: number; body?: string; message?: string }
     const status = typeof e?.statusCode === "number" ? e.statusCode : undefined
     const gone = status === 404 || status === 410
-    const message = e?.message || e?.body || `push failed${status ? ` (HTTP ${status})` : ""}`
+    // web-push's WebPushError always carries a fixed generic `message`
+    // ("Received unexpected response code"); the provider's actual reason
+    // lives in `.body`. Prefer body, fall back to message, then a generic
+    // string — then append the HTTP status if it isn't already in the text.
+    const bodyText = typeof e?.body === "string" ? e.body.trim() : ""
+    const base = bodyText || e?.message || "push failed"
+    const statusSuffix =
+      status !== undefined && !base.includes(`HTTP ${status}`) ? ` (HTTP ${status})` : ""
+    const message = `${base}${statusSuffix}`
     if (!gone) logger.warn(`[web-push] send failed for ${target.endpoint.slice(0, 60)}…: ${message}`)
     return { ok: false, gone, status, message }
   }
