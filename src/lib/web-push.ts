@@ -89,11 +89,28 @@ export type OrderForPush = {
   shipping_address?: { first_name?: string | null; last_name?: string | null } | null
 }
 
+/**
+ * Medusa v2 totals come back as BigNumber instances, whose amount is only
+ * reachable through valueOf()/numeric — there is no top-level `value`. Reading
+ * `.value` off one yields undefined, which is how "New order #982 · Rs 0"
+ * reached a phone. Number() invokes valueOf() and gets the real amount; the
+ * object branches below only cover the plain `{ value }` shapes that reach us
+ * from serialized payloads.
+ */
 function num(value: unknown): number {
-  if (typeof value === "number") return value
-  if (typeof value === "string") return Number(value) || 0
-  if (value && typeof value === "object" && "value" in value) {
-    return Number((value as { value?: string | number }).value) || 0
+  if (value == null) return 0
+  const direct = Number(value)
+  if (Number.isFinite(direct)) return direct
+  if (typeof value === "object") {
+    const obj = value as {
+      numeric?: unknown
+      value?: unknown
+      raw_?: { value?: unknown } | null
+    }
+    for (const candidate of [obj.numeric, obj.value, obj.raw_?.value]) {
+      const n = Number(candidate)
+      if (candidate != null && Number.isFinite(n)) return n
+    }
   }
   return 0
 }

@@ -128,4 +128,41 @@ describe("buildOrderPlacedPayload", () => {
     const bn = { ...base, total: { value: "1450" } }
     expect(buildOrderPlacedPayload(bn, admin).title).toBe("New order #123 · Rs 1,450")
   })
+
+  // The real thing retrieveOrder hands back: a BigNumber instance whose amount
+  // is only reachable through valueOf()/numeric. Reading `.value` off it gives
+  // undefined → Rs 0, which is exactly what shipped to the phone as
+  // "New order #982 · Rs 0".
+  it("reads a real BigNumber instance (valueOf/numeric, no top-level value)", () => {
+    class FakeBigNumber {
+      raw_: { value: string; precision: number }
+      numeric_: number
+      constructor(n: number) {
+        this.raw_ = { value: String(n), precision: 20 }
+        this.numeric_ = n
+      }
+      get numeric() {
+        return this.numeric_
+      }
+      valueOf() {
+        return this.numeric_
+      }
+      toJSON() {
+        return this.numeric_
+      }
+    }
+    const bn = {
+      ...base,
+      subtotal: new FakeBigNumber(1400),
+      shipping_total: new FakeBigNumber(50),
+      total: new FakeBigNumber(1450),
+    }
+    expect(buildOrderPlacedPayload(bn, admin).title).toBe("New order #123 · Rs 1,450")
+
+    const pre = { ...bn, metadata: { cart_type: "preorder" } }
+    // 75% of 1400 + 50 shipping = 1,100 — not "deposit Rs 0".
+    expect(buildOrderPlacedPayload(pre, admin).title).toBe(
+      "New pre-order #123 · deposit Rs 1,100",
+    )
+  })
 })
