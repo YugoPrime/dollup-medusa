@@ -16,7 +16,7 @@ const order = (
     id: `order_${seq}`,
     display_id: 1000 + seq,
     status: "pending",
-    fulfillment_status: "not_fulfilled",
+    fulfillments: [],
     shipping_address: { first_name: "Ana", last_name: "R" },
     metadata: { delivery_method: "Postage", delivery_date: TODAY, ...meta },
     ...over,
@@ -51,17 +51,76 @@ describe("selectPostagePrep", () => {
     ).toEqual([])
   })
 
-  it.each([
-    "fulfilled",
-    "partially_fulfilled",
-    "shipped",
-    "partially_shipped",
-    "delivered",
-    "partially_delivered",
-  ])("excludes orders whose fulfillment status is %s", (fulfillment_status) => {
+  const STAMP = "2026-09-08T06:53:48.899Z"
+  const fulfillment = (over: Record<string, string | null> = {}) => ({
+    packed_at: null,
+    shipped_at: null,
+    delivered_at: null,
+    canceled_at: null,
+    ...over,
+  })
+
+  // Order #717 in prod: marked Delivered in the admin, which creates a Medusa
+  // fulfillment, while dm_status stayed "preparation". query.graph never
+  // returns fulfillment_status, so the fulfillment itself is the only signal.
+  it.each(["packed_at", "shipped_at", "delivered_at"])(
+    "excludes an order with a live fulfillment stamped %s",
+    (key) => {
+      expect(
+        selectPostagePrep(
+          [
+            order(
+              { dm_status: "preparation" },
+              { fulfillments: [fulfillment({ [key]: STAMP })] },
+            ),
+          ],
+          TODAY,
+        ),
+      ).toEqual([])
+    },
+  )
+
+  it("keeps an order whose only fulfillment was cancelled", () => {
     expect(
-      selectPostagePrep([order({}, { fulfillment_status })], TODAY),
+      selectPostagePrep(
+        [
+          order(
+            {},
+            {
+              fulfillments: [
+                fulfillment({ packed_at: STAMP, canceled_at: STAMP }),
+              ],
+            },
+          ),
+        ],
+        TODAY,
+      ),
+    ).toHaveLength(1)
+  })
+
+  it("excludes an order when any one of its fulfillments is still live", () => {
+    expect(
+      selectPostagePrep(
+        [
+          order(
+            {},
+            {
+              fulfillments: [
+                fulfillment({ packed_at: STAMP, canceled_at: STAMP }),
+                fulfillment({ packed_at: STAMP }),
+              ],
+            },
+          ),
+        ],
+        TODAY,
+      ),
     ).toEqual([])
+  })
+
+  it("tolerates orders fetched without fulfillments", () => {
+    expect(
+      selectPostagePrep([order({}, { fulfillments: undefined })], TODAY),
+    ).toHaveLength(1)
   })
 
   it("excludes manual orders flagged delivered via metadata", () => {

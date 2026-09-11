@@ -49,7 +49,12 @@ export default async function postagePrepReminder(
         "id",
         "display_id",
         "status",
-        "fulfillment_status",
+        // Not "fulfillment_status" — query.graph doesn't compute it. The
+        // selector derives it from these, as Medusa's own workflows do.
+        "fulfillments.packed_at",
+        "fulfillments.shipped_at",
+        "fulfillments.delivered_at",
+        "fulfillments.canceled_at",
         "metadata",
         "shipping_address.first_name",
         "shipping_address.last_name",

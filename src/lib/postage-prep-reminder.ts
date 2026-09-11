@@ -26,30 +26,23 @@ export const POSTAGE_METHODS = [
   "Rodrigues Postage",
 ] as const
 
-/**
- * Any fulfillment status at or past "fulfilled" means the parcel has left, so
- * nagging about it would be wrong. Mirrors POST_FULFILLED_STATUSES in
- * dollup-admin/src/lib/admin-orders-shared.ts.
- */
-const POST_FULFILLED_STATUSES = new Set([
-  "fulfilled",
-  "partially_fulfilled",
-  "shipped",
-  "partially_shipped",
-  "delivered",
-  "partially_delivered",
-])
-
 /** How many orders the message lists before collapsing the rest into a count. */
 const MAX_LISTED = 20
 
 const PREP_URL = "admin.dollupboutique.com/prep"
 
+export type FulfillmentLike = {
+  packed_at?: string | Date | null
+  shipped_at?: string | Date | null
+  delivered_at?: string | Date | null
+  canceled_at?: string | Date | null
+}
+
 export type PostageOrderLike = {
   id: string
   display_id?: number | null
   status?: string | null
-  fulfillment_status?: string | null
+  fulfillments?: FulfillmentLike[] | null
   metadata?: Record<string, unknown> | null
   shipping_address?: {
     first_name?: string | null
@@ -72,6 +65,23 @@ function isPostageMethod(value: unknown): value is string {
   return (
     typeof value === "string" &&
     (POSTAGE_METHODS as readonly string[]).includes(value)
+  )
+}
+
+/**
+ * Whether the parcel has left — i.e. the admin would show it as Delivered.
+ *
+ * `order.fulfillment_status` is NOT a column: Medusa's orders list/detail
+ * workflows compute it (getLastFulfillmentStatus) from the fulfillments, and
+ * query.graph returns it as undefined. Reading it here meant every fulfilled
+ * postage order kept being nagged about. So derive it the same way: any
+ * non-cancelled fulfillment that is packed, shipped or delivered lands on one
+ * of the statuses in POST_FULFILLED_STATUSES in
+ * dollup-admin/src/lib/admin-orders-shared.ts.
+ */
+function hasLeft(fulfillments: FulfillmentLike[] | null | undefined): boolean {
+  return (fulfillments ?? []).some(
+    (f) => !f.canceled_at && (f.packed_at || f.shipped_at || f.delivered_at),
   )
 }
 
@@ -99,12 +109,8 @@ export function selectPostagePrep(
     // reminder stop.
     if (meta.dm_status === "ready") continue
     if (order.status === "canceled") continue
-    if (
-      order.fulfillment_status &&
-      POST_FULFILLED_STATUSES.has(order.fulfillment_status)
-    ) {
-      continue
-    }
+    // Marked Delivered in the admin, even if nobody tapped Ready first.
+    if (hasLeft(order.fulfillments)) continue
     // Manual-only orders can't be fulfilled in Medusa, so "gone" is a flag.
     if (meta.dm_delivered === true) continue
     // Superseded by an exchange order; the replacement carries the real work.
