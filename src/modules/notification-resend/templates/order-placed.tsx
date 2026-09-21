@@ -9,6 +9,7 @@ import {
   StatRow,
   formatMur,
 } from "./_layout"
+import { shopBreakActive, shopBreakResumesLabel } from "../../../lib/shop-break"
 
 export type OrderPlacedEmailData = {
   storefrontUrl: string
@@ -92,6 +93,10 @@ export default function OrderPlacedEmail(data: OrderPlacedEmailData) {
   const methodLabel = displayDeliveryLabel(shippingMethodLabel, deliveryMethod)
   const isPickup = isPickupMethod(shippingMethodLabel, deliveryMethod)
   const isPostage = isPostageMethod(shippingMethodLabel, deliveryMethod)
+  // Shop break: the copy below promises movement ("ready for the next step",
+  // "tracking shortly") that isn't happening yet, so say so up front.
+  const onBreak = shopBreakActive()
+  const resumesLabel = shopBreakResumesLabel()
 
   return (
     <EmailLayout
@@ -100,8 +105,47 @@ export default function OrderPlacedEmail(data: OrderPlacedEmailData) {
     >
       <Heading>Hi {customerFirstName || "there"} — order received</Heading>
       <Paragraph>
-        Thanks for shopping with Doll Up Boutique. We're preparing your order now and will update you as soon as it's ready for the next step.
+        Thanks for shopping with Doll Up Boutique.{" "}
+        {onBreak
+          ? "Your order is confirmed and your pieces are set aside."
+          : "We're preparing your order now and will update you as soon as it's ready for the next step."}
       </Paragraph>
+
+      {onBreak ? (
+        <Section
+          style={{
+            backgroundColor: BRAND.blush,
+            border: `1.5px solid ${BRAND.coralDark}`,
+            borderRadius: "8px",
+            padding: "16px",
+            margin: "16px 0 0 0",
+          }}
+        >
+          <Text
+            style={{
+              color: BRAND.ink,
+              fontSize: "15px",
+              fontWeight: 700,
+              lineHeight: "22px",
+              margin: "0 0 6px 0",
+            }}
+          >
+            We&apos;re on a break — your order goes out from {resumesLabel}
+          </Text>
+          <Text
+            style={{
+              color: BRAND.ink,
+              fontSize: "14px",
+              lineHeight: "22px",
+              margin: 0,
+            }}
+          >
+            Delivery and postage both restart on Saturday 17 October. Nothing is
+            posted or delivered before then — we&apos;ll be in touch as soon as
+            yours is on its way. Thank you for waiting.
+          </Text>
+        </Section>
+      ) : null}
 
       <Text
         style={{
@@ -261,7 +305,10 @@ export default function OrderPlacedEmail(data: OrderPlacedEmailData) {
             }}
           >
             Your order will be processed only once payment is received. If
-            you've already paid, you'll get an update with tracking shortly.
+            you've already paid,{" "}
+            {onBreak
+              ? `you'll get an update with tracking once we're back on ${resumesLabel}.`
+              : "you'll get an update with tracking shortly."}
           </Text>
           <Text
             style={{
