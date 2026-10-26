@@ -7,6 +7,7 @@ import { FEED_POSTS_MODULE } from "../../../../modules/feed-posts"
 import type FeedPostsModuleService from "../../../../modules/feed-posts/service"
 import { mauritiusToday } from "../../../../lib/mauritius-date"
 import { planFeedPostForDate } from "../../../../lib/feed-planner"
+import { planGridPostForDate } from "../../../../lib/grid-planner"
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
@@ -40,7 +41,12 @@ export const POST = async (
   res.json({ ok: true, feed_post: result.row })
 }
 
-/** DELETE /admin/feed-posts/plan { date } — unschedule (remove planned row). */
+/**
+ * DELETE /admin/feed-posts/plan { date } — the Feed Planner's "Replace".
+ * Removes the planned row; for today or a future day it immediately plans a
+ * replacement (never the removed product), so every upcoming day keeps a
+ * preview. Past dates are only deleted.
+ */
 export const DELETE = async (
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
@@ -54,6 +60,18 @@ export const DELETE = async (
     return
   }
   const feed = req.scope.resolve<FeedPostsModuleService>(FEED_POSTS_MODULE)
+  const existing = await feed.findByDate(date)
+  const removedProductId =
+    existing && existing.status === "planned" ? existing.product_id : null
   const deleted = await feed.deletePlannedByDate(date)
-  res.json({ ok: true, deleted })
+  if (date < mauritiusToday() || deleted === 0) {
+    res.json({ ok: true, deleted, feed_post: null })
+    return
+  }
+  const replacement = await planGridPostForDate({
+    scope: req.scope,
+    postDate: date,
+    excludeProductIds: removedProductId ? [removedProductId] : [],
+  })
+  res.json({ ok: true, deleted, feed_post: replacement.ok ? replacement.row : null })
 }

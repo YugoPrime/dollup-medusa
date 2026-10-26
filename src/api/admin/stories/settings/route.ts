@@ -6,7 +6,14 @@ import type {
 import { STORIES_MODULE } from "../../../../modules/stories"
 import type StoriesModuleService from "../../../../modules/stories/service"
 import type { UpdateStorySettingsInput } from "../../../../modules/stories/service"
-import { parseFocusSettingsInput } from "../../../../modules/stories/focus"
+import {
+  activeFocusTag,
+  countEligibleFocus,
+  parseFocusSettingsInput,
+} from "../../../../modules/stories/focus"
+import { createMedusaProductSource } from "../../../../modules/stories/product-source"
+import { planUpcomingGridPosts } from "../../../../lib/grid-planner"
+import { mauritiusToday } from "../../../../lib/mauritius-date"
 
 export const GET = async (
   req: AuthenticatedMedusaRequest,
@@ -14,7 +21,13 @@ export const GET = async (
 ) => {
   const service = req.scope.resolve<StoriesModuleService>(STORIES_MODULE)
   const settings = await service.getSettings()
-  res.json({ settings })
+  // How many live, in-stock, social-eligible products carry the active focus
+  // tag — 0 while the tag is set means the focus silently does nothing.
+  const tag = activeFocusTag(settings, mauritiusToday())
+  const eligible = tag
+    ? countEligibleFocus(await createMedusaProductSource(req.scope)({}), tag)
+    : 0
+  res.json({ settings, focus_stats: { focus_tag: tag, eligible } })
 }
 
 export const PUT = async (
@@ -43,6 +56,15 @@ export const PUT = async (
   try {
     Object.assign(input, parseFocusSettingsInput(body))
     const settings = await service.updateSettings(input)
+    // A newly set focus shouldn't wait for 18:00 to show its week of grid posts.
+    const today = mauritiusToday()
+    if (activeFocusTag(settings, today)) {
+      try {
+        await planUpcomingGridPosts({ scope: req.scope, today })
+      } catch (err) {
+        console.error("[stories-settings] grid planning failed:", (err as Error)?.message ?? err)
+      }
+    }
     res.json({ settings })
   } catch (err) {
     res.status(400).json({ message: (err as Error)?.message ?? "Update failed" })

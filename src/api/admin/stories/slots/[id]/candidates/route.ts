@@ -9,6 +9,7 @@ import {
 
 import { STORIES_MODULE } from "../../../../../../modules/stories"
 import type StoriesModuleService from "../../../../../../modules/stories/service"
+import { isSocialExcluded } from "../../../../../../modules/stories/product-source"
 
 /**
  * Returns swap candidates for a slot: in-stock published products in the
@@ -62,14 +63,9 @@ export const GET = async (req: AuthenticatedMedusaRequest, res: MedusaResponse) 
     },
   })
 
-  // Stories must never feature Intimates products (18+, partly private).
-  const visibleProducts = (products as any[]).filter((p) => {
-    const cats: Array<{ handle?: string }> = p.categories ?? []
-    if (cats.some((c) => (c?.handle ?? "").toLowerCase() === "intimates")) return false
-    const meta = (p.metadata ?? null) as Record<string, unknown> | null
-    if (meta && meta.unlisted === true) return false
-    return true
-  })
+  // Stories must never feature anything that can't go on social (After Dark,
+  // Toys, hidden, kept off social).
+  const visibleProducts = (products as any[]).filter((p) => !isSocialExcluded(p))
 
   type Candidate = {
     id: string

@@ -10,6 +10,7 @@ import {
   buildFeedPostForDate,
   publishFeedPostRow,
 } from "../../../lib/feed-post-pipeline"
+import { planGridPostForDate } from "../../../lib/grid-planner"
 
 
 /** GET /admin/feed-posts — recent feed posts, newest first. */
@@ -46,12 +47,19 @@ export const POST = async (
       : mauritiusToday()
 
   try {
-    const built = await buildFeedPostForDate({
-      scope: req.scope,
-      postDate,
-      productId,
-      force: true,
-    })
+    // A chosen product is built as-is; otherwise the grid rules pick one
+    // (rotation, new-collection focus, never that day's stories).
+    let built
+    if (productId) {
+      built = await buildFeedPostForDate({ scope: req.scope, postDate, productId, force: true })
+    } else {
+      const feed = req.scope.resolve<FeedPostsModuleService>(FEED_POSTS_MODULE)
+      await feed.deletePlannedByDate(postDate)
+      const picked = await planGridPostForDate({ scope: req.scope, postDate })
+      built = picked.ok
+        ? { ok: true as const, row: picked.row, product_id: picked.row.product_id as string }
+        : { ok: false as const, reason: picked.reason }
+    }
     if (!built.ok) {
       const status = built.reason === "exists" ? 409 : 422
       res.status(status).json({ ok: false, reason: built.reason })
