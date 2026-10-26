@@ -10,6 +10,7 @@ import {
 import { STORIES_MODULE } from "../../../../../../modules/stories"
 import type StoriesModuleService from "../../../../../../modules/stories/service"
 import { isSocialExcluded } from "../../../../../../modules/stories/product-source"
+import { gridProductIdsForPlan } from "../../../../../../lib/story-pick-deps"
 
 /**
  * Returns swap candidates for a slot: in-stock published products in the
@@ -34,6 +35,8 @@ export const GET = async (req: AuthenticatedMedusaRequest, res: MedusaResponse) 
 
   const settings = await stories.getSettings()
   const excluded = new Set(await stories.getExcludedProductIds(settings.anti_repeat_days))
+  // That day's grid post can't also be a story (the swap would be refused).
+  const gridIds = new Set(await gridProductIdsForPlan(req.scope, slot.plan_id))
 
   const filters: Record<string, unknown> = { status: "published" }
   if (!showAll && slot.category_id) {
@@ -80,6 +83,7 @@ export const GET = async (req: AuthenticatedMedusaRequest, res: MedusaResponse) 
   const candidates: Candidate[] = []
   for (const p of visibleProducts) {
     if (p.id === slot.product_id) continue  // skip currently-picked
+    if (gridIds.has(p.id)) continue  // that day's grid post
 
     let inStock = 0
     let anyUnlimited = false

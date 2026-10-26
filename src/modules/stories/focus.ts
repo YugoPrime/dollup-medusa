@@ -73,3 +73,12 @@ export function parseFocusSettingsInput(
 
   return out
 }
+
+/**
+ * Whether a settings read asked for focus stats (`?stats=1`). Counting needs a
+ * full catalog pass, so only the Settings page asks; the daily-use story pages
+ * read settings without it.
+ */
+export function wantsFocusStats(query: Record<string, unknown>): boolean {
+  return query.stats === "1" || query.stats === "true"
+}

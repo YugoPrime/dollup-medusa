@@ -81,3 +81,13 @@ describe("parseFocusSettingsInput", () => {
     )
   })
 })
+
+import { wantsFocusStats } from "../focus"
+
+describe("wantsFocusStats", () => {
+  it("is opt-in via ?stats=1", () => {
+    expect(wantsFocusStats({ stats: "1" })).toBe(true)
+    expect(wantsFocusStats({})).toBe(false)
+    expect(wantsFocusStats({ stats: "0" })).toBe(false)
+  })
+})
