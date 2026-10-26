@@ -20,6 +20,10 @@ export type ProductLike = {
    *  Optional so existing tests/callers don't break — when absent the snapshot
    *  treats the product as "not new". */
   created_at?: string | Date
+  /** Product tag values (e.g. "collection30"). */
+  tags?: string[]
+  /** Ids of the categories the product is directly assigned to. */
+  category_ids?: string[]
   variants: ProductVariantLike[]
 }
 

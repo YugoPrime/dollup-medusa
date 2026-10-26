@@ -11,7 +11,7 @@ import { STORIES_MODULE } from "../../../../../modules/stories"
 import type StoriesModuleService from "../../../../../modules/stories/service"
 import type { ProductLike } from "../../../../../modules/stories/snapshot"
 import {
-  isIntimatesProduct,
+  isSocialExcluded,
   toProductLike,
 } from "../../../../../modules/stories/product-source"
 
@@ -47,6 +47,8 @@ export const POST = async (req: AuthenticatedMedusaRequest, res: MedusaResponse)
         "created_at",
         "metadata",
         "images.url",
+        "tags.value",
+        "categories.id",
         "categories.handle",
         "variants.id",
         "variants.sku",
@@ -65,7 +67,7 @@ export const POST = async (req: AuthenticatedMedusaRequest, res: MedusaResponse)
         variants: { calculated_price: QueryContext({ currency_code: "mur" }) },
       },
     })
-    return products.filter((p: any) => !isIntimatesProduct(p)).map(toProductLike)
+    return products.filter((p: any) => !isSocialExcluded(p)).map(toProductLike)
   }
 
   try {
