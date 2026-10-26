@@ -6,6 +6,7 @@ import { resolveFillerForDate } from "../lib/stories-filler"
 import { escapeTelegramHtml, sendTelegram } from "../lib/telegram"
 import { STORIES_MODULE } from "../modules/stories"
 import { createStoryPickDeps } from "../lib/story-pick-deps"
+import { activeFocusTag, countEligibleFocus } from "../modules/stories/focus"
 import type StoriesModuleService from "../modules/stories/service"
 import {
   batchRenderPlan,
@@ -97,6 +98,25 @@ export default async function createTomorrowPlan(
       `⚠️ Auto-plan regenerate failed for ${escapeTelegramHtml(planDate)}: ${escapeTelegramHtml(msg)}`,
     )
     return
+  }
+
+  // A new-collection focus that matches nothing silently falls back to older
+  // stock: tell the owner instead.
+  const focusTag = activeFocusTag(settings, planDate)
+  if (focusTag) {
+    try {
+      const eligible = countEligibleFocus(await pickDeps.productSource({}), focusTag)
+      if (eligible === 0) {
+        await sendTelegram(
+          [
+            `⚠️ <b>New-collection focus is on (${escapeTelegramHtml(focusTag)}) but no live, in-stock product carries that tag</b>`,
+            `Stories for ${escapeTelegramHtml(planDate)} used older stock. Tag the collection or fix the tag in Settings → Stories.`,
+          ].join("\n"),
+        )
+      }
+    } catch (err) {
+      logger.error(`[auto-plan] focus check failed: ${(err as Error)?.message ?? err}`)
+    }
   }
 
   // Weekly editorial filler (e.g. how-to-order on Mondays). Env-gated:

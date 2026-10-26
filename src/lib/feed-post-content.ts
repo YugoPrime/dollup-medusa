@@ -6,7 +6,7 @@ import type { ProductSnapshot } from "../modules/stories/snapshot"
  */
 
 export const FEED_STOREFRONT_BASE_URL =
-  process.env.STORIES_STOREFRONT_BASE_URL ?? "https://shop.dollupboutique.com"
+  process.env.STORIES_STOREFRONT_BASE_URL ?? "https://dollupboutique.com"
 
 // Instagram carousels accept 2–10 items; a single image posts as a plain photo.
 export const IG_CAROUSEL_MAX = 10
@@ -62,7 +62,7 @@ export type FeedCaptionOptions = {
 }
 
 export const DEFAULT_FEED_FOOTER =
-  "📲 DM us or comment to order\n🚚 Cash on delivery across Mauritius · Fast island-wide delivery"
+  "📲 DM us or comment to order\n🚚 Fast island-wide delivery"
 
 export const DEFAULT_FEED_HASHTAGS =
   "#dollupboutique #mauritius #shopmauritius #fashionmauritius #moris"

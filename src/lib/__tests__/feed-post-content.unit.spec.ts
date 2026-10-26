@@ -102,6 +102,13 @@ describe("buildFeedCaption", () => {
     expect(cap).toContain("#x")
   })
 
+  it("default caption links to the live storefront and never promises COD", () => {
+    const cap = buildFeedCaption(snap)
+    expect(cap).toContain("🔗 https://dollupboutique.com/products/is2448")
+    expect(cap).toContain("🚚 Fast island-wide delivery")
+    expect(cap).not.toContain("Cash on delivery")
+  })
+
   it("shows the was-price when on sale", () => {
     const cap = buildFeedCaption({ ...snap, compare_at_price_mur: 1990 })
     expect(cap).toContain("Rs 1,290")
