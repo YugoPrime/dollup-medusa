@@ -9,7 +9,6 @@ import { mauritiusToday } from "../../../../lib/mauritius-date"
 import { planFeedPostForDate } from "../../../../lib/feed-planner"
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
-const DEFAULT_DEDUP_DAYS = 30
 
 /** POST /admin/feed-posts/plan { date, product_id } — schedule (no publish). */
 export const POST = async (
@@ -25,13 +24,11 @@ export const POST = async (
     res.status(400).json({ ok: false, reason: "bad_input", message: "bad_input" })
     return
   }
-  const dedupDays = Number(process.env.FEED_DEDUP_DAYS) || DEFAULT_DEDUP_DAYS
   const result = await planFeedPostForDate({
     scope: req.scope,
     postDate: date,
     productId,
     today: mauritiusToday(),
-    dedupDays,
   })
   if (!result.ok) {
     const status = result.reason === "posted" ? 409 : 422

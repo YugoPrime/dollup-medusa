@@ -11,7 +11,6 @@ import {
   publishFeedPostRow,
 } from "../../../lib/feed-post-pipeline"
 
-const DEFAULT_DEDUP_DAYS = 30
 
 /** GET /admin/feed-posts — recent feed posts, newest first. */
 export const GET = async (
@@ -45,13 +44,11 @@ export const POST = async (
     typeof body.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.date)
       ? body.date
       : mauritiusToday()
-  const dedupDays = Number(process.env.FEED_DEDUP_DAYS) || DEFAULT_DEDUP_DAYS
 
   try {
     const built = await buildFeedPostForDate({
       scope: req.scope,
       postDate,
-      dedupDays,
       productId,
       force: true,
     })

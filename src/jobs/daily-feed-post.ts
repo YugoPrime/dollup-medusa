@@ -64,7 +64,7 @@ export default async function dailyFeedPost(
   } else {
     let built
     try {
-      built = await buildFeedPostForDate({ scope: container, postDate, dedupDays })
+      built = await buildFeedPostForDate({ scope: container, postDate })
     } catch (err) {
       const msg = (err as Error)?.message ?? "buildFeedPostForDate failed"
       logger.error(`[feed-post] build failed for ${postDate}: ${msg}`)

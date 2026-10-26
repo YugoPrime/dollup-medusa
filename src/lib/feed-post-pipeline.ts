@@ -1,14 +1,7 @@
 import type { MedusaContainer } from "@medusajs/framework/types"
 
-import { STORIES_MODULE } from "../modules/stories"
-import type StoriesModuleService from "../modules/stories/service"
 import { createMedusaProductSource } from "../modules/stories/product-source"
-import { buildSnapshot, type ProductLike, type ProductSnapshot } from "../modules/stories/snapshot"
-import {
-  DEFAULT_WEIGHTING,
-  pickWeightedProduct,
-  type WeightingConfig,
-} from "../modules/stories/picker-weighting"
+import { buildSnapshot } from "../modules/stories/snapshot"
 import { FEED_POSTS_MODULE } from "../modules/feed-posts"
 import type FeedPostsModuleService from "../modules/feed-posts/service"
 import type { FeedPostDTO } from "../modules/feed-posts/service"
@@ -26,37 +19,24 @@ export type BuildFeedPostResult =
 
 type Scope = MedusaContainer
 
-function resolveWeighting(settings: {
-  collection_boost?: number | null
-  collection_boost_days?: number | null
-}): WeightingConfig {
-  return {
-    collection_boost: settings.collection_boost ?? DEFAULT_WEIGHTING.collection_boost,
-    collection_boost_days:
-      settings.collection_boost_days ?? DEFAULT_WEIGHTING.collection_boost_days,
-  }
-}
-
 /**
- * Picks one product for the day's feed post and persists a `planned` FeedPost
- * row (snapshot + ordered images + caption). Reuses the stories product source,
- * snapshot builder and newest-collection weighting so the feed favours the
- * current drop just like stories do.
+ * Persists a `planned` FeedPost row (snapshot + ordered images + caption) for
+ * one specific product. Automatic picks go through grid-planner.ts
+ * (planGridPostForDate); this only builds a row for a product the owner chose
+ * (Feed Planner drag/swap or "publish now" with a product).
  *
  * - Idempotent per `postDate` unless `force` is set: returns {ok:false,exists}.
- * - Dedup: products featured in a feed post within `dedupDays` are excluded.
- * - `productId` forces a specific product (used by the admin "publish now").
+ * - Without `productId` there is nothing to build: {ok:false,no_eligible_product}.
  */
 export async function buildFeedPostForDate(args: {
   scope: Scope
   postDate: string
-  dedupDays: number
   productId?: string
   force?: boolean
+  metadata?: Record<string, unknown>
 }): Promise<BuildFeedPostResult> {
-  const { scope, postDate, dedupDays } = args
+  const { scope, postDate } = args
   const feed = scope.resolve<FeedPostsModuleService>(FEED_POSTS_MODULE)
-  const stories = scope.resolve<StoriesModuleService>(STORIES_MODULE)
 
   if (!args.force) {
     const existing = await feed.findByDate(postDate)
@@ -64,75 +44,25 @@ export async function buildFeedPostForDate(args: {
       return { ok: false, reason: "exists", existing }
     }
   }
+  if (!args.productId) return { ok: false, reason: "no_eligible_product" }
 
-  const productSource = createMedusaProductSource(scope)
-  const settings = await stories.getSettings()
-  const weighting = resolveWeighting(settings)
-  const captionOpts = readFeedCaptionOptionsFromEnv()
+  const all = await createMedusaProductSource(scope)({})
+  const product = all.find((p) => p.id === args.productId)
+  if (!product) return { ok: false, reason: "no_eligible_product" }
 
-  // Dedup: exclude products already featured in a feed post within the window
-  // so the same product isn't re-posted repeatedly.
-  const sinceDate = shiftIsoDate(postDate, -Math.max(0, dedupDays))
-  const excluded = new Set(await feed.getRecentlyFeaturedProductIds(sinceDate))
-
-  const pick = await pickFeedProduct({
-    productSource,
-    productId: args.productId,
-    excluded,
-    weighting,
-  })
-  if (!pick) return { ok: false, reason: "no_eligible_product" }
-
-  const { product, snapshot, images } = pick
+  const snapshot = buildSnapshot(product)
+  const images = selectFeedImages(snapshot)
   if (images.length === 0) return { ok: false, reason: "no_images" }
 
-  const caption = buildFeedCaption(snapshot, captionOpts)
   const row = await feed.createPlanned({
     post_date: postDate,
     product_id: product.id,
     product_snapshot: snapshot,
     image_urls: images,
-    caption,
+    caption: buildFeedCaption(snapshot, readFeedCaptionOptionsFromEnv()),
+    metadata: args.metadata ?? null,
   })
   return { ok: true, row, product_id: product.id }
-}
-
-async function pickFeedProduct(args: {
-  productSource: (filter: { category_id?: string }) => Promise<ProductLike[]>
-  productId?: string
-  excluded: Set<string>
-  weighting: WeightingConfig
-}): Promise<{ product: ProductLike; snapshot: ProductSnapshot; images: string[] } | null> {
-  const all = await args.productSource({})
-
-  // Forced product (admin publish-now for a specific item).
-  if (args.productId) {
-    const forced = all.find((p) => p.id === args.productId)
-    if (!forced) return null
-    const snapshot = buildSnapshot(forced)
-    return { product: forced, snapshot, images: selectFeedImages(snapshot) }
-  }
-
-  const eligible = all.filter(
-    (p) =>
-      !args.excluded.has(p.id) &&
-      p.variants.some((v) => v.inventory_quantity > 0),
-  )
-
-  // Weighted pick, re-rolling past products whose snapshot yields no usable
-  // feed photo so we still land on something postable.
-  const now = Date.now()
-  const pool = [...eligible]
-  while (pool.length > 0) {
-    const candidate = pickWeightedProduct(pool, args.weighting, now)
-    if (!candidate) break
-    const idx = pool.indexOf(candidate)
-    if (idx >= 0) pool.splice(idx, 1)
-    const snapshot = buildSnapshot(candidate)
-    const images = selectFeedImages(snapshot)
-    if (images.length > 0) return { product: candidate, snapshot, images }
-  }
-  return null
 }
 
 export type PublishFeedPostResult = {
@@ -194,12 +124,4 @@ export async function publishFeedPostRow(args: {
     fb_post_id: fbPostId ?? null,
   })
   return { ok: true, ig_media_id: igMediaId, fb_post_id: fbPostId }
-}
-
-/** Shifts a "YYYY-MM-DD" date by `days` (can be negative). UTC-safe. */
-function shiftIsoDate(date: string, days: number): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date)
-  if (!m) return date
-  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + days))
-  return d.toISOString().slice(0, 10)
 }

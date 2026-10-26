@@ -42,9 +42,8 @@ export async function planFeedPostForDate(args: {
   postDate: string
   productId: string
   today: string
-  dedupDays: number
 }): Promise<PlanResult> {
-  const { scope, postDate, productId, today, dedupDays } = args
+  const { scope, postDate, productId, today } = args
   if (postDate < today) return { ok: false, reason: "past" }
 
   const feed = scope.resolve<FeedPostsModuleService>(FEED_POSTS_MODULE)
@@ -58,7 +57,6 @@ export async function planFeedPostForDate(args: {
   const built = await buildFeedPostForDate({
     scope,
     postDate,
-    dedupDays,
     productId,
     force: true,
   })

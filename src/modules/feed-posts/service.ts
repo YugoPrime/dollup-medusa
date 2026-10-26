@@ -106,6 +106,15 @@ class FeedPostsModuleService extends MedusaService({ FeedPost }) {
     return rows as unknown as FeedPostDTO[]
   }
 
+  /** Every feed post with post_date >= `sinceDate` (MU date string). */
+  async listSince(sinceDate: string): Promise<FeedPostDTO[]> {
+    const rows = await this.listFeedPosts(
+      { post_date: { $gte: sinceDate } } as any,
+      { take: 2000 },
+    )
+    return rows as unknown as FeedPostDTO[]
+  }
+
   /**
    * Deletes the `planned` row(s) for a date. Never deletes posted/failed rows
    * (those represent real or attempted publishes). Returns the count removed.
