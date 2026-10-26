@@ -5,11 +5,12 @@ import { mauritiusToday } from "../lib/mauritius-date"
 import { publishFeedPostRow } from "../lib/feed-post-pipeline"
 import { decideDailyPublishAction, FEED_MAX_ATTEMPTS } from "../lib/feed-planner"
 import {
+  inspectGridRow,
   planGridPostForDate,
-  plannedRowProblem,
   planUpcomingGridPosts,
 } from "../lib/grid-planner"
-import type { GridRowProblem } from "../lib/grid-rotation"
+import { stepAfterInspection, type GridRowProblem } from "../lib/grid-rotation"
+import { alertOnThrow } from "../lib/job-safety"
 import { isMetaIgConfigured } from "../lib/meta-ig"
 import { escapeTelegramHtml, sendTelegram } from "../lib/telegram"
 import { FEED_POSTS_MODULE } from "../modules/feed-posts"
@@ -27,6 +28,7 @@ const PROBLEM_LABEL: Record<GridRowProblem, string> = {
   sold_out: "it sold out",
   off_social: "it was switched off social",
   in_stories: "it is in today's stories",
+  no_photos: "none of the reviewed photos is still on the product",
 }
 
 type Logger = { info(m: string): void; warn(m: string): void; error(m: string): void }
@@ -34,13 +36,19 @@ type Logger = { info(m: string): void; warn(m: string): void; error(m: string): 
 /**
  * Daily IG/FB grid post, 18:00 Mauritius, with retries at 18:20 and 18:40.
  *
- * 1. Publish (FEED_AUTO_PUBLISH=true): today's planned row is re-checked
- *    first (sold out, switched off social, now in today's stories → replaced
- *    in the same rotation); an empty day is auto-picked; a failed row is
- *    retried until FEED_MAX_ATTEMPTS, then the owner gets a Telegram alert.
+ * 1. Publish (FEED_AUTO_PUBLISH=true): today's planned or failed row is checked
+ *    against the live product first. A planned row that can't go out (sold
+ *    out, switched off social, now in today's stories, reviewed photos gone)
+ *    is replaced in the same rotation; a failed one is not retried and the
+ *    owner is told. Price and sizes are refreshed from the live product. An
+ *    empty day is auto-picked; a failed row is retried until
+ *    FEED_MAX_ATTEMPTS, then the owner gets a Telegram alert.
  * 2. Top up: keeps the next 7 days planned so the owner can review them in the
  *    Feed Planner. Runs when auto-publish is on or a focus tag is set, so the
  *    calendar never fills with older stock before the collection is live.
+ *
+ * Each step is guarded: a crash becomes one Telegram alert instead of a silent
+ * stop, and planning still runs when publishing crashed.
  */
 export default async function dailyFeedPost(container: MedusaContainer): Promise<void> {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER) as Logger
@@ -48,8 +56,11 @@ export default async function dailyFeedPost(container: MedusaContainer): Promise
   const settings = await stories.getSettings()
   const today = mauritiusToday()
   const autoPublish = process.env.FEED_AUTO_PUBLISH === "true"
-  // Only the 18:00 run sends "nothing to post" alerts; the retry runs stay quiet.
-  const firstRun = new Date().getUTCMinutes() < 10
+  // Only the 18:00 run sends "nothing to post" / planning alerts; a crash in
+  // publishing is reported once, on the last (18:40) run, if it never recovered.
+  const minutes = new Date().getUTCMinutes()
+  const firstRun = minutes < 10
+  const lastRun = minutes >= 40
 
   if (autoPublish) {
     if (!isMetaIgConfigured()) {
@@ -57,30 +68,48 @@ export default async function dailyFeedPost(container: MedusaContainer): Promise
         "[feed-post] META_PAGE_ACCESS_TOKEN or META_IG_BUSINESS_ACCOUNT_ID missing — cannot publish",
       )
     } else {
-      await publishToday(container, today, firstRun, logger)
+      await alertOnThrow(
+        `Grid post for ${today}`,
+        () => publishToday(container, today, firstRun, logger),
+        async (text) => {
+          logger.error(`[feed-post] ${text}`)
+          if (lastRun) {
+            await sendTelegram(`❌ <b>${escapeTelegramHtml(text)}</b>\n\nNothing posted today.`)
+          }
+        },
+      )
     }
   }
 
   if (autoPublish || Boolean((settings.focus_tag ?? "").trim())) {
-    try {
-      const { planned, empty } = await planUpcomingGridPosts({ scope: container, today })
-      logger.info(
-        `[feed-post] planning: ${planned.length} day(s) planned${empty.length ? `, nothing for ${empty.join(", ")}` : ""}`,
-      )
-      if (firstRun && empty.length > 0) {
-        await sendTelegram(
-          [
-            `🟡 <b>No grid post could be planned for ${escapeTelegramHtml(empty.join(", "))}</b>`,
-            "",
-            "No eligible product in any of the 3 categories.",
-            "",
-            `<a href="${FEED_PLANNER_URL}">Open the Feed Planner</a>`,
-          ].join("\n"),
+    await alertOnThrow(
+      "Grid post planning",
+      async () => {
+        const { planned, empty } = await planUpcomingGridPosts({ scope: container, today })
+        logger.info(
+          `[feed-post] planning: ${planned.length} day(s) planned${empty.length ? `, nothing for ${empty.join(", ")}` : ""}`,
         )
-      }
-    } catch (err) {
-      logger.error(`[feed-post] planning failed: ${(err as Error)?.message ?? err}`)
-    }
+        if (firstRun && empty.length > 0) {
+          await sendTelegram(
+            [
+              `🟡 <b>No grid post could be planned for ${escapeTelegramHtml(empty.join(", "))}</b>`,
+              "",
+              "No eligible product in any of the 3 categories.",
+              "",
+              `<a href="${FEED_PLANNER_URL}">Open the Feed Planner</a>`,
+            ].join("\n"),
+          )
+        }
+      },
+      async (text) => {
+        logger.error(`[feed-post] ${text}`)
+        if (firstRun) {
+          await sendTelegram(
+            `⚠️ <b>${escapeTelegramHtml(text)}</b>\n\nUpcoming days may have no grid post.`,
+          )
+        }
+      },
+    )
   }
 }
 
@@ -111,9 +140,26 @@ async function publishToday(
       return
     }
     row = picked.row
-  } else if (row.status === "planned") {
-    const problem = await plannedRowProblem(scope, row, today)
-    if (problem) {
+  } else {
+    const { problem, refreshed } = await inspectGridRow(scope, row, today)
+    const step = stepAfterInspection(row.status as "planned" | "failed", problem)
+
+    if (step === "skip_with_alert" && problem) {
+      // A failed post is retried as it was, never with a product that can no
+      // longer go out.
+      await feed.markSkipped(row.id, `not retried: ${PROBLEM_LABEL[problem]}`)
+      await sendTelegram(
+        [
+          `🟡 <b>Today's grid post was not retried</b>`,
+          "",
+          `${escapeTelegramHtml(snapshotName(row))}: ${PROBLEM_LABEL[problem]}.`,
+          "Nothing posts today.",
+        ].join("\n"),
+      )
+      return
+    }
+
+    if (step === "replace" && problem) {
       const oldName = snapshotName(row)
       await feed.deletePlannedByDate(today)
       const replaced = await planGridPostForDate({
@@ -133,6 +179,10 @@ async function publishToday(
       )
       if (!replaced.ok) return
       row = replaced.row
+    } else if (refreshed) {
+      // Post what the product is today: live price/sizes, reviewed photos only.
+      await feed.refreshContent(row.id, refreshed)
+      row = { ...row, ...refreshed }
     }
   }
 

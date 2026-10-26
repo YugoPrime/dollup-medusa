@@ -24,6 +24,7 @@ import {
   gridRowProblem,
   nextRotationKey,
   pickGridProduct,
+  refreshGridContent,
   ROTATION,
   type GridRowProblem,
   type RotationKey,
@@ -286,19 +287,29 @@ export async function loadGridProduct(
   }
 }
 
-/** Why the planned grid row for `date` can't go out as planned, or null. */
-export async function plannedRowProblem(
+/**
+ * Checks today's grid row against the live product: why it can't go out (or
+ * null), and — when it can — its refreshed content (live price/sizes, only the
+ * reviewed photos still on the product). No reviewed photo left = "no_photos".
+ */
+export async function inspectGridRow(
   scope: Scope,
-  row: { product_id: string | null },
+  row: { product_id: string | null; image_urls: string[] | null },
   date: string,
-): Promise<GridRowProblem | null> {
+): Promise<{
+  problem: GridRowProblem | null
+  refreshed: ReturnType<typeof refreshGridContent>
+}> {
   const loaded = row.product_id
     ? await loadGridProduct(scope, row.product_id)
     : { product: null, published: false, socialExcluded: false }
-  return gridRowProblem({
+  const problem = gridRowProblem({
     product: loaded.product,
     published: loaded.published,
     socialExcluded: loaded.socialExcluded,
     storyProductIds: new Set(await storyProductIdsForDate(scope, date)),
   })
+  if (problem || !loaded.product) return { problem, refreshed: null }
+  const refreshed = refreshGridContent(row.image_urls ?? [], loaded.product)
+  return refreshed ? { problem: null, refreshed } : { problem: "no_photos", refreshed: null }
 }

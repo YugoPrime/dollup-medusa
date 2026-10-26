@@ -84,6 +84,23 @@ class FeedPostsModuleService extends MedusaService({ FeedPost }) {
     } as unknown as Parameters<this["updateFeedPosts"]>[0])
   }
 
+  /** Gives up on a day's row without posting (reason kept in `error`). */
+  async markSkipped(id: string, reason: string): Promise<void> {
+    await this.updateFeedPosts({
+      id,
+      status: "skipped",
+      error: reason.slice(0, 1000),
+    } as unknown as Parameters<this["updateFeedPosts"]>[0])
+  }
+
+  /** Replaces a row's content with what will actually be posted. */
+  async refreshContent(
+    id: string,
+    content: { product_snapshot: unknown; image_urls: string[]; caption: string },
+  ): Promise<void> {
+    await this.updateFeedPosts({ id, ...content } as unknown as Parameters<this["updateFeedPosts"]>[0])
+  }
+
   /** Records a failed publish attempt, bumping attempt_count. */
   async markFailed(id: string, error: string): Promise<number> {
     const [row] = await this.listFeedPosts({ id })

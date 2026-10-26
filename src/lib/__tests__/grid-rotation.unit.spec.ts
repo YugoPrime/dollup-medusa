@@ -161,3 +161,52 @@ describe("gridRowProblem", () => {
     expect(gridRowProblem({ product: ok, storyProductIds: new Set(), socialExcluded: false, published: true })).toBeNull()
   })
 })
+
+import { refreshGridContent, stepAfterInspection } from "../grid-rotation"
+
+describe("refreshGridContent", () => {
+  const withImages = (price: number, urls: string[]): ProductLike => ({
+    id: "p",
+    title: "Red Dress",
+    handle: "is2451",
+    variants: [
+      {
+        id: "v",
+        inventory_quantity: 3,
+        prices: [{ amount: price * 100, currency_code: "mur" }],
+        options: { color: "Red", size: "M" },
+        images: urls.map((url) => ({ url })),
+      },
+    ],
+  })
+
+  it("re-prices the caption from the live product", () => {
+    const r = refreshGridContent(["https://cdn/a.jpg"], withImages(990, ["https://cdn/a.jpg"]))
+    expect(r?.caption).toContain("Rs 990")
+  })
+
+  it("keeps only reviewed photos that are still on the product, in reviewed order", () => {
+    const r = refreshGridContent(
+      ["https://cdn/b.jpg", "https://cdn/gone.jpg", "https://cdn/a.jpg"],
+      withImages(990, ["https://cdn/a.jpg", "https://cdn/b.jpg", "https://cdn/new.jpg"]),
+    )
+    expect(r?.image_urls).toEqual(["https://cdn/b.jpg", "https://cdn/a.jpg"])
+  })
+
+  it("returns null when none of the reviewed photos is left", () => {
+    expect(refreshGridContent(["https://cdn/gone.jpg"], withImages(990, ["https://cdn/a.jpg"]))).toBeNull()
+  })
+})
+
+describe("stepAfterInspection", () => {
+  it("publishes a valid planned or failed row", () => {
+    expect(stepAfterInspection("planned", null)).toBe("publish")
+    expect(stepAfterInspection("failed", null)).toBe("publish")
+  })
+  it("replaces a planned row that can no longer go out", () => {
+    expect(stepAfterInspection("planned", "sold_out")).toBe("replace")
+  })
+  it("never retries a failed row that can no longer go out", () => {
+    expect(stepAfterInspection("failed", "off_social")).toBe("skip_with_alert")
+  })
+})

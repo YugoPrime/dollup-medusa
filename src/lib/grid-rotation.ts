@@ -3,7 +3,13 @@ import {
   pickWeightedProduct,
   type WeightingConfig,
 } from "../modules/stories/picker-weighting"
-import type { ProductLike } from "../modules/stories/snapshot"
+import { buildSnapshot, type ProductLike, type ProductSnapshot } from "../modules/stories/snapshot"
+import {
+  buildFeedCaption,
+  readFeedCaptionOptionsFromEnv,
+  selectFeedImages,
+  type FeedCaptionOptions,
+} from "./feed-post-content"
 
 /**
  * Pure rules for the daily IG/FB grid post: which category comes next and
@@ -73,7 +79,13 @@ export function pickGridProduct(args: {
   return pickWeightedProduct(stale, args.weighting, args.now, rng)
 }
 
-export type GridRowProblem = "missing" | "unpublished" | "sold_out" | "off_social" | "in_stories"
+export type GridRowProblem =
+  | "missing"
+  | "unpublished"
+  | "sold_out"
+  | "off_social"
+  | "in_stories"
+  | "no_photos"
 
 /** Why a planned grid product can no longer go out today, or null if it can. */
 export function gridRowProblem(args: {
@@ -88,4 +100,35 @@ export function gridRowProblem(args: {
   if (args.socialExcluded) return "off_social"
   if (args.storyProductIds.has(args.product.id)) return "in_stories"
   return null
+}
+
+/**
+ * The post as it goes out today: the owner reviewed the photos days ago, but
+ * price, sizes and colours come from the live product. Keeps only reviewed
+ * photos still on an in-stock variant (in the reviewed order); null when none
+ * is left, which the caller treats as "can't post as reviewed".
+ */
+export function refreshGridContent(
+  reviewedImages: string[],
+  product: ProductLike,
+  captionOpts: FeedCaptionOptions = readFeedCaptionOptionsFromEnv(),
+): { product_snapshot: ProductSnapshot; image_urls: string[]; caption: string } | null {
+  const snapshot = buildSnapshot(product)
+  const live = new Set(selectFeedImages(snapshot))
+  const image_urls = reviewedImages.filter((u) => live.has(u))
+  if (image_urls.length === 0) return null
+  return { product_snapshot: snapshot, image_urls, caption: buildFeedCaption(snapshot, captionOpts) }
+}
+
+/**
+ * What to do with today's planned or failed row once it has been inspected:
+ * a planned row that can't go out is replaced; a failed one is never retried
+ * with a product that can't go out (the day is skipped and the owner told).
+ */
+export function stepAfterInspection(
+  status: "planned" | "failed",
+  problem: GridRowProblem | null,
+): "publish" | "replace" | "skip_with_alert" {
+  if (!problem) return "publish"
+  return status === "planned" ? "replace" : "skip_with_alert"
 }
