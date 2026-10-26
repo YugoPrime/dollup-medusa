@@ -5,7 +5,7 @@ import { mauritiusTomorrow } from "../lib/mauritius-date"
 import { resolveFillerForDate } from "../lib/stories-filler"
 import { escapeTelegramHtml, sendTelegram } from "../lib/telegram"
 import { STORIES_MODULE } from "../modules/stories"
-import { createMedusaProductSource } from "../modules/stories/product-source"
+import { createStoryPickDeps } from "../lib/story-pick-deps"
 import type StoriesModuleService from "../modules/stories/service"
 import {
   batchRenderPlan,
@@ -87,9 +87,9 @@ export default async function createTomorrowPlan(
     return
   }
 
-  const productSource = createMedusaProductSource(container)
+  const pickDeps = createStoryPickDeps(container)
   try {
-    await stories.regeneratePlan(plan.id, { productSource })
+    await stories.regeneratePlan(plan.id, pickDeps)
   } catch (err) {
     const msg = (err as Error)?.message ?? "regeneratePlan failed"
     logger.error(`[auto-plan] regenerate failed for plan ${plan.id}: ${msg}`)

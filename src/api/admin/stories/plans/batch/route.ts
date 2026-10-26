@@ -14,6 +14,7 @@ import {
   isSocialExcluded,
   toProductLike,
 } from "../../../../../modules/stories/product-source"
+import { gridProductIdsForDate } from "../../../../../lib/story-pick-deps"
 
 /**
  * Batch-create N daily plans with shared anti-repeat. Reuses the same
@@ -73,7 +74,10 @@ export const POST = async (req: AuthenticatedMedusaRequest, res: MedusaResponse)
   try {
     const plans = await stories.createBatchPlans(
       { start_date, days, category_distribution, scheduled_times, notes },
-      { productSource },
+      {
+        productSource,
+        gridProductIdsForDate: (date) => gridProductIdsForDate(req.scope, date),
+      },
     )
     res.status(201).json({ plans })
   } catch (err) {
