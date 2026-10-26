@@ -39,6 +39,29 @@ export function collectCategoryAndDescendants(
   return Array.from(result)
 }
 
+/** Product fields every story/grid pick reads (see toProductLike). */
+export const STORY_PRODUCT_FIELDS = [
+  "id",
+  "title",
+  "handle",
+  "created_at",
+  "metadata",
+  "images.url",
+  "tags.value",
+  "categories.id",
+  "categories.handle",
+  "variants.id",
+  "variants.sku",
+  "variants.title",
+  "variants.manage_inventory",
+  "variants.inventory_items.required_quantity",
+  "variants.inventory_items.inventory.location_levels.stocked_quantity",
+  "variants.inventory_items.inventory.location_levels.reserved_quantity",
+  "variants.options.value",
+  "variants.options.option.title",
+  "variants.calculated_price.*",
+]
+
 /**
  * Wires the stories picker to Medusa's product module via query.graph so the
  * pricing module's calculated_price + original_amount (a remote link) and the
@@ -85,27 +108,7 @@ export function createMedusaProductSource(scope: {
     for (let skip = 0; skip < MAX_SKIP; skip += PAGE) {
       const { data } = await query.graph({
         entity: "product",
-        fields: [
-          "id",
-          "title",
-          "handle",
-          "created_at",
-          "metadata",
-          "images.url",
-          "tags.value",
-          "categories.id",
-          "categories.handle",
-          "variants.id",
-          "variants.sku",
-          "variants.title",
-          "variants.manage_inventory",
-          "variants.inventory_items.required_quantity",
-          "variants.inventory_items.inventory.location_levels.stocked_quantity",
-          "variants.inventory_items.inventory.location_levels.reserved_quantity",
-          "variants.options.value",
-          "variants.options.option.title",
-          "variants.calculated_price.*",
-        ],
+        fields: STORY_PRODUCT_FIELDS,
         filters,
         // Stable order is required for skip-based pagination: without it the DB
         // may return rows in a different order per page, skipping/duplicating

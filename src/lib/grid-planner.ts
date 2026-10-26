@@ -1,5 +1,5 @@
 import type { MedusaContainer } from "@medusajs/framework/types"
-import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
+import { ContainerRegistrationKeys, QueryContext } from "@medusajs/framework/utils"
 
 import { FEED_POSTS_MODULE } from "../modules/feed-posts"
 import type FeedPostsModuleService from "../modules/feed-posts/service"
@@ -7,18 +7,25 @@ import type { FeedPostDTO } from "../modules/feed-posts/service"
 import { STORIES_MODULE } from "../modules/stories"
 import { activeFocusTag } from "../modules/stories/focus"
 import { DEFAULT_WEIGHTING } from "../modules/stories/picker-weighting"
-import { collectCategoryAndDescendants } from "../modules/stories/product-source"
+import {
+  collectCategoryAndDescendants,
+  isSocialExcluded,
+  STORY_PRODUCT_FIELDS,
+  toProductLike,
+} from "../modules/stories/product-source"
 import type StoriesModuleService from "../modules/stories/service"
-import { buildSnapshot } from "../modules/stories/snapshot"
+import { buildSnapshot, type ProductLike } from "../modules/stories/snapshot"
 import {
   buildFeedCaption,
   readFeedCaptionOptionsFromEnv,
   selectFeedImages,
 } from "./feed-post-content"
 import {
+  gridRowProblem,
   nextRotationKey,
   pickGridProduct,
   ROTATION,
+  type GridRowProblem,
   type RotationKey,
 } from "./grid-rotation"
 import { addDaysToMauritiusDate } from "./mauritius-date"
@@ -194,4 +201,49 @@ export async function planUpcomingGridPosts(args: {
     else if (result.reason === "no_eligible_product") empty.push(date)
   }
   return { planned, empty }
+}
+
+/**
+ * One product as the grid sees it, whatever its status: unlike the product
+ * source this also returns unpublished and social-excluded products, so the
+ * caller can say *why* one can't be posted.
+ */
+export async function loadGridProduct(
+  scope: Scope,
+  productId: string,
+): Promise<{ product: ProductLike | null; published: boolean; socialExcluded: boolean }> {
+  const query = scope.resolve(ContainerRegistrationKeys.QUERY)
+  const { data } = await query.graph({
+    entity: "product",
+    fields: [...STORY_PRODUCT_FIELDS, "status"],
+    filters: { id: productId },
+    pagination: { take: 1 },
+    context: {
+      variants: { calculated_price: QueryContext({ currency_code: "mur" }) },
+    },
+  })
+  const raw = (data as any[])[0]
+  if (!raw) return { product: null, published: false, socialExcluded: false }
+  return {
+    product: toProductLike(raw),
+    published: raw.status === "published",
+    socialExcluded: isSocialExcluded(raw),
+  }
+}
+
+/** Why the planned grid row for `date` can't go out as planned, or null. */
+export async function plannedRowProblem(
+  scope: Scope,
+  row: { product_id: string | null },
+  date: string,
+): Promise<GridRowProblem | null> {
+  const loaded = row.product_id
+    ? await loadGridProduct(scope, row.product_id)
+    : { product: null, published: false, socialExcluded: false }
+  return gridRowProblem({
+    product: loaded.product,
+    published: loaded.published,
+    socialExcluded: loaded.socialExcluded,
+    storyProductIds: new Set(await storyProductIdsForDate(scope, date)),
+  })
 }
