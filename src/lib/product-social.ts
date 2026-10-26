@@ -7,6 +7,8 @@ import type FeedPostsModuleService from "../modules/feed-posts/service"
 import { STORIES_MODULE } from "../modules/stories"
 import type StoriesModuleService from "../modules/stories/service"
 import { planGridPostForDate } from "./grid-planner"
+import { createStoryPickDeps } from "./story-pick-deps"
+import { repickStorySlotsHolding, type RepickedSlot } from "./story-repick"
 import { mauritiusToday } from "./mauritius-date"
 
 /** Copy of `metadata` with `no_social` set; every other key is kept. */
@@ -19,13 +21,14 @@ export function mergeSocialFlag(
 
 export type SocialFlagResult = {
   replanned_dates: string[]
-  story_slots: Array<{ slot_id: string; plan_date: string; scheduled_at: string }>
+  /** Unposted story slots that held the product, now re-picked or emptied. */
+  story_slots: RepickedSlot[]
 }
 
 /**
  * The owner's "keep off social" switch. Turning it on also replans every
- * upcoming grid post that featured the product, and lists the unposted story
- * slots still holding it so the owner can swap them.
+ * upcoming grid post that featured the product and re-picks every unposted
+ * story slot holding it (their new videos render on the next renderer run).
  */
 export async function setProductNoSocial(
   scope: MedusaContainer,
@@ -64,24 +67,14 @@ export async function setProductNoSocial(
     replanned_dates.push(r.post_date)
   }
 
-  const stories = scope.resolve<StoriesModuleService>(STORIES_MODULE)
-  const slots = (await stories.listStorySlots({ product_id: productId, posted_at: null } as any)).filter(
-    (s) => new Date(s.scheduled_at as unknown as string).getTime() >= Date.parse(`${today}T00:00:00+04:00`),
-  )
-  const plans = slots.length
-    ? await stories.listStoryPlans({ id: Array.from(new Set(slots.map((s) => s.plan_id))) } as any)
-    : []
-  const dateByPlan = new Map(
-    plans.map((p) => {
-      const pd = p.plan_date as unknown as string | Date
-      return [p.id, typeof pd === "string" ? pd.slice(0, 10) : pd.toISOString().slice(0, 10)]
-    }),
-  )
-  const story_slots = slots.map((s) => ({
-    slot_id: s.id,
-    plan_date: dateByPlan.get(s.plan_id) ?? "",
-    scheduled_at: new Date(s.scheduled_at as unknown as string).toISOString(),
-  }))
+  // Stories already planned (and usually already rendered) with this product:
+  // re-pick them now, dropping the old video, so it can't post.
+  const story_slots = await repickStorySlotsHolding({
+    stories: scope.resolve<StoriesModuleService>(STORIES_MODULE),
+    deps: createStoryPickDeps(scope),
+    productId,
+    fromMs: Date.parse(`${today}T00:00:00+04:00`),
+  })
 
   return { replanned_dates, story_slots }
 }

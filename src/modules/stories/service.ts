@@ -8,6 +8,7 @@ import { buildSnapshot, type ProductLike } from "./snapshot"
 import { DEFAULT_WEIGHTING, type WeightingConfig } from "./picker-weighting"
 import { activeFocusTag } from "./focus"
 import { chooseSlotProduct } from "./slot-choice"
+import { clearSlotProductUpdate, swapSlotUpdate } from "./slot-update"
 
 export const STORY_SETTINGS_ID = "story_settings"
 
@@ -213,13 +214,19 @@ class StoriesModuleService extends MedusaService({
     const [slot] = await this.listStorySlots({ id: slotId })
     if (!slot) throw new Error(`Slot ${slotId} not found`)
     if (slot.posted_at) throw new Error("Cannot swap product on a posted slot")
-    await this.updateStorySlots({
-      id: slotId,
-      product_id: product.id,
-      product_snapshot: buildSnapshot(product),
-      fallback_used: false,
-      pick_attempt: (slot.pick_attempt ?? 1) + 1,
-    })
+    await this.updateStorySlots(
+      swapSlotUpdate(slot, product) as unknown as Parameters<this["updateStorySlots"]>[0],
+    )
+  }
+
+  /** Leaves an unposted slot with no product (and no render), so it can't post. */
+  async clearSlotProduct(slotId: string): Promise<void> {
+    const [slot] = await this.listStorySlots({ id: slotId })
+    if (!slot) throw new Error(`Slot ${slotId} not found`)
+    if (slot.posted_at) throw new Error("Cannot clear a posted slot")
+    await this.updateStorySlots(
+      clearSlotProductUpdate(slot) as unknown as Parameters<this["updateStorySlots"]>[0],
+    )
   }
 
   async updateSlotMetadata(

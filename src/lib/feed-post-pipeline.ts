@@ -10,6 +10,7 @@ import {
   readFeedCaptionOptionsFromEnv,
   selectFeedImages,
 } from "./feed-post-content"
+import { isUniqueViolation } from "./db-errors"
 import { isMetaIgConfigured, publishFeedImages } from "./meta-ig"
 import { isFeedFbCrosspostEnabled, publishFbPhotoPost } from "./meta-fb"
 
@@ -54,15 +55,21 @@ export async function buildFeedPostForDate(args: {
   const images = selectFeedImages(snapshot)
   if (images.length === 0) return { ok: false, reason: "no_images" }
 
-  const row = await feed.createPlanned({
-    post_date: postDate,
-    product_id: product.id,
-    product_snapshot: snapshot,
-    image_urls: images,
-    caption: buildFeedCaption(snapshot, readFeedCaptionOptionsFromEnv()),
-    metadata: args.metadata ?? null,
-  })
-  return { ok: true, row, product_id: product.id }
+  try {
+    const row = await feed.createPlanned({
+      post_date: postDate,
+      product_id: product.id,
+      product_snapshot: snapshot,
+      image_urls: images,
+      caption: buildFeedCaption(snapshot, readFeedCaptionOptionsFromEnv()),
+      metadata: args.metadata ?? null,
+    })
+    return { ok: true, row, product_id: product.id }
+  } catch (err) {
+    // One row per day (unique index): someone else planned this date first.
+    if (isUniqueViolation(err)) return { ok: false, reason: "exists" }
+    throw err
+  }
 }
 
 export type PublishFeedPostResult = {

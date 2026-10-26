@@ -65,7 +65,9 @@ export async function planFeedPostForDate(args: {
 
   const feed = scope.resolve<FeedPostsModuleService>(FEED_POSTS_MODULE)
   const existing = await feed.findByDate(postDate)
-  if (existing && existing.status === "posted") {
+  // A failed row is still being retried (or has given up) for that day; only
+  // one row per day can exist.
+  if (existing && (existing.status === "posted" || existing.status === "failed")) {
     return { ok: false, reason: "posted" }
   }
 
