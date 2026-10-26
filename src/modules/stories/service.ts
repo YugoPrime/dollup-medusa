@@ -33,6 +33,10 @@ export type StorySettingsDTO = {
    *  collection_boost_days; 1 = pure random. */
   collection_boost: number
   collection_boost_days: number
+  /** New-collection focus tag (see focus.ts); null = off. */
+  focus_tag: string | null
+  /** Last focus day, "YYYY-MM-DD" MU, inclusive; null = no end. */
+  focus_until: string | null
 }
 
 export type UpdateStorySettingsInput = Partial<Omit<StorySettingsDTO, "id">>
@@ -82,6 +86,8 @@ export const DEFAULT_STORY_SETTINGS: Omit<StorySettingsDTO, "id"> = {
   stock_alert_threshold: 0,
   collection_boost: DEFAULT_WEIGHTING.collection_boost,
   collection_boost_days: DEFAULT_WEIGHTING.collection_boost_days,
+  focus_tag: null,
+  focus_until: null,
 }
 
 class StoriesModuleService extends MedusaService({

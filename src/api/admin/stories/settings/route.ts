@@ -6,6 +6,7 @@ import type {
 import { STORIES_MODULE } from "../../../../modules/stories"
 import type StoriesModuleService from "../../../../modules/stories/service"
 import type { UpdateStorySettingsInput } from "../../../../modules/stories/service"
+import { parseFocusSettingsInput } from "../../../../modules/stories/focus"
 
 export const GET = async (
   req: AuthenticatedMedusaRequest,
@@ -40,6 +41,7 @@ export const PUT = async (
 
   const service = req.scope.resolve<StoriesModuleService>(STORIES_MODULE)
   try {
+    Object.assign(input, parseFocusSettingsInput(body))
     const settings = await service.updateSettings(input)
     res.json({ settings })
   } catch (err) {
