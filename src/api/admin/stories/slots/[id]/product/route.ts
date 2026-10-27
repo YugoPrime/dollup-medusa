@@ -8,8 +8,15 @@ import {
 } from "@medusajs/framework/utils"
 
 import { STORIES_MODULE } from "../../../../../../modules/stories"
-import { toProductLike } from "../../../../../../modules/stories/product-source"
+import {
+  isSocialExcluded,
+  toProductLike,
+} from "../../../../../../modules/stories/product-source"
 import type StoriesModuleService from "../../../../../../modules/stories/service"
+import {
+  gridProductIdsForPlan,
+  gridSwapConflict,
+} from "../../../../../../lib/story-pick-deps"
 
 /**
  * Manually swap the product picked for a slot. Rejects posted slots.
@@ -34,6 +41,8 @@ export const PUT = async (req: AuthenticatedMedusaRequest, res: MedusaResponse) 
       "title",
       "handle",
       "created_at",
+      "metadata",
+      "categories.handle",
       "images.url",
       "variants.id",
       "variants.sku",
@@ -55,6 +64,22 @@ export const PUT = async (req: AuthenticatedMedusaRequest, res: MedusaResponse) 
   const p = (products as any[])[0]
   if (!p) {
     res.status(404).json({ message: `Product ${productId} not found` })
+    return
+  }
+
+  if (isSocialExcluded(p)) {
+    res.status(422).json({
+      message: "This product can't go on social (toys, After Dark, hidden or kept off social)",
+    })
+    return
+  }
+
+  const [current] = await stories.listStorySlots({ id })
+  const conflict = current
+    ? gridSwapConflict(await gridProductIdsForPlan(req.scope, current.plan_id), productId)
+    : null
+  if (conflict) {
+    res.status(409).json({ message: conflict })
     return
   }
 

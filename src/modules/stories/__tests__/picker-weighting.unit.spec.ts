@@ -2,6 +2,7 @@ import {
   DEFAULT_WEIGHTING,
   isWithinBoostWindow,
   pickWeightedProduct,
+  pickWithFocus,
   productWeight,
   weightedPickIndex,
   type WeightingConfig,
@@ -89,5 +90,22 @@ describe("pickWeightedProduct", () => {
   it("exposes sane defaults", () => {
     expect(DEFAULT_WEIGHTING.collection_boost).toBeGreaterThan(1)
     expect(DEFAULT_WEIGHTING.collection_boost_days).toBeGreaterThan(0)
+  })
+})
+
+describe("pickWithFocus", () => {
+  const oldA = { id: "oldA", ...at(100 * DAY), tags: [] as string[] }
+  const focusB = { id: "focusB", ...at(100 * DAY), tags: ["collection30"] }
+
+  it("picks among focus-tagged items when any exist", () => {
+    expect(pickWithFocus([oldA, focusB], "collection30", DEFAULT_WEIGHTING, NOW, () => 0)?.id).toBe("focusB")
+  })
+
+  it("falls back to the weighted pick when no item carries the tag", () => {
+    expect(pickWithFocus([oldA], "collection30", DEFAULT_WEIGHTING, NOW, () => 0)?.id).toBe("oldA")
+  })
+
+  it("ignores focus when the tag is null", () => {
+    expect(pickWithFocus([oldA, focusB], null, DEFAULT_WEIGHTING, NOW, () => 0)?.id).toBe("oldA")
   })
 })

@@ -19,6 +19,11 @@ const StorySettings = model.define("StorySettings", {
   // picker-weighting.ts.
   collection_boost: model.number().default(3),
   collection_boost_days: model.number().default(14),
+  // New-collection focus (see focus.ts): products carrying `focus_tag` come
+  // first in stories and grid posts until `focus_until` ("YYYY-MM-DD", MU,
+  // inclusive). Null tag = focus off.
+  focus_tag: model.text().nullable(),
+  focus_until: model.text().nullable(),
 })
 
 export default StorySettings

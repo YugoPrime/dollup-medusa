@@ -10,8 +10,8 @@ import {
   buildFeedPostForDate,
   publishFeedPostRow,
 } from "../../../lib/feed-post-pipeline"
+import { planGridPostForDate } from "../../../lib/grid-planner"
 
-const DEFAULT_DEDUP_DAYS = 30
 
 /** GET /admin/feed-posts — recent feed posts, newest first. */
 export const GET = async (
@@ -45,16 +45,21 @@ export const POST = async (
     typeof body.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.date)
       ? body.date
       : mauritiusToday()
-  const dedupDays = Number(process.env.FEED_DEDUP_DAYS) || DEFAULT_DEDUP_DAYS
 
   try {
-    const built = await buildFeedPostForDate({
-      scope: req.scope,
-      postDate,
-      dedupDays,
-      productId,
-      force: true,
-    })
+    // A chosen product is built as-is; otherwise the grid rules pick one
+    // (rotation, new-collection focus, never that day's stories).
+    let built
+    if (productId) {
+      built = await buildFeedPostForDate({ scope: req.scope, postDate, productId, force: true })
+    } else {
+      const feed = req.scope.resolve<FeedPostsModuleService>(FEED_POSTS_MODULE)
+      await feed.deletePlannedByDate(postDate)
+      const picked = await planGridPostForDate({ scope: req.scope, postDate })
+      built = picked.ok
+        ? { ok: true as const, row: picked.row, product_id: picked.row.product_id as string }
+        : { ok: false as const, reason: picked.reason }
+    }
     if (!built.ok) {
       const status = built.reason === "exists" ? 409 : 422
       res.status(status).json({ ok: false, reason: built.reason })

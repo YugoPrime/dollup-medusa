@@ -11,9 +11,10 @@ import { STORIES_MODULE } from "../../../../../modules/stories"
 import type StoriesModuleService from "../../../../../modules/stories/service"
 import type { ProductLike } from "../../../../../modules/stories/snapshot"
 import {
-  isIntimatesProduct,
+  isSocialExcluded,
   toProductLike,
 } from "../../../../../modules/stories/product-source"
+import { gridProductIdsForDate } from "../../../../../lib/story-pick-deps"
 
 /**
  * Batch-create N daily plans with shared anti-repeat. Reuses the same
@@ -47,6 +48,8 @@ export const POST = async (req: AuthenticatedMedusaRequest, res: MedusaResponse)
         "created_at",
         "metadata",
         "images.url",
+        "tags.value",
+        "categories.id",
         "categories.handle",
         "variants.id",
         "variants.sku",
@@ -65,13 +68,16 @@ export const POST = async (req: AuthenticatedMedusaRequest, res: MedusaResponse)
         variants: { calculated_price: QueryContext({ currency_code: "mur" }) },
       },
     })
-    return products.filter((p: any) => !isIntimatesProduct(p)).map(toProductLike)
+    return products.filter((p: any) => !isSocialExcluded(p)).map(toProductLike)
   }
 
   try {
     const plans = await stories.createBatchPlans(
       { start_date, days, category_distribution, scheduled_times, notes },
-      { productSource },
+      {
+        productSource,
+        gridProductIdsForDate: (date) => gridProductIdsForDate(req.scope, date),
+      },
     )
     res.status(201).json({ plans })
   } catch (err) {

@@ -5,11 +5,10 @@ import StorySlot from "./models/story-slot"
 import PublicationLog from "./models/publication-log"
 import StorySettings from "./models/story-settings"
 import { buildSnapshot, type ProductLike } from "./snapshot"
-import {
-  DEFAULT_WEIGHTING,
-  pickWeightedProduct,
-  type WeightingConfig,
-} from "./picker-weighting"
+import { DEFAULT_WEIGHTING, type WeightingConfig } from "./picker-weighting"
+import { activeFocusTag } from "./focus"
+import { chooseSlotProduct } from "./slot-choice"
+import { clearSlotProductUpdate, swapSlotUpdate } from "./slot-update"
 
 export const STORY_SETTINGS_ID = "story_settings"
 
@@ -33,6 +32,24 @@ export type StorySettingsDTO = {
    *  collection_boost_days; 1 = pure random. */
   collection_boost: number
   collection_boost_days: number
+  /** New-collection focus tag (see focus.ts); null = off. */
+  focus_tag: string | null
+  /** Last focus day, "YYYY-MM-DD" MU, inclusive; null = no end. */
+  focus_until: string | null
+}
+
+/** How the picker chooses: recency weighting plus the new-collection focus. */
+export type PickPolicy = {
+  weighting: WeightingConfig
+  focus_tag: string | null
+  focus_until: string | null
+}
+
+/** What the picker needs from outside the stories module. */
+export type PickDeps = {
+  productSource: (filter: { category_id?: string }) => Promise<ProductLike[]>
+  /** Product ids of that day's grid post; stories must never repeat them. */
+  gridProductIdsForDate?: (planDate: string) => Promise<string[]>
 }
 
 export type UpdateStorySettingsInput = Partial<Omit<StorySettingsDTO, "id">>
@@ -82,6 +99,8 @@ export const DEFAULT_STORY_SETTINGS: Omit<StorySettingsDTO, "id"> = {
   stock_alert_threshold: 0,
   collection_boost: DEFAULT_WEIGHTING.collection_boost,
   collection_boost_days: DEFAULT_WEIGHTING.collection_boost_days,
+  focus_tag: null,
+  focus_until: null,
 }
 
 class StoriesModuleService extends MedusaService({
@@ -195,13 +214,19 @@ class StoriesModuleService extends MedusaService({
     const [slot] = await this.listStorySlots({ id: slotId })
     if (!slot) throw new Error(`Slot ${slotId} not found`)
     if (slot.posted_at) throw new Error("Cannot swap product on a posted slot")
-    await this.updateStorySlots({
-      id: slotId,
-      product_id: product.id,
-      product_snapshot: buildSnapshot(product),
-      fallback_used: false,
-      pick_attempt: (slot.pick_attempt ?? 1) + 1,
-    })
+    await this.updateStorySlots(
+      swapSlotUpdate(slot, product) as unknown as Parameters<this["updateStorySlots"]>[0],
+    )
+  }
+
+  /** Leaves an unposted slot with no product (and no render), so it can't post. */
+  async clearSlotProduct(slotId: string): Promise<void> {
+    const [slot] = await this.listStorySlots({ id: slotId })
+    if (!slot) throw new Error(`Slot ${slotId} not found`)
+    if (slot.posted_at) throw new Error("Cannot clear a posted slot")
+    await this.updateStorySlots(
+      clearSlotProductUpdate(slot) as unknown as Parameters<this["updateStorySlots"]>[0],
+    )
   }
 
   async updateSlotMetadata(
@@ -239,11 +264,9 @@ class StoriesModuleService extends MedusaService({
    */
   private async pickProductsForPlan(
     planId: string,
-    deps: {
-      productSource: (filter: { category_id?: string }) => Promise<ProductLike[]>
-    },
+    deps: PickDeps,
     excluded: Set<string>,
-    weighting: WeightingConfig = DEFAULT_WEIGHTING,
+    policy: PickPolicy,
   ): Promise<void> {
     const [plan] = await this.listStoryPlans({ id: planId })
     if (!plan) throw new Error(`Plan ${planId} not found`)
@@ -277,30 +300,32 @@ class StoriesModuleService extends MedusaService({
     }
     const scheduledTimes = plan.scheduled_times as unknown as string[]
 
-    const eligible = (p: ProductLike) =>
-      p.variants.some((v) => v.inventory_quantity > 0) && !excluded.has(p.id)
+    const planDate = plan.plan_date as unknown as string | Date
+    const planYmd =
+      typeof planDate === "string" ? planDate.slice(0, 10) : planDate.toISOString().slice(0, 10)
+    const focusTag = activeFocusTag(policy, planYmd)
+    // That day's grid post: excluded for this plan only, never added to the
+    // shared anti-repeat set (other days may still use it).
+    const gridExcluded = new Set(
+      deps.gridProductIdsForDate ? await deps.gridProductIdsForDate(planYmd) : [],
+    )
 
     // Single `now` for the whole plan so every slot weights recency against the
     // same instant (deterministic given a fixed rng in tests).
     const now = Date.now()
-    const pick = (arr: ProductLike[]): ProductLike | null =>
-      pickWeightedProduct(arr, weighting, now)
 
     for (const { slot_index, category_id } of toFill) {
-      const scheduledAt = resolveScheduledAt(
-        plan.plan_date as unknown as string | Date,
-        scheduledTimes[slot_index],
-      )
+      const scheduledAt = resolveScheduledAt(planDate, scheduledTimes[slot_index])
 
-      const inCategory = (await deps.productSource({ category_id })).filter(eligible)
-      let product = pick(inCategory)
-      let fallbackUsed = false
-
-      if (!product) {
-        const union = (await deps.productSource({})).filter(eligible)
-        product = pick(union)
-        fallbackUsed = product != null
-      }
+      const { product, fallbackUsed } = await chooseSlotProduct({
+        inCategory: await deps.productSource({ category_id }),
+        union: () => deps.productSource({}),
+        excluded,
+        gridExcluded,
+        focusTag,
+        weighting: policy.weighting,
+        now,
+      })
 
       if (product) {
         await this.createStorySlots({
@@ -333,12 +358,7 @@ class StoriesModuleService extends MedusaService({
     }
   }
 
-  async regeneratePlan(
-    planId: string,
-    deps: {
-      productSource: (filter: { category_id?: string }) => Promise<ProductLike[]>
-    },
-  ): Promise<void> {
+  async regeneratePlan(planId: string, deps: PickDeps): Promise<void> {
     const settings = await this.getSettings()
     const excluded = new Set(
       await this.getExcludedProductIds(settings.anti_repeat_days),
@@ -352,7 +372,7 @@ class StoriesModuleService extends MedusaService({
       if (s.plan_id === planId) continue
       if (s.product_id && !s.posted_at) excluded.add(s.product_id)
     }
-    await this.pickProductsForPlan(planId, deps, excluded, weightingFromSettings(settings))
+    await this.pickProductsForPlan(planId, deps, excluded, policyFromSettings(settings))
   }
 
   async getStockAlerts(deps: {
@@ -475,9 +495,7 @@ class StoriesModuleService extends MedusaService({
 
   async createBatchPlans(
     input: CreateBatchPlansInput,
-    deps: {
-      productSource: (filter: { category_id?: string }) => Promise<ProductLike[]>
-    },
+    deps: PickDeps,
   ): Promise<StoryPlanDTO[]> {
     if (!Number.isInteger(input.days) || input.days < 1 || input.days > 31) {
       throw new Error("days must be an integer between 1 and 31")
@@ -512,7 +530,7 @@ class StoriesModuleService extends MedusaService({
     const settings = await this.getSettings()
     const excluded = new Set(await this.getExcludedProductIds(settings.anti_repeat_days))
 
-    const weighting = weightingFromSettings(settings)
+    const policy = policyFromSettings(settings)
     const created: StoryPlanDTO[] = []
     for (const date of dates) {
       const plan = await this.createPlan({
@@ -521,7 +539,7 @@ class StoriesModuleService extends MedusaService({
         scheduled_times: input.scheduled_times,
         notes: input.notes ?? null,
       })
-      await this.pickProductsForPlan(plan.id, deps, excluded, weighting)
+      await this.pickProductsForPlan(plan.id, deps, excluded, policy)
       created.push(plan)
     }
     return created
@@ -539,6 +557,14 @@ function weightingFromSettings(settings: {
       settings.collection_boost ?? DEFAULT_WEIGHTING.collection_boost,
     collection_boost_days:
       settings.collection_boost_days ?? DEFAULT_WEIGHTING.collection_boost_days,
+  }
+}
+
+function policyFromSettings(settings: StorySettingsDTO): PickPolicy {
+  return {
+    weighting: weightingFromSettings(settings),
+    focus_tag: settings.focus_tag ?? null,
+    focus_until: settings.focus_until ?? null,
   }
 }
 

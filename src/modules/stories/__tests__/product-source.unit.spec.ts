@@ -1,4 +1,4 @@
-import { collectCategoryAndDescendants, toProductLike } from "../product-source"
+import { collectCategoryAndDescendants, isSocialExcluded, toProductLike } from "../product-source"
 
 const SAMPLE = {
   id: "prod_1",
@@ -239,5 +239,45 @@ describe("toProductLike", () => {
       "https://r2/legacy/no-color-in-name.jpg",
       "https://r2/legacy/another.jpg",
     ])
+  })
+})
+
+describe("isSocialExcluded", () => {
+  it("excludes a product in Toys even when it is also in Lingerie", () => {
+    expect(
+      isSocialExcluded({ categories: [{ handle: "lingerie" }, { handle: "toys" }], metadata: null }),
+    ).toBe(true)
+  })
+
+  it("excludes After Dark, unlisted and no_social", () => {
+    expect(isSocialExcluded({ categories: [{ handle: "intimates" }] })).toBe(true)
+    expect(isSocialExcluded({ categories: [{ handle: "dresses" }], metadata: { unlisted: true } })).toBe(true)
+    expect(isSocialExcluded({ categories: [{ handle: "dresses" }], metadata: { no_social: true } })).toBe(true)
+  })
+
+  it("keeps a normal dress, and no_social:false", () => {
+    expect(isSocialExcluded({ categories: [{ handle: "dresses" }], metadata: { no_social: false } })).toBe(false)
+  })
+})
+
+describe("toProductLike tags and categories", () => {
+  it("maps tag values and category ids", () => {
+    const p = toProductLike({
+      id: "p1",
+      title: "T",
+      handle: "is1",
+      tags: [{ value: "collection30" }],
+      categories: [{ id: "pcat_a", handle: "dresses" }],
+      images: [],
+      variants: [],
+    })
+    expect(p.tags).toEqual(["collection30"])
+    expect(p.category_ids).toEqual(["pcat_a"])
+  })
+
+  it("defaults both to empty arrays", () => {
+    const p = toProductLike({ id: "p2", title: "T", handle: "is2", images: [], variants: [] })
+    expect(p.tags).toEqual([])
+    expect(p.category_ids).toEqual([])
   })
 })

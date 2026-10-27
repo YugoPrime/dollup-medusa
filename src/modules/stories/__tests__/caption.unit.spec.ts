@@ -15,6 +15,10 @@ describe("renderCaption", () => {
     picked_at: new Date().toISOString(),
   }
 
+  it("links to the live storefront by default", () => {
+    expect(STOREFRONT_BASE_URL).toBe("https://dollupboutique.com")
+  })
+
   it("substitutes name, price, sizes, link", () => {
     const tpl = "{name} — Rs {price} · {sizes} · {link}"
     expect(renderCaption(tpl, snap)).toBe(

@@ -1,7 +1,7 @@
 import type { ProductSnapshot } from "./snapshot"
 
 export const STOREFRONT_BASE_URL =
-  process.env.STORIES_STOREFRONT_BASE_URL ?? "https://shop.dollupboutique.com"
+  process.env.STORIES_STOREFRONT_BASE_URL ?? "https://dollupboutique.com"
 
 const MUR_FORMAT = new Intl.NumberFormat("en-US", { useGrouping: true })
 

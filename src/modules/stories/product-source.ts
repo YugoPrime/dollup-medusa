@@ -39,6 +39,29 @@ export function collectCategoryAndDescendants(
   return Array.from(result)
 }
 
+/** Product fields every story/grid pick reads (see toProductLike). */
+export const STORY_PRODUCT_FIELDS = [
+  "id",
+  "title",
+  "handle",
+  "created_at",
+  "metadata",
+  "images.url",
+  "tags.value",
+  "categories.id",
+  "categories.handle",
+  "variants.id",
+  "variants.sku",
+  "variants.title",
+  "variants.manage_inventory",
+  "variants.inventory_items.required_quantity",
+  "variants.inventory_items.inventory.location_levels.stocked_quantity",
+  "variants.inventory_items.inventory.location_levels.reserved_quantity",
+  "variants.options.value",
+  "variants.options.option.title",
+  "variants.calculated_price.*",
+]
+
 /**
  * Wires the stories picker to Medusa's product module via query.graph so the
  * pricing module's calculated_price + original_amount (a remote link) and the
@@ -48,8 +71,9 @@ export function collectCategoryAndDescendants(
  * StoriesModuleService.regeneratePlan / createBatchPlans expect. Filters by
  * status=published and an optional `category_id` — which is expanded to include
  * all descendant categories so a parent like "Beachwear" pulls products from
- * its Bikini Sets / Cover-Ups / One-Pieces children. Skips Intimates products
- * (18+, marked unlisted) so the auto-planner never picks them.
+ * its Bikini Sets / Cover-Ups / One-Pieces children. Skips every product that
+ * must never reach Instagram/Facebook (see isSocialExcluded) so neither the
+ * story picker nor the grid planner can ever choose one.
  */
 export function createMedusaProductSource(scope: {
   resolve(key: any): any
@@ -84,25 +108,7 @@ export function createMedusaProductSource(scope: {
     for (let skip = 0; skip < MAX_SKIP; skip += PAGE) {
       const { data } = await query.graph({
         entity: "product",
-        fields: [
-          "id",
-          "title",
-          "handle",
-          "created_at",
-          "metadata",
-          "images.url",
-          "categories.handle",
-          "variants.id",
-          "variants.sku",
-          "variants.title",
-          "variants.manage_inventory",
-          "variants.inventory_items.required_quantity",
-          "variants.inventory_items.inventory.location_levels.stocked_quantity",
-          "variants.inventory_items.inventory.location_levels.reserved_quantity",
-          "variants.options.value",
-          "variants.options.option.title",
-          "variants.calculated_price.*",
-        ],
+        fields: STORY_PRODUCT_FIELDS,
         filters,
         // Stable order is required for skip-based pagination: without it the DB
         // may return rows in a different order per page, skipping/duplicating
@@ -119,7 +125,7 @@ export function createMedusaProductSource(scope: {
       // A short page marks the end — robust whether or not graph returns a count.
       if (page.length < PAGE) break
     }
-    return products.filter((p) => !isIntimatesProduct(p)).map(toProductLike)
+    return products.filter((p) => !isSocialExcluded(p)).map(toProductLike)
   }
 }
 
@@ -150,6 +156,20 @@ export function isIntimatesProduct(p: any): boolean {
   const meta = (p.metadata ?? null) as Record<string, unknown> | null
   if (meta && meta.unlisted === true) return true
   return false
+}
+
+/**
+ * True for any product that must never be posted to Instagram/Facebook, in
+ * stories or on the grid: After Dark (`intimates`) and Toys categories,
+ * `metadata.unlisted` (hidden from the public shop) and `metadata.no_social`
+ * (the owner's "keep off social" switch).
+ */
+export function isSocialExcluded(p: any): boolean {
+  if (isIntimatesProduct(p)) return true
+  const cats: Array<{ handle?: string }> = p.categories ?? []
+  if (cats.some((c) => (c?.handle ?? "").toLowerCase() === "toys")) return true
+  const meta = (p.metadata ?? null) as Record<string, unknown> | null
+  return meta != null && meta.no_social === true
 }
 
 /**
@@ -213,6 +233,12 @@ export function toProductLike(p: any): ProductLike {
     title: p.title,
     handle: p.handle,
     created_at: p.created_at,
+    tags: (p.tags ?? [])
+      .map((t: any) => t?.value)
+      .filter((v: unknown): v is string => typeof v === "string"),
+    category_ids: (p.categories ?? [])
+      .map((c: any) => c?.id)
+      .filter((v: unknown): v is string => typeof v === "string"),
     variants: (p.variants ?? []).map((v: any) => {
       const calc = v.calculated_price
       const displayAmount = calc?.calculated_amount

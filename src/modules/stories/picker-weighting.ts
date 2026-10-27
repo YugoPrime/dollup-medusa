@@ -1,3 +1,4 @@
+import { hasTag } from "./focus"
 import type { ProductLike } from "./snapshot"
 
 /**
@@ -98,4 +99,23 @@ export function pickWeightedProduct<T extends Pick<ProductLike, "created_at">>(
   const weights = items.map((p) => productWeight(p, config, now))
   const idx = weightedPickIndex(weights, rng)
   return idx >= 0 ? items[idx] : null
+}
+
+/**
+ * New-collection-first pick: while a focus tag is active, choose uniformly
+ * among the items carrying it; when none do (or focus is off), fall back to
+ * the recency-weighted pick over everything.
+ */
+export function pickWithFocus<T extends Pick<ProductLike, "created_at" | "tags">>(
+  items: T[],
+  focusTag: string | null,
+  config: WeightingConfig,
+  now: number,
+  rng: () => number = Math.random,
+): T | null {
+  if (focusTag) {
+    const focus = items.filter((p) => hasTag(p, focusTag))
+    if (focus.length > 0) return focus[Math.min(focus.length - 1, Math.floor(rng() * focus.length))]
+  }
+  return pickWeightedProduct(items, config, now, rng)
 }
