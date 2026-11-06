@@ -189,20 +189,51 @@ export async function dispatchSlot(
     : dispatchShadow(deps, slot, req)
 }
 
+/**
+ * Internal skip reason: a failed job is re-sent with its stored inputs (same
+ * job_id, count + 1) instead of being re-picked. Never reported as a reason.
+ */
+const RESEND = "resend stored job"
+
+const isRecord = (v: unknown): v is Record<string, string> =>
+  !!v && typeof v === "object" && !Array.isArray(v)
+
+/** The slot's last cloud job as a render request, if its stored shape allows. */
+function storedRequest(slot: StorySlotRow): RenderRequest | null {
+  const job = readRenderJob(slot.metadata)
+  if (
+    !job ||
+    typeof job.template_slug !== "string" ||
+    !isRecord(job.slot_inputs) ||
+    !isRecord(job.text_overrides)
+  ) {
+    return null
+  }
+  return {
+    template_slug: job.template_slug,
+    slot_inputs: job.slot_inputs,
+    text_overrides: job.text_overrides,
+    plan_id: slot.plan_id,
+    slot_index: slot.slot_index,
+  }
+}
+
 function prodSkip(
   slot: StorySlotRow,
   now: Date,
   opts: { manual: boolean; sweep: boolean },
 ): { reason: string; template_slug?: string } | null {
   const job = readRenderJob(slot.metadata)
-  if (job?.state === "sent") {
-    return typeof job.template_slug === "string"
-      ? { reason: "in flight", template_slug: job.template_slug }
-      : { reason: "in flight" }
-  }
-  if (job?.state === "failed") {
+  // Slots that keep (or will reuse) their template report it, so the daily
+  // template cap keeps counting it for the other slots.
+  const holding = (reason: string) =>
+    typeof job?.template_slug === "string"
+      ? { reason, template_slug: job.template_slug }
+      : { reason }
+
+  if (job?.state === "sent") return holding("in flight")
+  if (job?.state === "failed" && !opts.manual) {
     if (
-      !opts.manual &&
       typeof job.dispatch_count === "number" &&
       job.dispatch_count >= MAX_SENDS_PER_SLOT
     ) {
@@ -210,7 +241,7 @@ function prodSkip(
     }
     const failedAt = Date.parse(job.resolved_at ?? "")
     if (opts.sweep && now.getTime() - failedAt < RETRY_GAP_MS) {
-      return { reason: "retry later" }
+      return holding("retry later")
     }
   }
   if (
@@ -218,6 +249,11 @@ function prodSkip(
     new Date(slot.scheduled_at).getTime() < now.getTime() - PUBLISH_WINDOW_MS
   ) {
     return { reason: "too late to post" }
+  }
+  // A retry re-sends the same job, so the per-slot send cap holds. A manual
+  // call re-picks instead and starts the count again.
+  if (job?.state === "failed" && !opts.manual && storedRequest(slot)) {
+    return holding(RESEND)
   }
   return null
 }
@@ -248,27 +284,51 @@ export async function dispatchPlan(
 
   const results: DispatchSlotResult[] = []
   for (const p of planned) {
-    const base = { slot_id: p.slot.id, slot_index: p.slot.slot_index }
+    const slot = p.slot
+    const base = { slot_id: slot.id, slot_index: slot.slot_index }
+    let req: RenderRequest
+    let sendManual = manual
     if ("skip" in p) {
+      const stored = p.skip === RESEND ? storedRequest(slot) : null
+      if (!stored) {
+        results.push({
+          ...base,
+          status: "skipped",
+          reason: p.skip,
+          ...(p.template_slug !== undefined ? { template_slug: p.template_slug } : {}),
+        })
+        continue
+      }
+      req = stored
+      sendManual = false
+    } else {
+      req = { ...p.picked, plan_id: slot.plan_id, slot_index: slot.slot_index }
+    }
+
+    // One slot's failure must not stop the rest of the plan.
+    try {
+      const status = await dispatchSlot(deps, slot, req, {
+        kind: opts.kind,
+        manual: sendManual,
+      })
+      results.push({ ...base, status, template_slug: req.template_slug })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      console.error(
+        JSON.stringify({
+          msg: "[stories-render:dispatch]",
+          event: "slot_error",
+          slot_id: slot.id,
+          message,
+        }),
+      )
       results.push({
         ...base,
-        status: "skipped",
-        reason: p.skip,
-        ...(p.template_slug !== undefined ? { template_slug: p.template_slug } : {}),
+        status: "unavailable",
+        reason: `error: ${message}`,
+        template_slug: req.template_slug,
       })
-      continue
     }
-    const status = await dispatchSlot(
-      deps,
-      p.slot,
-      {
-        ...p.picked,
-        plan_id: p.slot.plan_id,
-        slot_index: p.slot.slot_index,
-      },
-      { kind: opts.kind, manual },
-    )
-    results.push({ ...base, status, template_slug: p.picked.template_slug })
   }
   return results
 }

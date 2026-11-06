@@ -5,6 +5,7 @@ jest.mock("../picker")
 import { planBatchSlots, type StorySlotRow } from "../batch"
 import type { CloudDeps } from "../cloud/dispatch"
 import { dispatchPlan } from "../cloud/dispatch"
+import { buildCloudJob } from "../cloud/job"
 import { pickTemplate } from "../picker"
 
 const NOW = new Date("2026-11-06T14:00:00.000Z")
@@ -35,18 +36,36 @@ function makeSlot(id: string, slot_index: number, metadata: Slot["metadata"] = n
   }
 }
 
-const inFlight = (id: string, slot_index: number) =>
-  makeSlot(id, slot_index, {
+const CALLBACK_URL = "https://shop.example/hooks/story-render"
+const STORED_REQ = {
+  template_slug: HERO,
+  slot_inputs: { hero: "https://r2/old.jpg" },
+  text_overrides: {},
+}
+
+function withJob(id: string, slot_index: number, over: Record<string, unknown>): Slot {
+  const slot = makeSlot(id, slot_index)
+  const job = buildCloudJob(slot, STORED_REQ, "prod", CALLBACK_URL)
+  slot.metadata = {
     render_job: {
-      job_id: `${id}_0123456789abcdef`,
-      output_key: `stories/${id}/0123456789abcdef.mp4`,
-      template_slug: HERO,
-      slot_inputs: {},
-      text_overrides: {},
+      job_id: job.job_id,
+      output_key: job.output_key,
+      ...STORED_REQ,
       state: "sent",
       dispatch_count: 1,
       sent_at: NOW.toISOString(),
+      ...over,
     },
+  }
+  return slot
+}
+
+const inFlight = (id: string, slot_index: number) => withJob(id, slot_index, {})
+
+const failedAgo = (id: string, slot_index: number, minutes: number) =>
+  withJob(id, slot_index, {
+    state: "failed",
+    resolved_at: new Date(NOW.getTime() - minutes * 60_000).toISOString(),
   })
 
 /** Records the in-stock-hero count the picker saw at the moment of each pick. */
@@ -76,7 +95,7 @@ function deps(slots: Slot[]): CloudDeps {
       baseUrl: "https://render.example",
       apiKey: "k",
       callbackSecret: "s",
-      callbackUrl: "https://shop.example/hooks/story-render",
+      callbackUrl: CALLBACK_URL,
     },
     now: () => NOW,
   }
@@ -103,6 +122,29 @@ describe("template cap", () => {
     await dispatchPlan(deps(slots), PLAN_ID, { kind: "prod" })
 
     expect(seen).toEqual([2])
+  })
+
+  it("a waiting failure keeps its template in the cap", async () => {
+    const seen = captureHeroCounts()
+    // Slot 0 failed 5 min ago (waits), slot 1 failed 20 min ago (re-sent as stored).
+    const waiting = failedAgo("stslot_W0", 0, 5)
+    const retried = failedAgo("stslot_R1", 1, 20)
+    const d = deps([waiting, retried, makeSlot("stslot_N2", 2)])
+
+    const results = await dispatchPlan(d, PLAN_ID, { kind: "prod", sweep: true })
+
+    expect(results.map((r) => [r.status, r.reason, r.template_slug])).toEqual([
+      ["skipped", "retry later", HERO],
+      ["sent", undefined, HERO],
+      ["sent", undefined, HERO],
+    ])
+    // Failed slots are not re-picked; both still count when slot 2 is picked.
+    expect(pickMock).toHaveBeenCalledTimes(1)
+    expect(seen).toEqual([2])
+    const submit = d.client.submit as jest.Mock
+    expect(submit.mock.calls[0][0].job_id).toBe(
+      buildCloudJob(retried, STORED_REQ, "prod", CALLBACK_URL).job_id,
+    )
   })
 
   it("planBatchSlots counts kept renders and skip templates together", () => {

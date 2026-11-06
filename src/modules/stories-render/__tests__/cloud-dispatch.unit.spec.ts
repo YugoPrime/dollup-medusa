@@ -16,6 +16,7 @@ import {
   type CloudJobRequest,
   type CloudSlot,
 } from "../cloud/job"
+import { pickTemplate } from "../picker"
 import type { RenderRequest } from "../types"
 
 const NOW = new Date("2026-11-06T14:00:00.000Z")
@@ -87,6 +88,32 @@ function renderJob(slot: Slot, over: Record<string, unknown> = {}) {
     ...over,
   }
 }
+
+// Inputs the real picker never produces for snapshot(): it has no back photo,
+// so a cardflip pick is impossible. A retry that re-picked would change the job.
+const STORED: RenderRequest = {
+  template_slug: "cardflip-front-back",
+  slot_inputs: { front: "https://r2/old.jpg", back: "https://r2/old-b.jpg" },
+  text_overrides: { headline: "Old headline" },
+}
+
+function storedJob(slot: Slot, over: Record<string, unknown> = {}) {
+  const job = buildCloudJob(slot, STORED, "prod", CFG.callbackUrl)
+  return {
+    job_id: job.job_id,
+    output_key: job.output_key,
+    template_slug: STORED.template_slug,
+    slot_inputs: STORED.slot_inputs,
+    text_overrides: STORED.text_overrides,
+    state: "failed",
+    dispatch_count: 1,
+    sent_at: new Date(NOW.getTime() - 30 * MIN).toISOString(),
+    resolved_at: new Date(NOW.getTime() - 11 * MIN).toISOString(),
+    ...over,
+  }
+}
+
+const jobOf = (s: Slot) => s.metadata!.render_job as Patch
 
 function doneRemote(job: CloudJobRequest): RemoteJob {
   return {
@@ -258,12 +285,16 @@ describe("dispatchSlot (prod)", () => {
   })
 
   it("an unreachable service leaves the slot retryable", async () => {
+    // One earlier send of the same job: this send is the 2nd. A 2 written back
+    // tells "count unchanged" apart from both "reset to 1" and "maxed to 3".
     const s = makeSlot("stslot_A1", 0)
+    s.metadata = { render_job: renderJob(s, { dispatch_count: 1 }) }
     const t = setup([s], { kind: "unavailable", reason: "TimeoutError" })
 
     const out = await dispatchSlot(t.deps, s, REQ, { kind: "prod", manual: false })
 
     expect(out).toBe("unavailable")
+    expect((t.calls[0].args[1] as Patch).render_job.dispatch_count).toBe(2)
     const failed = t.calls.find((c) => c.fn === "updateSlotMetadataIfJob")!
     expect(failed.args[3]).toEqual({ is: "sent" })
     const patch = failed.args[2] as Patch
@@ -272,8 +303,9 @@ describe("dispatchSlot (prod)", () => {
       name: "CloudDispatchError",
       stage: "dispatch",
     })
-    expect(patch.render_job).toMatchObject({ state: "failed", dispatch_count: 1 })
-    expect((s.metadata!.render_job as Patch).dispatch_count).toBeLessThan(MAX_SENDS_PER_SLOT)
+    expect(patch.render_job).toMatchObject({ state: "failed", dispatch_count: 2 })
+    expect((s.metadata!.render_job as Patch).dispatch_count).toBe(2)
+    expect(MAX_SENDS_PER_SLOT).toBeGreaterThan(2)
   })
 
   it("a failure write never overwrites a callback that landed first", async () => {
@@ -439,6 +471,78 @@ describe("dispatchPlan", () => {
     const t2 = setup([older], QUEUED)
     const r2 = await dispatchPlan(t2.deps, PLAN_ID, { kind: "prod", sweep: true })
     expect(r2.map((r) => r.status)).toEqual(["sent"])
+  })
+
+  it("a sweep retry re-sends the stored job and counts up", async () => {
+    const s = makeSlot("stslot_W1", 0)
+    s.metadata = { render_job: storedJob(s) }
+    const stored = buildCloudJob(s, STORED, "prod", CFG.callbackUrl)
+    expect(pickTemplate(snapshot(), 0, new Map())?.template_slug).not.toBe(STORED.template_slug)
+    const t = setup([s], { kind: "unavailable", reason: "http 503" })
+
+    const r1 = await dispatchPlan(t.deps, PLAN_ID, { kind: "prod", sweep: true })
+    expect(r1).toEqual([
+      {
+        slot_id: s.id,
+        slot_index: 0,
+        status: "unavailable",
+        template_slug: STORED.template_slug,
+      },
+    ])
+    expect(t.submitted[0]).toEqual(stored)
+    expect(jobOf(s)).toMatchObject({ job_id: stored.job_id, state: "failed", dispatch_count: 2 })
+
+    t.deps.now = () => new Date(NOW.getTime() + 11 * MIN)
+    await dispatchPlan(t.deps, PLAN_ID, { kind: "prod", sweep: true })
+    expect(t.submitted[1].job_id).toBe(stored.job_id)
+    expect(jobOf(s)).toMatchObject({ job_id: stored.job_id, state: "failed", dispatch_count: 3 })
+
+    t.deps.now = () => new Date(NOW.getTime() + 22 * MIN)
+    const r3 = await dispatchPlan(t.deps, PLAN_ID, { kind: "prod", sweep: true })
+    expect(r3.map((r) => [r.status, r.reason])).toEqual([["skipped", "gave up"]])
+    expect(t.client.submit).toHaveBeenCalledTimes(2)
+  })
+
+  it("a manual call re-picks a failed slot and resets the count", async () => {
+    const s = makeSlot("stslot_M1", 0)
+    s.metadata = { render_job: storedJob(s, { dispatch_count: 2 }) }
+    const stored = buildCloudJob(s, STORED, "prod", CFG.callbackUrl)
+    const t = setup([s], QUEUED)
+
+    const r = await dispatchPlan(t.deps, PLAN_ID, { kind: "prod", manual: true })
+
+    expect(r.map((x) => x.status)).toEqual(["sent"])
+    expect(r[0].template_slug).not.toBe(STORED.template_slug)
+    expect(t.submitted[0].job_id).not.toBe(stored.job_id)
+    expect(jobOf(s)).toMatchObject({ job_id: t.submitted[0].job_id, dispatch_count: 1 })
+  })
+
+  it("one slot's error does not stop the plan", async () => {
+    const a = makeSlot("stslot_X0", 0)
+    const b = makeSlot("stslot_X1", 1)
+    const t = setup([a, b], QUEUED)
+    t.stories.updateSlotMetadata.mockImplementationOnce(async () => {
+      throw new Error("Slot stslot_X0 not found")
+    })
+    const errSpy = jest.spyOn(console, "error").mockImplementation(() => undefined)
+    try {
+      const r = await dispatchPlan(t.deps, PLAN_ID, { kind: "prod" })
+
+      expect(r.map((x) => [x.slot_index, x.status, x.reason])).toEqual([
+        [0, "unavailable", "error: Slot stslot_X0 not found"],
+        [1, "sent", undefined],
+      ])
+      expect(t.submitted.map((j) => j.job_id.startsWith("stslot_X1_"))).toEqual([true])
+      expect(errSpy).toHaveBeenCalledTimes(1)
+      expect(JSON.parse(errSpy.mock.calls[0][0] as string)).toEqual({
+        msg: "[stories-render:dispatch]",
+        event: "slot_error",
+        slot_id: "stslot_X0",
+        message: "Slot stslot_X0 not found",
+      })
+    } finally {
+      errSpy.mockRestore()
+    }
   })
 
   it("the sweep never renders a slot too late to post", async () => {
