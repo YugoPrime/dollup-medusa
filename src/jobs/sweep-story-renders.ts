@@ -24,9 +24,7 @@ export default async function sweepStoryRenders(
     const deps = createCloudDeps(container)
     const summary = await sweepCloudRenders({
       ...deps,
-      telegram: async (html) => {
-        await sendTelegram(html)
-      },
+      telegram: (html) => sendTelegram(html),
       upcomingPlans: () => listUpcomingPlans(deps.stories, LOOKAHEAD_DAYS),
       adminUrl: ADMIN_URL,
     })

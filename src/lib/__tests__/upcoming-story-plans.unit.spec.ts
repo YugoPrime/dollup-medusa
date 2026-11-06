@@ -16,6 +16,10 @@ describe("upcoming story plans", () => {
     ]
     const stories = { listStoryPlans: jest.fn(async () => plans) }
     const got = await listUpcomingPlans(stories as any, 7, "2026-11-06")
+    expect(stories.listStoryPlans).toHaveBeenCalledWith(
+      {},
+      { take: 200, order: { plan_date: "DESC" } },
+    )
     expect(got).toEqual([
       { id: "p_today", plan_date: "2026-11-06" },
       { id: "p_mid", plan_date: "2026-11-09" },

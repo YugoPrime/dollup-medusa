@@ -1,4 +1,5 @@
 import type { RemoteJob } from "../cloud/client"
+import type { TelegramSendResult } from "../../../lib/telegram"
 import { sweepCloudRenders, type SweepDeps } from "../cloud/sweep"
 import { buildCloudJob, MAX_SENDS_PER_SLOT, type CloudSlot } from "../cloud/job"
 import type { RenderRequest } from "../types"
@@ -121,13 +122,17 @@ function setup(
     ),
   }
   const client = {
-    submit: jest.fn(),
+    submit: jest.fn(
+      async (_job: unknown) => ({ kind: "accepted", status: "queued" }) as const,
+    ),
     get: jest.fn(async (jobId: string) => {
       const s = slots.find((x) => jobOf(x)?.job_id === jobId)
       return s ? getResult(s) : "not_found"
     }),
   }
-  const telegram = jest.fn(async (_html: string) => {})
+  const telegram = jest.fn(
+    async (_html: string): Promise<TelegramSendResult> => ({ ok: true }),
+  )
   const deps: SweepDeps = {
     stories: stories as unknown as SweepDeps["stories"],
     client: client as unknown as SweepDeps["client"],
@@ -158,6 +163,7 @@ describe("sweepCloudRenders reconcile", () => {
     const { deps, client } = setup([slot], (s) => remote(s))
     await sweepCloudRenders(deps)
     expect(client.get).not.toHaveBeenCalled()
+    expect(client.submit).not.toHaveBeenCalled()
     expect(jobOf(slot).state).toBe("sent")
   })
 
@@ -213,8 +219,9 @@ describe("sweepCloudRenders reconcile", () => {
     const slot = withJob(makeSlot(1), {
       sent_at: new Date(NOW.getTime() - 90 * MIN).toISOString(),
     })
-    const { deps, stories } = setup([slot], () => "unavailable")
+    const { deps, stories, client } = setup([slot], () => "unavailable")
     const out = await sweepCloudRenders(deps)
+    expect(client.submit).not.toHaveBeenCalled()
     expect(jobOf(slot).state).toBe("sent")
     expect(stories.updateSlotMetadataIfJob).not.toHaveBeenCalled()
     expect(out.reconciled).toBe(0)
@@ -229,6 +236,94 @@ describe("sweepCloudRenders reconcile", () => {
     })
     await sweepCloudRenders(deps)
     expect(jobOf(b).state).toBe("done")
+  })
+
+  describe("past the stuck limit", () => {
+    const OLD = () => ({
+      sent_at: new Date(NOW.getTime() - 61 * MIN).toISOString(),
+    })
+    const TOO_LATE = () => ({
+      scheduled_at: new Date(NOW.getTime() - 130 * MIN),
+    })
+    const expectStuck = (slot: Slot, message: string) => {
+      expect(jobOf(slot)).toMatchObject({
+        state: "failed",
+        dispatch_count: MAX_SENDS_PER_SLOT,
+      })
+      expect(slot.metadata!.render_error).toMatchObject({
+        name: "CloudSweepError",
+        stage: "stuck",
+        message,
+      })
+    }
+
+    it("done without an mp4_url gives up", async () => {
+      const slot = withJob(makeSlot(1), OLD())
+      const { deps } = setup([slot], (s) => remote(s, { mp4_url: null }))
+      await sweepCloudRenders(deps)
+      expectStuck(slot, "service reported done without an mp4_url")
+    })
+
+    it("an ignored callback gives up", async () => {
+      const slot = withJob(makeSlot(1), OLD())
+      const { deps } = setup([slot], (s) =>
+        remote(s, { mp4_url: "https://cdn.example.com/elsewhere.mp4" }),
+      )
+      await sweepCloudRenders(deps)
+      expectStuck(
+        slot,
+        "callback result ignored: mp4_url does not match output_key",
+      )
+    })
+
+    it("an unknown status gives up", async () => {
+      const slot = withJob(makeSlot(1), OLD())
+      const { deps } = setup([slot], (s) =>
+        remote(s, { status: "weird" as RemoteJob["status"], mp4_url: null }),
+      )
+      await sweepCloudRenders(deps)
+      expectStuck(slot, "unknown job status weird")
+    })
+
+    it("an unreachable service gives up once the slot is too late to post", async () => {
+      const slot = withJob(makeSlot(1, TOO_LATE()), OLD())
+      const { deps } = setup([slot], () => "unavailable")
+      await sweepCloudRenders(deps)
+      expectStuck(slot, "render service unreachable")
+    })
+
+    it("an unreachable service is left alone while the slot can still post", async () => {
+      const slot = withJob(makeSlot(1), OLD())
+      const { deps } = setup([slot], () => "unavailable")
+      await sweepCloudRenders(deps)
+      expect(jobOf(slot).state).toBe("sent")
+    })
+
+    it("odd answers before the stuck limit are left alone", async () => {
+      const slot = withJob(makeSlot(1))
+      const { deps } = setup([slot], (s) => remote(s, { mp4_url: null }))
+      await sweepCloudRenders(deps)
+      expect(jobOf(slot).state).toBe("sent")
+    })
+  })
+})
+
+describe("sweepCloudRenders dispatch", () => {
+  it("the sweep re-sends a failed slot after the retry gap", async () => {
+    const slot = withJob(makeSlot(1), {
+      state: "failed",
+      dispatch_count: 1,
+      resolved_at: new Date(NOW.getTime() - 11 * MIN).toISOString(),
+    })
+    const storedId = jobOf(slot).job_id
+    const { deps, client } = setup([slot])
+    const out = await sweepCloudRenders(deps)
+    expect(client.submit).toHaveBeenCalledTimes(1)
+    expect((client.submit.mock.calls[0][0] as { job_id: string }).job_id).toBe(
+      storedId,
+    )
+    expect(out.dispatched).toBe(1)
+    expect(jobOf(slot)).toMatchObject({ state: "sent", dispatch_count: 2 })
   })
 })
 
@@ -302,6 +397,62 @@ describe("sweepCloudRenders summary", () => {
     expect(msg).toContain("…and 2 more")
     expect(msg).toContain("&lt;b&gt;")
     expect(msg).not.toContain("x".repeat(121))
+  })
+
+  it("a failed slot too late to post no longer blocks the summary", async () => {
+    const late = withJob(
+      makeSlot(3, { scheduled_at: new Date(NOW.getTime() - 130 * MIN) }),
+      {
+        state: "failed",
+        dispatch_count: 1,
+        resolved_at: new Date(NOW.getTime() - 2 * MIN).toISOString(),
+      },
+      { render_error: { message: "gone", name: "X", stage: "render" } },
+    )
+    const { deps, telegram, client } = setup([...sixDone(), late])
+    await sweepCloudRenders(deps)
+    expect(client.submit).not.toHaveBeenCalled()
+    expect(telegram).toHaveBeenCalledTimes(1)
+    expect(telegram.mock.calls[0][0]).toContain("Failed: 1")
+  })
+
+  it("summary send failure releases the claim and the next sweep sends it", async () => {
+    const slots = sixDone()
+    const { deps, telegram } = setup(slots)
+    const errors = jest.spyOn(console, "error").mockImplementation(() => {})
+    telegram.mockResolvedValueOnce({
+      ok: false,
+      status: 429,
+      message: "secret body",
+    })
+    const first = await sweepCloudRenders(deps)
+    expect(first.summaries).toBe(0)
+    expect(slots.every((s) => s.metadata!.render_notified_job === null)).toBe(
+      true,
+    )
+    const logged = errors.mock.calls.map((c) => String(c[0])).join("\n")
+    errors.mockRestore()
+    expect(JSON.parse(logged)).toEqual({
+      msg: "[stories-render:sweep]",
+      event: "summary_failed",
+      plan_id: PLAN_ID,
+      status: 429,
+    })
+    const second = await sweepCloudRenders(deps)
+    expect(second.summaries).toBe(1)
+    expect(telegram).toHaveBeenCalledTimes(2)
+    const third = await sweepCloudRenders(deps)
+    expect(third.summaries).toBe(0)
+    expect(telegram).toHaveBeenCalledTimes(2)
+  })
+
+  it("a dormant telegram keeps the claims and does not count a summary", async () => {
+    const slots = sixDone()
+    const { deps, telegram } = setup(slots)
+    telegram.mockResolvedValue({ ok: false, skipped: true })
+    const out = await sweepCloudRenders(deps)
+    expect(out.summaries).toBe(0)
+    expect(slots[0].metadata!.render_notified_job).toBe(jobOf(slots[0]).job_id)
   })
 
   it("does not announce if another sweep already claimed the slot", async () => {

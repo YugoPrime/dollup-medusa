@@ -31,6 +31,16 @@ export const STUCK_SENT_MS = 3_600_000
 // publish skips slots more than 2 h late
 export const PUBLISH_WINDOW_MS = 7_200_000
 
+/** True once publish would skip the slot (more than PUBLISH_WINDOW_MS late). */
+export function isTooLateToPost(
+  slot: Pick<CloudSlot, "scheduled_at">,
+  now: Date
+): boolean {
+  return (
+    new Date(slot.scheduled_at).getTime() < now.getTime() - PUBLISH_WINDOW_MS
+  )
+}
+
 export function buildCloudJob(
   slot: Pick<CloudSlot, "id" | "plan_id" | "slot_index">,
   req: RenderRequest,

@@ -22,9 +22,12 @@ export async function listUpcomingPlans(
   lookaheadDays: number,
   today: string = mauritiusToday(),
 ): Promise<Array<{ id: string; plan_date: string }>> {
-  // listStoryPlans has no "between dates" filter exposed, so list a generous
-  // window and filter in-process. Volumes are small (<= 30 plans).
-  const allPlans = await stories.listStoryPlans({} as any, { take: 200 })
+  // listStoryPlans has no "between dates" filter exposed, so list the newest
+  // plans and filter in-process. Volumes are small (<= 30 plans).
+  const allPlans = await stories.listStoryPlans({} as any, {
+    take: 200,
+    order: { plan_date: "DESC" },
+  })
   const planDates = new Set<string>()
   for (let i = 0; i <= lookaheadDays; i++) {
     planDates.add(addDaysToMauritiusDate(today, i))

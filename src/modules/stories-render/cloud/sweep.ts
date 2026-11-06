@@ -1,8 +1,12 @@
-import { escapeTelegramHtml } from "../../../lib/telegram"
+import {
+  escapeTelegramHtml,
+  type TelegramSendResult,
+} from "../../../lib/telegram"
 import { applyCallback, remoteJobToCallback } from "./callback"
 import { dispatchPlan, type CloudDeps } from "./dispatch"
 import {
   failedJobPatch,
+  isTooLateToPost,
   MAX_SENDS_PER_SLOT,
   readRenderJob,
   STALE_SENT_MS,
@@ -14,7 +18,8 @@ import {
 export type SweepPlan = { id: string; plan_date: string }
 
 export type SweepDeps = CloudDeps & {
-  telegram: (html: string) => Promise<void>
+  /** Resolves to sendTelegram's result: only `ok: false` without `skipped` is a failed delivery. */
+  telegram: (html: string) => Promise<TelegramSendResult>
   upcomingPlans: () => Promise<SweepPlan[]>
   adminUrl: string
 }
@@ -67,8 +72,22 @@ async function reconcileSlot(deps: SweepDeps, slot: CloudSlot): Promise<boolean>
   const age = deps.now().getTime() - Date.parse(job.sent_at)
   if (!(age > STALE_SENT_MS)) return false
 
+  const pastStuck = age > STUCK_SENT_MS
+  // Past the stuck limit, any outcome that leaves the job unsettled gives up.
+  const giveUp = (message: string) =>
+    failSent(deps, slot, job, {
+      message,
+      stage: "stuck",
+      dispatchCount: MAX_SENDS_PER_SLOT,
+    })
+
   const remote = await deps.client.get(job.job_id)
-  if (remote === "unavailable") return false
+  if (remote === "unavailable") {
+    // Never wait forever on a slot that can no longer be posted anyway.
+    return pastStuck && isTooLateToPost(slot, deps.now())
+      ? giveUp("render service unreachable")
+      : false
+  }
   if (remote === "not_found") {
     return failSent(deps, slot, job, {
       message: "render service has no record of this job",
@@ -78,21 +97,21 @@ async function reconcileSlot(deps: SweepDeps, slot: CloudSlot): Promise<boolean>
   }
   if (remote.status === "done" || remote.status === "failed") {
     const body = remoteJobToCallback(remote, `dollup/${job.template_slug}`)
-    if (!body) return false
+    if (!body) {
+      return pastStuck ? giveUp("service reported done without an mp4_url") : false
+    }
     const res = await applyCallback(deps.stories, body, deps.now())
-    return res.action === "written"
+    if (res.action === "written") return true
+    return pastStuck
+      ? giveUp(`callback result ignored: ${res.reason ?? "unknown"}`)
+      : false
   }
-  if (
-    (remote.status === "queued" || remote.status === "rendering") &&
-    age > STUCK_SENT_MS
-  ) {
-    return failSent(deps, slot, job, {
-      message: `job still ${remote.status} after 60 min (OPERATIONS.md: dead-letter queue)`,
-      stage: "stuck",
-      dispatchCount: MAX_SENDS_PER_SLOT,
-    })
-  }
-  return false
+  if (!pastStuck) return false
+  return giveUp(
+    remote.status === "queued" || remote.status === "rendering"
+      ? `job still ${remote.status} after 60 min (OPERATIONS.md: dead-letter queue)`
+      : `unknown job status ${String((remote as { status: unknown }).status)}`,
+  )
 }
 
 async function reconcilePlan(deps: SweepDeps, plan: SweepPlan): Promise<number> {
@@ -112,9 +131,12 @@ async function reconcilePlan(deps: SweepDeps, plan: SweepPlan): Promise<number> 
 
 type Settled = { slot: CloudSlot; job: RenderJobState }
 
-const unsettled = (job: RenderJobState): boolean =>
-  job.state === "sent" ||
-  (job.state === "failed" && !(job.dispatch_count >= MAX_SENDS_PER_SLOT))
+// A failed slot below the cap still retries, unless it is too late to post.
+const unsettled = (s: Settled, now: Date): boolean =>
+  s.job.state === "sent" ||
+  (s.job.state === "failed" &&
+    !(s.job.dispatch_count >= MAX_SENDS_PER_SLOT) &&
+    !isTooLateToPost(s.slot, now))
 
 const notified = (slot: CloudSlot): unknown =>
   (slot.metadata as Record<string, unknown> | null)?.render_notified_job
@@ -165,7 +187,7 @@ async function summarizePlan(deps: SweepDeps, plan: SweepPlan): Promise<boolean>
     const job = readRenderJob(slot.metadata)
     if (job) jobs.push({ slot, job })
   }
-  if (jobs.some((j) => unsettled(j.job))) return false
+  if (jobs.some((j) => unsettled(j, deps.now()))) return false
 
   const claimed: Settled[] = []
   for (const s of jobs) {
@@ -179,8 +201,18 @@ async function summarizePlan(deps: SweepDeps, plan: SweepPlan): Promise<boolean>
   }
   if (claimed.length === 0) return false
 
-  await deps.telegram(summaryMessage(deps, plan, claimed))
-  return true
+  const sent = await deps.telegram(summaryMessage(deps, plan, claimed))
+  if (sent.ok) return true
+  // Dormant Telegram (no token): nothing to retry. A real failure releases the
+  // claims so the next tick sends the summary again.
+  if ("skipped" in sent) return false
+  for (const s of claimed) {
+    await deps.stories.updateSlotMetadataIfJob(s.slot.id, s.job.job_id, {
+      render_notified_job: null,
+    })
+  }
+  logError("summary_failed", { plan_id: plan.id, status: sent.status })
+  return false
 }
 
 export async function sweepCloudRenders(deps: SweepDeps): Promise<SweepSummary> {

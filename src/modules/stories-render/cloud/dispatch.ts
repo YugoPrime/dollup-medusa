@@ -11,7 +11,7 @@ import {
   buildCloudJob,
   failedJobPatch,
   MAX_SENDS_PER_SLOT,
-  PUBLISH_WINDOW_MS,
+  isTooLateToPost,
   readRenderJob,
   RETRY_GAP_MS,
   type CloudJobRequest,
@@ -236,10 +236,7 @@ function prodSkip(
       return holding("retry later")
     }
   }
-  if (
-    opts.sweep &&
-    new Date(slot.scheduled_at).getTime() < now.getTime() - PUBLISH_WINDOW_MS
-  ) {
+  if (opts.sweep && isTooLateToPost(slot, now)) {
     return { reason: "too late to post" }
   }
   // A retry re-sends the same job, so the per-slot send cap holds. A manual
