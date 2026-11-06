@@ -272,6 +272,13 @@ export type CallbackResponse = {
   body: Record<string, unknown>
 }
 
+/** One line per refused callback. Never the header, signature, secret or body. */
+function logRejected(reason: "bad signature" | "bad body"): void {
+  console.warn(
+    JSON.stringify({ msg: "[stories-render:callback]", action: "rejected", reason })
+  )
+}
+
 export async function handleRenderCallback(
   deps: {
     apply: (b: CallbackBody) => Promise<{ action: string; reason?: string }>
@@ -282,6 +289,7 @@ export async function handleRenderCallback(
   signature: string | undefined
 ): Promise<CallbackResponse> {
   if (!verifyRenderSignature(rawBody, signature, deps.secret, deps.nowSec)) {
+    logRejected("bad signature")
     return { status: 401, body: { error: "bad signature" } }
   }
 
@@ -289,10 +297,14 @@ export async function handleRenderCallback(
   try {
     json = JSON.parse(rawBody.toString("utf8"))
   } catch {
+    logRejected("bad body")
     return { status: 400, body: { error: "invalid json" } }
   }
   const body = parseCallbackBody(json)
-  if (!body) return { status: 400, body: { error: "invalid body" } }
+  if (!body) {
+    logRejected("bad body")
+    return { status: 400, body: { error: "invalid body" } }
+  }
 
   try {
     const result = await deps.apply(body)

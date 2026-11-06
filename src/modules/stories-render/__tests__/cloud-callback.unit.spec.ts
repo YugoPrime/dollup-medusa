@@ -416,31 +416,71 @@ describe("handleRenderCallback", () => {
     `t=${NOW_SEC},v1=${createHmac("sha256", SECRET).update(`${NOW_SEC}.`).update(body).digest("hex")}`
   const mk = (apply: jest.Mock) => ({ apply, secret: SECRET, nowSec: NOW_SEC })
   let logSpy: jest.SpyInstance
+  let warnSpy: jest.SpyInstance
 
   beforeEach(() => {
     logSpy = jest.spyOn(console, "log").mockImplementation(() => {})
+    warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {})
     jest.spyOn(console, "error").mockImplementation(() => {})
   })
   afterEach(() => jest.restoreAllMocks())
 
-  it("401 on a bad signature, without applying", async () => {
+  /** The single rejection line, parsed, plus its raw text for leak checks. */
+  function rejectionLine(): { parsed: unknown; raw: string } {
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    expect(warnSpy.mock.calls[0]).toHaveLength(1)
+    const raw = warnSpy.mock.calls[0][0] as string
+    expect(logSpy).not.toHaveBeenCalled()
+    return { parsed: JSON.parse(raw), raw }
+  }
+
+  it("401 on a bad signature, without applying, logging one line without the header", async () => {
     const apply = jest.fn()
     const body = Buffer.from(JSON.stringify(ok()))
-    const r = await handleRenderCallback(mk(apply), body, "t=1,v1=00")
+    // A well-formed header signed with the wrong secret.
+    const header = `t=${NOW_SEC},v1=${createHmac("sha256", "wrong-secret").update(`${NOW_SEC}.`).update(body).digest("hex")}`
+    const r = await handleRenderCallback(mk(apply), body, header)
     expect(r).toEqual({ status: 401, body: { error: "bad signature" } })
     expect(apply).not.toHaveBeenCalled()
+    const { parsed, raw } = rejectionLine()
+    expect(parsed).toEqual({
+      msg: "[stories-render:callback]",
+      action: "rejected",
+      reason: "bad signature",
+    })
+    expect(raw).not.toContain(header.split("v1=")[1])
+    expect(raw).not.toContain(SECRET)
+    expect(raw).not.toContain(PROD_ID)
   })
 
-  it("400 on non-JSON", async () => {
+  it("400 on non-JSON, logging one line without the body", async () => {
     const body = Buffer.from("not json")
-    const r = await handleRenderCallback(mk(jest.fn()), body, sign(body))
+    const header = sign(body)
+    const r = await handleRenderCallback(mk(jest.fn()), body, header)
     expect(r.status).toBe(400)
+    const { parsed, raw } = rejectionLine()
+    expect(parsed).toEqual({
+      msg: "[stories-render:callback]",
+      action: "rejected",
+      reason: "bad body",
+    })
+    expect(raw).not.toContain("not json")
+    expect(raw).not.toContain(header.split("v1=")[1])
   })
 
-  it("400 on a body without job_id", async () => {
-    const body = Buffer.from(JSON.stringify({ status: "ok" }))
-    const r = await handleRenderCallback(mk(jest.fn()), body, sign(body))
+  it("400 on a body without job_id, logging one line without the body", async () => {
+    const body = Buffer.from(JSON.stringify({ status: "ok", mp4_url: "https://leak.example/x.mp4" }))
+    const header = sign(body)
+    const r = await handleRenderCallback(mk(jest.fn()), body, header)
     expect(r.status).toBe(400)
+    const { parsed, raw } = rejectionLine()
+    expect(parsed).toEqual({
+      msg: "[stories-render:callback]",
+      action: "rejected",
+      reason: "bad body",
+    })
+    expect(raw).not.toContain("leak.example")
+    expect(raw).not.toContain(header.split("v1=")[1])
   })
 
   it("500 when apply throws, so the service retries", async () => {

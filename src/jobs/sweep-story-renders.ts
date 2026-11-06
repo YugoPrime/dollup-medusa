@@ -28,9 +28,12 @@ export default async function sweepStoryRenders(
       upcomingPlans: () => listUpcomingPlans(deps.stories, LOOKAHEAD_DAYS),
       adminUrl: ADMIN_URL,
     })
-    logger.info(
-      `[story-sweep] reconciled ${summary.reconciled}, dispatched ${summary.dispatched}, summaries ${summary.summaries}`,
-    )
+    // Quiet ticks (most of them) log nothing.
+    if (summary.reconciled + summary.dispatched + summary.summaries > 0) {
+      logger.info(
+        `[story-sweep] reconciled ${summary.reconciled}, dispatched ${summary.dispatched}, summaries ${summary.summaries}`,
+      )
+    }
   } catch (err) {
     logger.error(
       `[story-sweep] failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -40,5 +43,7 @@ export default async function sweepStoryRenders(
 
 export const config = {
   name: "sweep-story-renders",
-  schedule: "*/5 * * * *",
+  // Every 5 minutes from minute 2: never minute 0, when create-tomorrow-plan
+  // runs (14:00 UTC) and dispatches the same plan.
+  schedule: "2-59/5 * * * *",
 }

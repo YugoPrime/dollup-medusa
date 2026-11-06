@@ -13,6 +13,8 @@ import { POST as batchRenderPost } from "../../../api/admin/stories/plans/[id]/b
 import { POST as renderSamplePost } from "../../../api/admin/stories/templates/[slug]/render-sample/route"
 import { POST as shadowRenderPost } from "../../../api/admin/stories/plans/[id]/shadow-render/route"
 import createTomorrowPlan from "../../../jobs/create-tomorrow-plan"
+import sweepStoryRenders, { config as sweepConfig } from "../../../jobs/sweep-story-renders"
+import { sweepCloudRenders } from "../cloud/sweep"
 
 jest.mock("../cloud/mode", () => ({ resolveRenderMode: jest.fn() }))
 jest.mock("../cloud/dispatch", () => ({
@@ -38,6 +40,7 @@ jest.mock("../picker", () => ({
 jest.mock("../../../lib/r2-story-uploader", () => ({
   uploadStoryRenderToR2: jest.fn(),
 }))
+jest.mock("../cloud/sweep", () => ({ sweepCloudRenders: jest.fn() }))
 
 const mode = resolveRenderMode as jest.Mock
 const deps = { fake: "deps" }
@@ -396,5 +399,45 @@ describe("local mode at the routes", () => {
     expect(dispatchSlot).not.toHaveBeenCalled()
     expect(dispatchPlan).not.toHaveBeenCalled()
     delete process.env.STORIES_RENDER_REMOTE_ONLY
+  })
+})
+
+describe("sweep-story-renders job", () => {
+  const logger = { info: jest.fn(), error: jest.fn(), warn: jest.fn() }
+  const container = () => ({ resolve: jest.fn(() => logger) }) as any
+  const sweep = sweepCloudRenders as jest.Mock
+
+  it("runs every 5 minutes off minute 0 (create-tomorrow-plan owns 14:00 UTC)", () => {
+    expect(sweepConfig).toEqual({ name: "sweep-story-renders", schedule: "2-59/5 * * * *" })
+  })
+
+  it("logs nothing when the sweep did nothing", async () => {
+    mode.mockReturnValue("cloud")
+    sweep.mockResolvedValue({ reconciled: 0, dispatched: 0, summaries: 0 })
+    await sweepStoryRenders(container())
+    expect(sweep).toHaveBeenCalledTimes(1)
+    expect(logger.info).not.toHaveBeenCalled()
+    expect(logger.error).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    [{ reconciled: 1, dispatched: 0, summaries: 0 }],
+    [{ reconciled: 0, dispatched: 2, summaries: 0 }],
+    [{ reconciled: 0, dispatched: 0, summaries: 1 }],
+  ])("logs the summary line when something happened (%j)", async (summary) => {
+    mode.mockReturnValue("cloud")
+    sweep.mockResolvedValue(summary)
+    await sweepStoryRenders(container())
+    expect(logger.info).toHaveBeenCalledTimes(1)
+    expect(logger.info).toHaveBeenCalledWith(
+      `[story-sweep] reconciled ${summary.reconciled}, dispatched ${summary.dispatched}, summaries ${summary.summaries}`,
+    )
+  })
+
+  it("is a no-op outside cloud mode", async () => {
+    mode.mockReturnValue("shadow")
+    await sweepStoryRenders(container())
+    expect(sweep).not.toHaveBeenCalled()
+    expect(logger.info).not.toHaveBeenCalled()
   })
 })
