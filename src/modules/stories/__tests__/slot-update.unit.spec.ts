@@ -28,16 +28,9 @@ const SLOT = {
 }
 
 describe("swapSlotUpdate", () => {
-  it("drops the old product's render so its video can never post", () => {
+  it("sets the new product and bumps pick_attempt, without touching metadata", () => {
     const u = swapSlotUpdate(SLOT, PRODUCT)
-    expect(u.metadata).not.toHaveProperty("render")
-    expect(u.metadata).not.toHaveProperty("render_error")
-    expect(u.metadata).not.toHaveProperty("render_started_at")
-  })
-
-  it("keeps other metadata, sets the new product and bumps pick_attempt", () => {
-    const u = swapSlotUpdate(SLOT, PRODUCT)
-    expect(u.metadata).toHaveProperty("publish_error")
+    expect(u).not.toHaveProperty("metadata")
     expect(u.product_id).toBe("p_new")
     expect(u.product_snapshot.handle).toBe("is2451")
     expect(u.pick_attempt).toBe(2)
@@ -45,28 +38,11 @@ describe("swapSlotUpdate", () => {
   })
 })
 
-describe("swapSlotUpdate cloud render state", () => {
-  it("a swap drops render_job and render_shadow", () => {
-    const u = swapSlotUpdate(
-      {
-        ...SLOT,
-        metadata: {
-          render_job: { job_id: "stslot_1_0123456789abcdef" },
-          render_shadow: { mp4_url: "https://cdn/shadow.mp4" },
-          publish_error: { message: "earlier" },
-        },
-      },
-      PRODUCT,
-    )
-    expect(Object.keys(u.metadata)).toEqual(["publish_error"])
-  })
-})
-
 describe("clearSlotProductUpdate", () => {
-  it("empties the slot and drops its render", () => {
+  it("empties the slot without touching metadata", () => {
     const u = clearSlotProductUpdate(SLOT)
     expect(u.product_id).toBeNull()
     expect(u.product_snapshot).toBeNull()
-    expect(u.metadata).not.toHaveProperty("render")
+    expect(u).not.toHaveProperty("metadata")
   })
 })

@@ -10,7 +10,7 @@ import { buildSnapshot, type ProductLike } from "./snapshot"
 import { DEFAULT_WEIGHTING, type WeightingConfig } from "./picker-weighting"
 import { activeFocusTag } from "./focus"
 import { chooseSlotProduct } from "./slot-choice"
-import { mergeSlotMetadataSql } from "./slot-metadata-sql"
+import { dropRenderKeysSql, mergeSlotMetadataSql } from "./slot-metadata-sql"
 import { clearSlotProductUpdate, swapSlotUpdate } from "./slot-update"
 
 export const STORY_SETTINGS_ID = "story_settings"
@@ -210,6 +210,17 @@ class StoriesModuleService extends MedusaService({
     await this.updateStorySlots({ id: slotId, scheduled_at: scheduledAt })
   }
 
+  /** Removes all render_* metadata (atomic). Runs before a swap/clear so a stale render callback fails its job guard. */
+  @InjectManager()
+  protected async dropRenderKeys(
+    slotId: string,
+    @MedusaContext() sharedContext?: Context<EntityManager>,
+  ): Promise<void> {
+    const { sql, params } = dropRenderKeysSql(slotId)
+    const rows = await sharedContext!.manager!.execute(sql, params)
+    if (!rows.length) throw new Error(`Slot ${slotId} not found`)
+  }
+
   async swapSlotProduct(
     slotId: string,
     product: ProductLike,
@@ -217,6 +228,7 @@ class StoriesModuleService extends MedusaService({
     const [slot] = await this.listStorySlots({ id: slotId })
     if (!slot) throw new Error(`Slot ${slotId} not found`)
     if (slot.posted_at) throw new Error("Cannot swap product on a posted slot")
+    await this.dropRenderKeys(slotId)
     await this.updateStorySlots(
       swapSlotUpdate(slot, product) as unknown as Parameters<this["updateStorySlots"]>[0],
     )
@@ -227,6 +239,7 @@ class StoriesModuleService extends MedusaService({
     const [slot] = await this.listStorySlots({ id: slotId })
     if (!slot) throw new Error(`Slot ${slotId} not found`)
     if (slot.posted_at) throw new Error("Cannot clear a posted slot")
+    await this.dropRenderKeys(slotId)
     await this.updateStorySlots(
       clearSlotProductUpdate(slot) as unknown as Parameters<this["updateStorySlots"]>[0],
     )

@@ -1,3 +1,5 @@
+import { RENDER_KEYS } from "./slot-update"
+
 /**
  * One atomic jsonb merge of `patch` into story_slot.metadata. Postgres applies
  * the merge under the row lock, so concurrent writers cannot erase each other's
@@ -25,4 +27,19 @@ export function mergeSlotMetadataSql(
     guardSql +
     "\nRETURNING id"
   return { sql, params }
+}
+
+/**
+ * Atomically removes every render key from a live slot's metadata. Medusa's own
+ * update merges metadata and keeps omitted keys, so a swap needs this instead.
+ * The keys are trusted constants, inlined as an ARRAY literal.
+ */
+export function dropRenderKeysSql(slotId: string): { sql: string; params: unknown[] } {
+  const keys = RENDER_KEYS.map((k) => `'${k}'`).join(",")
+  const sql =
+    "UPDATE story_slot\n" +
+    `   SET metadata = COALESCE(metadata, '{}'::jsonb) - ARRAY[${keys}]::text[], updated_at = now()\n` +
+    " WHERE id = ? AND deleted_at IS NULL\n" +
+    "RETURNING id"
+  return { sql, params: [slotId] }
 }

@@ -14,7 +14,7 @@ jest.setTimeout(60 * 1000)
 moduleIntegrationTestRunner<StoriesModuleService>({
   moduleName: STORIES_MODULE,
   resolve: "./src/modules/stories",
-  testSuite: ({ service }) => {
+  testSuite: ({ service, MikroOrmWrapper }) => {
     describe("StoriesModuleService - atomic slot metadata", () => {
       let n = 0
       async function makeSlot(metadata: Record<string, unknown> | null, posted = false) {
@@ -56,10 +56,32 @@ moduleIntegrationTestRunner<StoriesModuleService>({
 
       it("two writers at once both keep their keys", async () => {
         const slot = await makeSlot({})
-        await Promise.all([
-          service.updateSlotMetadata(slot.id, { render: { mp4_url: "u" } }),
-          service.updateSlotMetadata(slot.id, { publish: { id: "p" } }),
-        ])
+        // Writer A holds the row lock with an uncommitted write; writer B (the
+        // service) must queue behind it and then merge, not overwrite, A's key.
+        const em = MikroOrmWrapper.forkManager()
+        await em.begin()
+        await em.execute(
+          `UPDATE story_slot SET metadata = metadata || '{"render":{"mp4_url":"u"}}'::jsonb WHERE id = ?`,
+          [slot.id],
+        )
+        let pending: Promise<void> | undefined
+        let waiting = false
+        try {
+          pending = service.updateSlotMetadata(slot.id, { publish: { id: "p" } })
+          pending.catch(() => undefined)
+          for (let i = 0; i < 50 && !waiting; i++) {
+            const rows = await MikroOrmWrapper.forkManager().execute(
+              `SELECT 1 FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query ILIKE '%story_slot%'`,
+            )
+            waiting = rows.length > 0
+            if (!waiting) await new Promise((r) => setTimeout(r, 100))
+          }
+        } finally {
+          // Always release the lock, or the test DB cleanup would hang on it.
+          await em.commit()
+        }
+        expect(waiting).toBe(true)
+        await pending
         const m = await meta(slot.id)
         expect(m.render).toEqual({ mp4_url: "u" })
         expect(m.publish).toEqual({ id: "p" })
@@ -90,6 +112,44 @@ moduleIntegrationTestRunner<StoriesModuleService>({
 
       it("IfJob refuses a posted slot", async () => {
         const slot = await makeSlot({ render_job: { job_id: "J1" } }, true)
+        expect(await service.updateSlotMetadataIfJob(slot.id, "J1", { render: { x: 1 } })).toBe(false)
+      })
+
+      const RENDERED = {
+        render: { mp4_url: "old" },
+        render_error: { message: "x" },
+        render_started_at: "2026-11-02T10:00:00Z",
+        render_job: { job_id: "J1" },
+        render_shadow: { mp4_url: "shadow" },
+        publish_error: { message: "earlier" },
+      }
+
+      it("swapSlotProduct drops every render key and fails the old job's guard", async () => {
+        const slot = await makeSlot(RENDERED)
+        await service.swapSlotProduct(slot.id, {
+          id: "p_new",
+          title: "New",
+          handle: "new",
+          variants: [
+            {
+              id: "v1",
+              inventory_quantity: 2,
+              prices: [{ amount: 129000, currency_code: "mur" }],
+              options: { color: "Red", size: "M" },
+              images: [{ url: "https://cdn/x.jpg" }],
+            },
+          ],
+        })
+        expect(await meta(slot.id)).toEqual({ publish_error: { message: "earlier" } })
+        expect(await service.updateSlotMetadataIfJob(slot.id, "J1", { render: { x: 1 } })).toBe(false)
+        const [row] = await service.listStorySlots({ id: slot.id })
+        expect(row.product_id).toBe("p_new")
+      })
+
+      it("clearSlotProduct drops every render key and fails the old job's guard", async () => {
+        const slot = await makeSlot(RENDERED)
+        await service.clearSlotProduct(slot.id)
+        expect(await meta(slot.id)).toEqual({ publish_error: { message: "earlier" } })
         expect(await service.updateSlotMetadataIfJob(slot.id, "J1", { render: { x: 1 } })).toBe(false)
       })
     })
