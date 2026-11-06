@@ -25,7 +25,7 @@ moduleIntegrationTestRunner<StoriesModuleService>({
           category_distribution: [{ category_id: "c1", count: 1 }],
           scheduled_times: ["09:00"],
         })
-        return service.createStorySlots({
+        const slot = await service.createStorySlots({
           plan_id: plan.id,
           slot_index: 0,
           scheduled_at: new Date(`${date}T09:00:00+04:00`),
@@ -36,6 +36,7 @@ moduleIntegrationTestRunner<StoriesModuleService>({
           metadata,
           posted_at: posted ? new Date() : null,
         } as unknown as Parameters<typeof service.createStorySlots>[0])
+        return slot as unknown as { id: string }
       }
       async function meta(id: string) {
         const [s] = await service.listStorySlots({ id })
