@@ -8,14 +8,20 @@ import { RENDER_KEYS } from "./slot-update"
  *
  * With `guard`, the write also requires an unposted slot whose current
  * render job is `guard.jobId` (and, optionally, in/not in a given state), so a stale callback cannot overwrite newer state.
+ *
+ * With `slotGuard`, the write also requires the product_id and pick_attempt the
+ * caller read. A swap bumps pick_attempt and a clear nulls product_id, so a
+ * write planned from a slot read before either one finds no row.
  */
 export type RenderJobStateName = "sent" | "done" | "failed"
 export type JobStateGuard = { is?: RenderJobStateName; isNot?: RenderJobStateName }
+export type SlotGuard = { productId: string | null; pickAttempt: number | null }
 
 export function mergeSlotMetadataSql(
   slotId: string,
   patch: Record<string, unknown>,
   guard?: { jobId: string; state?: JobStateGuard },
+  slotGuard?: SlotGuard,
 ): { sql: string; params: unknown[] } {
   const params: unknown[] = [JSON.stringify(patch), slotId]
   let guardSql = ""
@@ -30,6 +36,11 @@ export function mergeSlotMetadataSql(
       guardSql += "\n   AND (metadata -> 'render_job' ->> 'state') IS DISTINCT FROM ?"
       params.push(guard.state.isNot)
     }
+  }
+  if (slotGuard) {
+    guardSql +=
+      "\n   AND product_id IS NOT DISTINCT FROM ? AND pick_attempt IS NOT DISTINCT FROM ?"
+    params.push(slotGuard.productId, slotGuard.pickAttempt)
   }
   const sql =
     "UPDATE story_slot\n" +

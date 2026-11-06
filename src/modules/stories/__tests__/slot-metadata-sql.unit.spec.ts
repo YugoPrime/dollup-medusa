@@ -35,6 +35,57 @@ describe("mergeSlotMetadataSql state guard", () => {
   })
 })
 
+describe("mergeSlotMetadataSql slot guard", () => {
+  const SLOT_CLAUSE =
+    "AND product_id IS NOT DISTINCT FROM ? AND pick_attempt IS NOT DISTINCT FROM ?"
+
+  it("adds the product and pick attempt clause, without the job guard", () => {
+    const { sql, params } = mergeSlotMetadataSql("s1", { a: 1 }, undefined, {
+      productId: "prod_1",
+      pickAttempt: 2,
+    })
+    expect(sql).toBe(
+      "UPDATE story_slot\n" +
+        "   SET metadata = COALESCE(metadata, '{}'::jsonb) || ?::jsonb, updated_at = now()\n" +
+        " WHERE id = ? AND deleted_at IS NULL\n" +
+        `   ${SLOT_CLAUSE}\n` +
+        "RETURNING id",
+    )
+    expect(params).toEqual(['{"a":1}', "s1", "prod_1", 2])
+    expect(sql).not.toMatch(/posted_at|render_job/)
+  })
+
+  it("passes a null product_id and pick_attempt as params", () => {
+    const { params } = mergeSlotMetadataSql("s1", {}, undefined, {
+      productId: null,
+      pickAttempt: null,
+    })
+    expect(params).toEqual(["{}", "s1", null, null])
+  })
+
+  it("comes after the job guard, in clause order", () => {
+    const { sql, params } = mergeSlotMetadataSql(
+      "s1",
+      {},
+      { jobId: "J", state: { is: "sent" } },
+      { productId: "prod_1", pickAttempt: 3 },
+    )
+    const job = sql.indexOf("->> 'job_id' = ?")
+    const state = sql.indexOf("->> 'state' = ?")
+    const slot = sql.indexOf(SLOT_CLAUSE)
+    expect(job).toBeGreaterThan(-1)
+    expect(state).toBeGreaterThan(job)
+    expect(slot).toBeGreaterThan(state)
+    expect(params).toEqual(["{}", "s1", "J", "sent", "prod_1", 3])
+  })
+
+  it("leaves the job guard alone when absent", () => {
+    const { sql } = mergeSlotMetadataSql("s1", {}, { jobId: "J" })
+    expect(sql).not.toContain("product_id")
+    expect(sql).not.toContain("pick_attempt")
+  })
+})
+
 describe("dropRenderKeysSql", () => {
   it("removes every render key from a live slot", () => {
     const { sql, params } = dropRenderKeysSql("stslot_1")

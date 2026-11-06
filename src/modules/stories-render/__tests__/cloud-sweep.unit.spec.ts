@@ -104,6 +104,24 @@ function setup(
     updateSlotMetadata: jest.fn(async (id: string, patch: Patch) => {
       merge(id, patch)
     }),
+    updateSlotMetadataIfUnchanged: jest.fn(
+      async (
+        id: string,
+        expected: { product_id: string | null; pick_attempt: number | null },
+        patch: Patch,
+      ) => {
+        const s = byId.get(id)
+        if (
+          !s ||
+          (s.product_id ?? null) !== (expected.product_id ?? null) ||
+          (s.pick_attempt ?? null) !== (expected.pick_attempt ?? null)
+        ) {
+          return false
+        }
+        merge(id, patch)
+        return true
+      },
+    ),
     updateSlotMetadataIfJob: jest.fn(
       async (
         id: string,
@@ -167,13 +185,18 @@ describe("sweepCloudRenders reconcile", () => {
     expect(jobOf(slot).state).toBe("sent")
   })
 
-  it("a job the service lost becomes retryable", async () => {
+  it("a job the service lost becomes retryable, with the send uncounted", async () => {
+    // Stamped as the 2nd send; the service never got it, so 1 is written back.
     const slot = withJob(makeSlot(1), { dispatch_count: 2 })
-    const { deps } = setup([slot], () => "not_found")
+    const first = withJob(makeSlot(2), { dispatch_count: 1 })
+    const odd = withJob(makeSlot(3), { dispatch_count: 0 })
+    const { deps } = setup([slot, first, odd], () => "not_found")
     await sweepCloudRenders(deps)
+    expect(jobOf(first)).toMatchObject({ state: "failed", dispatch_count: 0 })
+    expect(jobOf(odd)).toMatchObject({ state: "failed", dispatch_count: 0 })
     expect(jobOf(slot)).toMatchObject({
       state: "failed",
-      dispatch_count: 2,
+      dispatch_count: 1,
       resolved_at: NOW.toISOString(),
     })
     expect(jobOf(slot).template_slug).toBe(REQ.template_slug)

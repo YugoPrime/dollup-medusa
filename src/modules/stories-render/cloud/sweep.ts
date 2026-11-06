@@ -5,6 +5,7 @@ import {
 import { applyCallback, remoteJobToCallback } from "./callback"
 import { dispatchPlan, type CloudDeps } from "./dispatch"
 import {
+  countBeforeSend,
   failedJobPatch,
   isTooLateToPost,
   MAX_SENDS_PER_SLOT,
@@ -89,10 +90,11 @@ async function reconcileSlot(deps: SweepDeps, slot: CloudSlot): Promise<boolean>
       : false
   }
   if (remote === "not_found") {
+    // The send never reached the service, so it does not count toward the cap.
     return failSent(deps, slot, job, {
       message: "render service has no record of this job",
       stage: "dispatch",
-      dispatchCount: job.dispatch_count,
+      dispatchCount: countBeforeSend(job.dispatch_count),
     })
   }
   if (remote.status === "done" || remote.status === "failed") {

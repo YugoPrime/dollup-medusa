@@ -17,7 +17,11 @@ moduleIntegrationTestRunner<StoriesModuleService>({
   testSuite: ({ service, MikroOrmWrapper }) => {
     describe("StoriesModuleService - atomic slot metadata", () => {
       let n = 0
-      async function makeSlot(metadata: Record<string, unknown> | null, posted = false) {
+      async function makeSlot(
+        metadata: Record<string, unknown> | null,
+        posted = false,
+        productId: string | null = "prod_test",
+      ) {
         n += 1
         const date = `2026-07-${String(n).padStart(2, "0")}`
         const plan = await service.createPlan({
@@ -30,7 +34,7 @@ moduleIntegrationTestRunner<StoriesModuleService>({
           slot_index: 0,
           scheduled_at: new Date(`${date}T09:00:00+04:00`),
           category_id: "c1",
-          product_id: "prod_test",
+          product_id: productId,
           fallback_used: false,
           pick_attempt: 1,
           metadata,
@@ -131,6 +135,21 @@ moduleIntegrationTestRunner<StoriesModuleService>({
         expect(await service.updateSlotMetadataIfJob(slot.id, "J1", { render: { x: 1 } })).toBe(false)
       })
 
+      const NEW_PRODUCT = {
+        id: "p_new",
+        title: "New",
+        handle: "new",
+        variants: [
+          {
+            id: "v1",
+            inventory_quantity: 2,
+            prices: [{ amount: 129000, currency_code: "mur" }],
+            options: { color: "Red", size: "M" },
+            images: [{ url: "https://cdn/x.jpg" }],
+          },
+        ],
+      }
+
       const RENDERED = {
         render: { mp4_url: "old" },
         render_error: { message: "x" },
@@ -142,20 +161,7 @@ moduleIntegrationTestRunner<StoriesModuleService>({
 
       it("swapSlotProduct drops every render key and fails the old job's guard", async () => {
         const slot = await makeSlot(RENDERED)
-        await service.swapSlotProduct(slot.id, {
-          id: "p_new",
-          title: "New",
-          handle: "new",
-          variants: [
-            {
-              id: "v1",
-              inventory_quantity: 2,
-              prices: [{ amount: 129000, currency_code: "mur" }],
-              options: { color: "Red", size: "M" },
-              images: [{ url: "https://cdn/x.jpg" }],
-            },
-          ],
-        })
+        await service.swapSlotProduct(slot.id, NEW_PRODUCT)
         expect(await meta(slot.id)).toEqual({ publish_error: { message: "earlier" } })
         expect(await service.updateSlotMetadataIfJob(slot.id, "J1", { render: { x: 1 } })).toBe(false)
         const [row] = await service.listStorySlots({ id: slot.id })
@@ -167,6 +173,85 @@ moduleIntegrationTestRunner<StoriesModuleService>({
         await service.clearSlotProduct(slot.id)
         expect(await meta(slot.id)).toEqual({ publish_error: { message: "earlier" } })
         expect(await service.updateSlotMetadataIfJob(slot.id, "J1", { render: { x: 1 } })).toBe(false)
+      })
+
+      const STAMP = { render_job: { job_id: "J_old" } }
+      async function asRead(id: string) {
+        const [s] = await service.listStorySlots({ id })
+        return { product_id: s.product_id, pick_attempt: s.pick_attempt }
+      }
+
+      it("IfUnchanged writes while product_id and pick_attempt match", async () => {
+        const slot = await makeSlot({ publish: { id: "p" } })
+        expect(await asRead(slot.id)).toEqual({ product_id: "prod_test", pick_attempt: 1 })
+        expect(
+          await service.updateSlotMetadataIfUnchanged(
+            slot.id,
+            { product_id: "prod_test", pick_attempt: 1 },
+            STAMP,
+          ),
+        ).toBe(true)
+        expect(await meta(slot.id)).toEqual({ publish: { id: "p" }, ...STAMP })
+        expect(
+          await service.updateSlotMetadataIfUnchanged(
+            slot.id,
+            { product_id: "prod_other", pick_attempt: 1 },
+            { x: 1 },
+          ),
+        ).toBe(false)
+        expect(
+          await service.updateSlotMetadataIfUnchanged(
+            slot.id,
+            { product_id: "prod_test", pick_attempt: 2 },
+            { x: 1 },
+          ),
+        ).toBe(false)
+        expect(await meta(slot.id)).toEqual({ publish: { id: "p" }, ...STAMP })
+      })
+
+      it("IfUnchanged matches a null product_id", async () => {
+        const slot = await makeSlot(null, false, null)
+        expect(
+          await service.updateSlotMetadataIfUnchanged(
+            slot.id,
+            { product_id: null, pick_attempt: 1 },
+            STAMP,
+          ),
+        ).toBe(true)
+        expect(await meta(slot.id)).toEqual(STAMP)
+        expect(
+          await service.updateSlotMetadataIfUnchanged(
+            slot.id,
+            { product_id: "prod_test", pick_attempt: 1 },
+            { x: 1 },
+          ),
+        ).toBe(false)
+        expect(await meta(slot.id)).toEqual(STAMP)
+      })
+
+      it("IfUnchanged refuses the slot as read after swapSlotProduct", async () => {
+        const slot = await makeSlot(RENDERED)
+        const before = await asRead(slot.id)
+        await service.swapSlotProduct(slot.id, NEW_PRODUCT)
+        expect(await asRead(slot.id)).toEqual({ product_id: "p_new", pick_attempt: 2 })
+        expect(await service.updateSlotMetadataIfUnchanged(slot.id, before, STAMP)).toBe(false)
+        expect(await meta(slot.id)).toEqual({ publish_error: { message: "earlier" } })
+      })
+
+      it("IfUnchanged refuses the slot as read after clearSlotProduct", async () => {
+        const slot = await makeSlot(RENDERED)
+        const before = await asRead(slot.id)
+        await service.clearSlotProduct(slot.id)
+        expect(await asRead(slot.id)).toEqual({ product_id: null, pick_attempt: 1 })
+        expect(await service.updateSlotMetadataIfUnchanged(slot.id, before, STAMP)).toBe(false)
+        expect(await meta(slot.id)).toEqual({ publish_error: { message: "earlier" } })
+      })
+
+      it("IfUnchanged refuses a deleted slot", async () => {
+        const slot = await makeSlot({})
+        const before = await asRead(slot.id)
+        await service.softDeleteStorySlots([slot.id])
+        expect(await service.updateSlotMetadataIfUnchanged(slot.id, before, STAMP)).toBe(false)
       })
     })
   },

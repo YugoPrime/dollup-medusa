@@ -1,3 +1,4 @@
+import { countBeforeSend } from "../cloud/job"
 import { describe, expect, it } from "@jest/globals"
 
 import {
@@ -68,5 +69,19 @@ describe("cloud job", () => {
     expect(readShadowJob({ render_shadow: sj })).toEqual(sj)
     expect(readShadowJob(undefined)).toBeNull()
     expect(readShadowJob({ render_shadow: [] })).toBeNull()
+  })
+})
+
+describe("countBeforeSend", () => {
+  it("takes back the stamped send, never below 0", () => {
+    expect(countBeforeSend(3)).toBe(2)
+    expect(countBeforeSend(1)).toBe(0)
+    expect(countBeforeSend(0)).toBe(0)
+  })
+
+  it("treats a missing or bad stored count as 0", () => {
+    expect(countBeforeSend(undefined)).toBe(0)
+    expect(countBeforeSend("2")).toBe(0)
+    expect(countBeforeSend(Number.NaN)).toBe(0)
   })
 })

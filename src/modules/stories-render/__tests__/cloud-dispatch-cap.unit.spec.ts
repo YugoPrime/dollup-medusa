@@ -83,6 +83,7 @@ function deps(slots: Slot[]): CloudDeps {
     listStoryPlans: jest.fn(async () => [{ id: PLAN_ID }]),
     listStorySlots: jest.fn(async () => slots),
     updateSlotMetadata: jest.fn(async () => undefined),
+    updateSlotMetadataIfUnchanged: jest.fn(async () => true),
     updateSlotMetadataIfJob: jest.fn(async () => true),
   }
   return {

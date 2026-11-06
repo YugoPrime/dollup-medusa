@@ -275,6 +275,27 @@ class StoriesModuleService extends MedusaService({
   }
 
   /**
+   * Like updateSlotMetadata, but writes only while the live slot still has the
+   * product_id and pick_attempt in `expect` (the slot as the caller read it). A
+   * swap bumps pick_attempt and a clear nulls product_id, so either one makes
+   * this a no-op. Returns whether a row changed.
+   */
+  @InjectManager()
+  async updateSlotMetadataIfUnchanged(
+    slotId: string,
+    expect: { product_id: string | null; pick_attempt: number | null },
+    patch: Record<string, unknown>,
+    @MedusaContext() sharedContext?: Context<EntityManager>,
+  ): Promise<boolean> {
+    const { sql, params } = mergeSlotMetadataSql(slotId, patch, undefined, {
+      productId: expect.product_id,
+      pickAttempt: expect.pick_attempt,
+    })
+    const rows = await sharedContext!.manager!.execute(sql, params)
+    return rows.length > 0
+  }
+
+  /**
    * Returns deduped product IDs that have been posted within the last
    * `days` days. Used by the picker to enforce anti-repeat.
    */

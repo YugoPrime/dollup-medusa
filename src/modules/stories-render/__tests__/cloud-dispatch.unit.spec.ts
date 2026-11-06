@@ -9,12 +9,12 @@ import {
   dispatchSlot,
   summarizeDispatch,
   type CloudDeps,
+  type DispatchSlot,
 } from "../cloud/dispatch"
 import {
   buildCloudJob,
   MAX_SENDS_PER_SLOT,
   type CloudJobRequest,
-  type CloudSlot,
 } from "../cloud/job"
 import { pickTemplate } from "../picker"
 import type { RenderRequest } from "../types"
@@ -34,7 +34,7 @@ const REQ: RenderRequest = {
   text_overrides: { title: "Hi" },
 }
 
-type Slot = CloudSlot & { metadata: Record<string, unknown> | null }
+type Slot = DispatchSlot & { metadata: Record<string, unknown> | null }
 type Call = { fn: string; args: unknown[] }
 type Patch = Record<string, any>
 
@@ -69,6 +69,8 @@ function makeSlot(id: string, slot_index: number, over: Partial<Slot> = {}): Slo
     posted_at: null,
     metadata: null,
     product_snapshot: snapshot(),
+    product_id: "prod_1",
+    pick_attempt: 1,
     ...over,
   }
 }
@@ -156,6 +158,25 @@ function setup(
       calls.push({ fn: "updateSlotMetadata", args: [id, patch] })
       merge(id, patch)
     }),
+    updateSlotMetadataIfUnchanged: jest.fn(
+      async (
+        id: string,
+        expected: { product_id: string | null; pick_attempt: number | null },
+        patch: Patch,
+      ) => {
+        calls.push({ fn: "updateSlotMetadataIfUnchanged", args: [id, expected, patch] })
+        const s = byId.get(id)
+        if (
+          !s ||
+          s.product_id !== expected.product_id ||
+          s.pick_attempt !== expected.pick_attempt
+        ) {
+          return false
+        }
+        merge(id, patch)
+        return true
+      },
+    ),
     updateSlotMetadataIfJob: jest.fn(
       async (
         id: string,
@@ -212,9 +233,10 @@ describe("dispatchSlot (prod)", () => {
     const out = await dispatchSlot(t.deps, s, REQ, { kind: "prod", manual: false })
 
     expect(out).toBe("sent")
-    expect(t.calls.map((c) => c.fn)).toEqual(["updateSlotMetadata", "submit"])
+    expect(t.calls.map((c) => c.fn)).toEqual(["updateSlotMetadataIfUnchanged", "submit"])
     expect(t.calls[0].args).toEqual([
       s.id,
+      { product_id: "prod_1", pick_attempt: 1 },
       {
         render_started_at: NOW.toISOString(),
         render_template_slug: "in-stock-hero",
@@ -245,7 +267,7 @@ describe("dispatchSlot (prod)", () => {
       }
       const t = setup([s], QUEUED)
       await dispatchSlot(t.deps, s, REQ, { kind: "prod", manual })
-      return (t.calls[0].args[1] as Patch).render_job.dispatch_count
+      return (t.calls[0].args[2] as Patch).render_job.dispatch_count
     }
 
     expect(await countAfter(null, false)).toBe(3)
@@ -284,9 +306,9 @@ describe("dispatchSlot (prod)", () => {
     expect((s.metadata!.render_job as Patch).dispatch_count).toBe(3)
   })
 
-  it("an unreachable service leaves the slot retryable", async () => {
-    // One earlier send of the same job: this send is the 2nd. A 2 written back
-    // tells "count unchanged" apart from both "reset to 1" and "maxed to 3".
+  it("an unreachable service leaves the slot retryable, and the send uncounted", async () => {
+    // One earlier send of the same job: this send is stamped as the 2nd. It
+    // never reached the service, so the count written back is the 1 from before.
     const s = makeSlot("stslot_A1", 0)
     s.metadata = { render_job: renderJob(s, { dispatch_count: 1 }) }
     const t = setup([s], { kind: "unavailable", reason: "TimeoutError" })
@@ -294,7 +316,7 @@ describe("dispatchSlot (prod)", () => {
     const out = await dispatchSlot(t.deps, s, REQ, { kind: "prod", manual: false })
 
     expect(out).toBe("unavailable")
-    expect((t.calls[0].args[1] as Patch).render_job.dispatch_count).toBe(2)
+    expect((t.calls[0].args[2] as Patch).render_job.dispatch_count).toBe(2)
     const failed = t.calls.find((c) => c.fn === "updateSlotMetadataIfJob")!
     expect(failed.args[3]).toEqual({ is: "sent" })
     const patch = failed.args[2] as Patch
@@ -303,9 +325,44 @@ describe("dispatchSlot (prod)", () => {
       name: "CloudDispatchError",
       stage: "dispatch",
     })
-    expect(patch.render_job).toMatchObject({ state: "failed", dispatch_count: 2 })
-    expect((s.metadata!.render_job as Patch).dispatch_count).toBe(2)
-    expect(MAX_SENDS_PER_SLOT).toBeGreaterThan(2)
+    expect(patch.render_job).toMatchObject({ state: "failed", dispatch_count: 1 })
+    expect((s.metadata!.render_job as Patch).dispatch_count).toBe(1)
+  })
+
+  it("an unreachable first send writes 0, never below", async () => {
+    const s = makeSlot("stslot_A1", 0)
+    const t = setup([s], { kind: "unavailable", reason: "http 503" })
+
+    await dispatchSlot(t.deps, s, REQ, { kind: "prod", manual: true })
+
+    expect((t.calls[0].args[2] as Patch).render_job.dispatch_count).toBe(1)
+    expect(jobOf(s)).toMatchObject({ state: "failed", dispatch_count: 0 })
+  })
+
+  it("a slot changed since it was read is not sent", async () => {
+    // Read with pick_attempt 1; a swap bumped the stored row to 2 since.
+    const stored = makeSlot("stslot_A1", 0, { product_id: "prod_2", pick_attempt: 2 })
+    const asRead = { ...stored, product_id: "prod_1", pick_attempt: 1 }
+    const t = setup([stored], QUEUED)
+
+    const out = await dispatchSlot(t.deps, asRead, REQ, { kind: "prod", manual: true })
+
+    expect(out).toBe("changed")
+    expect(t.calls.map((c) => c.fn)).toEqual(["updateSlotMetadataIfUnchanged"])
+    expect(t.calls[0].args[1]).toEqual({ product_id: "prod_1", pick_attempt: 1 })
+    expect(t.client.submit).not.toHaveBeenCalled()
+    expect(stored.metadata).toBeNull()
+  })
+
+  it("a cleared slot (product_id now null) is not sent", async () => {
+    const stored = makeSlot("stslot_A1", 0, { product_id: null })
+    const asRead = { ...stored, product_id: "prod_1" }
+    const t = setup([stored], QUEUED)
+
+    expect(await dispatchSlot(t.deps, asRead, REQ, { kind: "prod", manual: false })).toBe(
+      "changed",
+    )
+    expect(t.client.submit).not.toHaveBeenCalled()
   })
 
   it("a failure write never overwrites a callback that landed first", async () => {
@@ -478,29 +535,79 @@ describe("dispatchPlan", () => {
     s.metadata = { render_job: storedJob(s) }
     const stored = buildCloudJob(s, STORED, "prod", CFG.callbackUrl)
     expect(pickTemplate(snapshot(), 0, new Map())?.template_slug).not.toBe(STORED.template_slug)
-    const t = setup([s], { kind: "unavailable", reason: "http 503" })
+    const t = setup([s], QUEUED)
+    // The service took the job and its render failed, as its error callback writes it.
+    const renderFails = (at: Date) => {
+      s.metadata = {
+        ...s.metadata,
+        render_job: { ...jobOf(s), state: "failed", resolved_at: at.toISOString() },
+      }
+    }
 
     const r1 = await dispatchPlan(t.deps, PLAN_ID, { kind: "prod", sweep: true })
     expect(r1).toEqual([
       {
         slot_id: s.id,
         slot_index: 0,
-        status: "unavailable",
+        status: "sent",
         template_slug: STORED.template_slug,
       },
     ])
     expect(t.submitted[0]).toEqual(stored)
-    expect(jobOf(s)).toMatchObject({ job_id: stored.job_id, state: "failed", dispatch_count: 2 })
+    expect(jobOf(s)).toMatchObject({ job_id: stored.job_id, state: "sent", dispatch_count: 2 })
+    renderFails(NOW)
 
     t.deps.now = () => new Date(NOW.getTime() + 11 * MIN)
     await dispatchPlan(t.deps, PLAN_ID, { kind: "prod", sweep: true })
     expect(t.submitted[1].job_id).toBe(stored.job_id)
-    expect(jobOf(s)).toMatchObject({ job_id: stored.job_id, state: "failed", dispatch_count: 3 })
+    expect(jobOf(s)).toMatchObject({ job_id: stored.job_id, state: "sent", dispatch_count: 3 })
+    renderFails(new Date(NOW.getTime() + 11 * MIN))
 
     t.deps.now = () => new Date(NOW.getTime() + 22 * MIN)
     const r3 = await dispatchPlan(t.deps, PLAN_ID, { kind: "prod", sweep: true })
     expect(r3.map((r) => [r.status, r.reason])).toEqual([["skipped", "gave up"]])
     expect(t.client.submit).toHaveBeenCalledTimes(2)
+  })
+
+  it("sends that never reach the service keep retrying until too late to post", async () => {
+    // Scheduled 60 min after NOW, so too late to post from NOW + 180 min.
+    const s = makeSlot("stslot_W1", 0)
+    s.metadata = { render_job: storedJob(s) }
+    const stored = buildCloudJob(s, STORED, "prod", CFG.callbackUrl)
+    const t = setup([s], { kind: "unavailable", reason: "http 503" })
+
+    for (let i = 1; i <= 4; i++) {
+      t.deps.now = () => new Date(NOW.getTime() + i * 11 * MIN)
+      const r = await dispatchPlan(t.deps, PLAN_ID, { kind: "prod", sweep: true })
+      expect(r.map((x) => [x.status, x.reason])).toEqual([["unavailable", undefined]])
+      expect(jobOf(s)).toMatchObject({ job_id: stored.job_id, state: "failed", dispatch_count: 1 })
+    }
+    expect(t.client.submit).toHaveBeenCalledTimes(4)
+    expect(t.submitted.every((j) => j.job_id === stored.job_id)).toBe(true)
+
+    t.deps.now = () => new Date(NOW.getTime() + 181 * MIN)
+    const late = await dispatchPlan(t.deps, PLAN_ID, { kind: "prod", sweep: true })
+    expect(late.map((x) => [x.status, x.reason])).toEqual([["skipped", "too late to post"]])
+    expect(t.client.submit).toHaveBeenCalledTimes(4)
+  })
+
+  it("a slot changed while sending is reported skipped, and the plan goes on", async () => {
+    const a = makeSlot("stslot_C0", 0)
+    const b = makeSlot("stslot_C1", 1)
+    const t = setup([a, b], QUEUED)
+    t.stories.updateSlotMetadataIfUnchanged.mockResolvedValueOnce(false)
+
+    const r = await dispatchPlan(t.deps, PLAN_ID, { kind: "prod" })
+
+    expect(r[0]).toEqual({
+      slot_id: "stslot_C0",
+      slot_index: 0,
+      status: "skipped",
+      reason: "slot changed while sending",
+    })
+    expect(r[1].status).toBe("sent")
+    expect(t.submitted.map((j) => j.job_id.startsWith("stslot_C1_"))).toEqual([true])
+    expect(summarizeDispatch(r)).toEqual({ sent: 1, skipped: 1, failed: 0 })
   })
 
   it("a manual call re-picks a failed slot and resets the count", async () => {
@@ -521,15 +628,15 @@ describe("dispatchPlan", () => {
     const a = makeSlot("stslot_X0", 0)
     const b = makeSlot("stslot_X1", 1)
     const t = setup([a, b], QUEUED)
-    t.stories.updateSlotMetadata.mockImplementationOnce(async () => {
-      throw new Error("Slot stslot_X0 not found")
+    t.stories.updateSlotMetadataIfUnchanged.mockImplementationOnce(async () => {
+      throw new Error("db down")
     })
     const errSpy = jest.spyOn(console, "error").mockImplementation(() => undefined)
     try {
       const r = await dispatchPlan(t.deps, PLAN_ID, { kind: "prod" })
 
       expect(r.map((x) => [x.slot_index, x.status, x.reason])).toEqual([
-        [0, "unavailable", "error: Slot stslot_X0 not found"],
+        [0, "unavailable", "error: db down"],
         [1, "sent", undefined],
       ])
       expect(t.submitted.map((j) => j.job_id.startsWith("stslot_X1_"))).toEqual([true])
@@ -538,7 +645,7 @@ describe("dispatchPlan", () => {
         msg: "[stories-render:dispatch]",
         event: "slot_error",
         slot_id: "stslot_X0",
-        message: "Slot stslot_X0 not found",
+        message: "db down",
       })
     } finally {
       errSpy.mockRestore()
@@ -580,8 +687,10 @@ describe("dispatchPlan", () => {
 })
 
 describe("summarizeDispatch", () => {
-  it("counts applied as sent and rejected + unavailable as failed", () => {
-    const r = (status: "sent" | "applied" | "rejected" | "unavailable" | "skipped") => ({
+  it("counts applied as sent, changed as skipped, and rejected + unavailable as failed", () => {
+    const r = (
+      status: "sent" | "applied" | "rejected" | "unavailable" | "changed" | "skipped",
+    ) => ({
       slot_id: "s",
       slot_index: 0,
       status,
@@ -594,8 +703,9 @@ describe("summarizeDispatch", () => {
         r("rejected"),
         r("unavailable"),
         r("skipped"),
+        r("changed"),
       ]),
-    ).toEqual({ sent: 2, skipped: 2, failed: 2 })
+    ).toEqual({ sent: 2, skipped: 3, failed: 2 })
   })
 })
 

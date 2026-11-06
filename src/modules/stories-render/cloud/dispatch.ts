@@ -9,6 +9,7 @@ import { createRenderClient, type RenderClient, type SubmitResult } from "./clie
 import { readCloudRenderConfig, type CloudRenderConfig } from "./config"
 import {
   buildCloudJob,
+  countBeforeSend,
   failedJobPatch,
   MAX_SENDS_PER_SLOT,
   isTooLateToPost,
@@ -28,6 +29,7 @@ export type CloudDeps = {
     | "listStoryPlans"
     | "updateSlotMetadata"
     | "updateSlotMetadataIfJob"
+    | "updateSlotMetadataIfUnchanged"
   >
   client: RenderClient
   cfg: CloudRenderConfig
@@ -45,7 +47,19 @@ export function createCloudDeps(scope: MedusaContainer): CloudDeps {
   }
 }
 
-export type DispatchOutcome = "sent" | "applied" | "rejected" | "unavailable"
+/** `changed`: the slot was swapped, cleared or deleted since it was read, so nothing was sent. */
+export type DispatchOutcome =
+  | "sent"
+  | "applied"
+  | "rejected"
+  | "unavailable"
+  | "changed"
+
+/** A slot as read, with the product and pick attempt its prod stamp is guarded on. */
+export type DispatchSlot = CloudSlot & {
+  product_id: string | null
+  pick_attempt: number | null
+}
 
 export type DispatchSlotResult = {
   slot_id: string
@@ -82,7 +96,7 @@ async function applyFinished(
 
 async function dispatchProd(
   deps: CloudDeps,
-  slot: CloudSlot,
+  slot: DispatchSlot,
   req: RenderRequest,
   manual: boolean,
 ): Promise<DispatchOutcome> {
@@ -103,13 +117,20 @@ async function dispatchProd(
     dispatch_count: count,
     sent_at: sentAt,
   }
-  // Stamp before sending, so a fast callback always finds its job.
-  await deps.stories.updateSlotMetadata(slot.id, {
-    render_started_at: sentAt,
-    render_template_slug: req.template_slug,
-    render_error: null,
-    render_job: renderJob,
-  })
+  // Stamp before sending, so a fast callback always finds its job. Guarded on
+  // the slot as read: after a swap or clear these inputs are for a product the
+  // slot no longer holds, so nothing is sent.
+  const stamped = await deps.stories.updateSlotMetadataIfUnchanged(
+    slot.id,
+    { product_id: slot.product_id, pick_attempt: slot.pick_attempt },
+    {
+      render_started_at: sentAt,
+      render_template_slug: req.template_slug,
+      render_error: null,
+      render_job: renderJob,
+    },
+  )
+  if (!stamped) return "changed"
 
   const res = await deps.client.submit(job)
   if (res.kind === "accepted") {
@@ -128,8 +149,10 @@ async function dispatchProd(
       message: failureMessage(res),
       name: "CloudDispatchError",
       stage: "dispatch",
-      // A refusal is permanent: max out the count so nothing re-sends it.
-      dispatchCount: res.kind === "rejected" ? MAX_SENDS_PER_SLOT : count,
+      // A refusal is permanent: max out the count so nothing re-sends it. A
+      // send that never reached the service does not count toward the cap.
+      dispatchCount:
+        res.kind === "rejected" ? MAX_SENDS_PER_SLOT : countBeforeSend(count),
       failedAt,
     }),
     { is: "sent" },
@@ -172,7 +195,7 @@ async function dispatchShadow(
 
 export async function dispatchSlot(
   deps: CloudDeps,
-  slot: CloudSlot,
+  slot: DispatchSlot,
   req: RenderRequest,
   opts: { kind: JobKind; manual: boolean },
 ): Promise<DispatchOutcome> {
@@ -300,7 +323,11 @@ export async function dispatchPlan(
         kind: opts.kind,
         manual: sendManual,
       })
-      results.push({ ...base, status, template_slug: req.template_slug })
+      if (status === "changed") {
+        results.push({ ...base, status: "skipped", reason: "slot changed while sending" })
+      } else {
+        results.push({ ...base, status, template_slug: req.template_slug })
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       console.error(
@@ -329,7 +356,7 @@ export function summarizeDispatch(r: DispatchSlotResult[]): {
 } {
   return {
     sent: r.filter((x) => x.status === "sent" || x.status === "applied").length,
-    skipped: r.filter((x) => x.status === "skipped").length,
+    skipped: r.filter((x) => x.status === "skipped" || x.status === "changed").length,
     failed: r.filter((x) => x.status === "rejected" || x.status === "unavailable")
       .length,
   }

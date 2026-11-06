@@ -11,6 +11,8 @@ export type CloudSlot = {
   posted_at: Date | string | null
   metadata: unknown
   product_snapshot?: unknown
+  product_id?: string | null
+  pick_attempt?: number | null
 }
 
 export type CloudJobRequest = {
@@ -30,6 +32,18 @@ export const STALE_SENT_MS = 1_200_000
 export const STUCK_SENT_MS = 3_600_000
 // publish skips slots more than 2 h late
 export const PUBLISH_WINDOW_MS = 7_200_000
+
+/**
+ * The dispatch_count to write back when a send never reached the service
+ * (unreachable, or the service has no record of it): the stamped count minus
+ * this send, never below 0. Such sends do not use up MAX_SENDS_PER_SLOT; the
+ * retry gap and the publish window still bound the retries.
+ */
+export function countBeforeSend(stamped: unknown): number {
+  return typeof stamped === "number" && Number.isFinite(stamped)
+    ? Math.max(0, stamped - 1)
+    : 0
+}
 
 /** True once publish would skip the slot (more than PUBLISH_WINDOW_MS late). */
 export function isTooLateToPost(
