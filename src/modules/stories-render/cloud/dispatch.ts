@@ -9,6 +9,7 @@ import { createRenderClient, type RenderClient, type SubmitResult } from "./clie
 import { readCloudRenderConfig, type CloudRenderConfig } from "./config"
 import {
   buildCloudJob,
+  failedJobPatch,
   MAX_SENDS_PER_SLOT,
   PUBLISH_WINDOW_MS,
   readRenderJob,
@@ -123,23 +124,14 @@ async function dispatchProd(
   await deps.stories.updateSlotMetadataIfJob(
     slot.id,
     job.job_id,
-    {
-      render_error: {
-        message: failureMessage(res),
-        name: "CloudDispatchError",
-        stage: "dispatch",
-        stderr_tail: null,
-        failed_at: failedAt,
-      },
-      render_started_at: null,
-      render_job: {
-        ...renderJob,
-        state: "failed",
-        // A refusal is permanent: max out the count so nothing re-sends it.
-        dispatch_count: res.kind === "rejected" ? MAX_SENDS_PER_SLOT : count,
-        resolved_at: failedAt,
-      },
-    },
+    failedJobPatch(renderJob, {
+      message: failureMessage(res),
+      name: "CloudDispatchError",
+      stage: "dispatch",
+      // A refusal is permanent: max out the count so nothing re-sends it.
+      dispatchCount: res.kind === "rejected" ? MAX_SENDS_PER_SLOT : count,
+      failedAt,
+    }),
     { is: "sent" },
   )
   return res.kind

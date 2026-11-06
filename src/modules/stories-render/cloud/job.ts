@@ -101,3 +101,35 @@ export function readRenderJob(metadata: unknown): RenderJobState | null {
 export function readShadowJob(metadata: unknown): ShadowJobState | null {
   return readKey(metadata, "render_shadow") as ShadowJobState | null
 }
+
+/**
+ * Metadata patch that marks a prod render job failed. `render_job` is the FULL
+ * job (jsonb `||` replaces the whole key). Shared by the dispatcher and sweeper.
+ */
+export function failedJobPatch(
+  job: RenderJobState,
+  f: {
+    message: string
+    name: string
+    stage: string
+    dispatchCount: number
+    failedAt: string
+  }
+): Record<string, unknown> {
+  return {
+    render_error: {
+      message: f.message,
+      name: f.name,
+      stage: f.stage,
+      stderr_tail: null,
+      failed_at: f.failedAt,
+    },
+    render_started_at: null,
+    render_job: {
+      ...job,
+      state: "failed",
+      dispatch_count: f.dispatchCount,
+      resolved_at: f.failedAt,
+    },
+  }
+}
