@@ -85,3 +85,17 @@ test("null metadata is missing; rows ordered by slot_index", () => {
   assert.equal(r.rows[1].result, "missing")
   assert.equal(r.verdict, "FAIL")
 })
+
+test("empty plan is FAIL, not a vacuous PASS", () => {
+  const r = compareShadow([])
+  assert.equal(r.verdict, "FAIL")
+  assert.equal(r.rows.length, 0)
+})
+
+test("done shadow without mp4_url counts as failed", () => {
+  const s = seven()
+  s[2].metadata.render_shadow = { job_id: "j", state: "done", sent_at: "t", duration_ms: 1000 }
+  const r = compareShadow(s)
+  assert.equal(r.rows[2].result, "failed")
+  assert.equal(r.verdict, "FAIL")
+})
