@@ -311,6 +311,15 @@ describe("create-tomorrow-plan", () => {
     expect(sent()).toContain("⚠️ Not sent yet, retrying: 2")
   })
 
+  it("in cloud mode a dispatch failure is not reported as missing config", async () => {
+    mode.mockReturnValue("cloud")
+    ;(dispatchPlan as jest.Mock).mockRejectedValue(new Error("list failed"))
+    await expect(createTomorrowPlan(container())).resolves.toBeUndefined()
+    expect(sent()).toContain("Cloud render dispatch failed")
+    expect(sent()).toContain("list failed")
+    expect(sent()).not.toContain("not configured")
+  })
+
   it("in cloud mode with missing config alerts and returns", async () => {
     mode.mockReturnValue("cloud")
     ;(createCloudDeps as jest.Mock).mockImplementation(() => {

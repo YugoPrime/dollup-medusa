@@ -164,15 +164,28 @@ export default async function createTomorrowPlan(
 
   // Cloud mode: hand every slot to the render service, then report.
   if (renderMode === "cloud") {
+    let deps
+    try {
+      deps = createCloudDeps(container)
+    } catch (err) {
+      const msg = (err as Error)?.message ?? "cloud config error"
+      logger.error(`[auto-plan] cloud render not configured for plan ${plan.id}: ${msg}`)
+      await sendTelegram(
+        `⚠️ Cloud render is not configured: ${escapeTelegramHtml(msg)}`,
+      )
+      return
+    }
     let summary
     try {
-      const deps = createCloudDeps(container)
       summary = summarizeDispatch(await dispatchPlan(deps, plan.id, { kind: "prod" }))
     } catch (err) {
       const msg = (err as Error)?.message ?? "cloud dispatch failed"
       logger.error(`[auto-plan] cloud dispatch failed for plan ${plan.id}: ${msg}`)
       await sendTelegram(
-        `⚠️ Cloud render is not configured: ${escapeTelegramHtml(msg)}`,
+        [
+          `⚠️ <b>Cloud render dispatch failed for ${escapeTelegramHtml(planDate)}</b>: ${escapeTelegramHtml(msg)}`,
+          "The sweeper retries every 5 minutes. To roll back: STORIES_RENDER_MODE=local.",
+        ].join("\n"),
       )
       return
     }
