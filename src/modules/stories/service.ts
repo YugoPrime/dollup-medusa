@@ -1,4 +1,6 @@
-import { MedusaService } from "@medusajs/framework/utils"
+import { InjectManager, MedusaContext, MedusaService } from "@medusajs/framework/utils"
+import type { Context } from "@medusajs/framework/types"
+import type { EntityManager } from "@medusajs/framework/mikro-orm/knex"
 
 import StoryPlan from "./models/story-plan"
 import StorySlot from "./models/story-slot"
@@ -8,6 +10,7 @@ import { buildSnapshot, type ProductLike } from "./snapshot"
 import { DEFAULT_WEIGHTING, type WeightingConfig } from "./picker-weighting"
 import { activeFocusTag } from "./focus"
 import { chooseSlotProduct } from "./slot-choice"
+import { mergeSlotMetadataSql } from "./slot-metadata-sql"
 import { clearSlotProductUpdate, swapSlotUpdate } from "./slot-update"
 
 export const STORY_SETTINGS_ID = "story_settings"
@@ -229,19 +232,32 @@ class StoriesModuleService extends MedusaService({
     )
   }
 
+  /** Atomic jsonb merge (see slot-metadata-sql.ts). Throws if no live slot matched. */
+  @InjectManager()
   async updateSlotMetadata(
     slotId: string,
     patch: Record<string, unknown>,
+    @MedusaContext() sharedContext?: Context<EntityManager>,
   ): Promise<void> {
-    const [slot] = await this.listStorySlots({ id: slotId })
-    if (!slot) throw new Error(`Slot ${slotId} not found`)
-    await this.updateStorySlots({
-      id: slotId,
-      metadata: {
-        ...((slot.metadata ?? {}) as Record<string, unknown>),
-        ...patch,
-      },
-    } as unknown as Parameters<this["updateStorySlots"]>[0])
+    const { sql, params } = mergeSlotMetadataSql(slotId, patch)
+    const rows = await sharedContext!.manager!.execute(sql, params)
+    if (!rows.length) throw new Error(`Slot ${slotId} not found`)
+  }
+
+  /**
+   * Like updateSlotMetadata, but writes only while the slot is unposted, live and
+   * its metadata.render_job.job_id is `jobId`. Returns whether a row changed.
+   */
+  @InjectManager()
+  async updateSlotMetadataIfJob(
+    slotId: string,
+    jobId: string,
+    patch: Record<string, unknown>,
+    @MedusaContext() sharedContext?: Context<EntityManager>,
+  ): Promise<boolean> {
+    const { sql, params } = mergeSlotMetadataSql(slotId, patch, { jobId })
+    const rows = await sharedContext!.manager!.execute(sql, params)
+    return rows.length > 0
   }
 
   /**

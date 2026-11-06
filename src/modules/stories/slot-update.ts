@@ -1,7 +1,13 @@
 import { buildSnapshot, type ProductLike, type ProductSnapshot } from "./snapshot"
 
 /** Metadata keys that describe a slot's rendered video. */
-const RENDER_KEYS = ["render", "render_error", "render_started_at"] as const
+export const RENDER_KEYS = [
+  "render",
+  "render_error",
+  "render_started_at",
+  "render_job",
+  "render_shadow",
+] as const
 
 /**
  * Slot metadata without its render, so the old product's video can never be

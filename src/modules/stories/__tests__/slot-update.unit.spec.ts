@@ -45,6 +45,23 @@ describe("swapSlotUpdate", () => {
   })
 })
 
+describe("swapSlotUpdate cloud render state", () => {
+  it("a swap drops render_job and render_shadow", () => {
+    const u = swapSlotUpdate(
+      {
+        ...SLOT,
+        metadata: {
+          render_job: { job_id: "stslot_1_0123456789abcdef" },
+          render_shadow: { mp4_url: "https://cdn/shadow.mp4" },
+          publish_error: { message: "earlier" },
+        },
+      },
+      PRODUCT,
+    )
+    expect(Object.keys(u.metadata)).toEqual(["publish_error"])
+  })
+})
+
 describe("clearSlotProductUpdate", () => {
   it("empties the slot and drops its render", () => {
     const u = clearSlotProductUpdate(SLOT)
