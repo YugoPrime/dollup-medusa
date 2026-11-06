@@ -14,6 +14,16 @@ function hashOf(url) {
   return name.replace(/\.mp4$/, "") || "-"
 }
 
+// A done shadow must sit exactly at its own output_key; an unparseable URL fails.
+function urlMatchesKey(url, key) {
+  if (typeof key !== "string" || !key) return false
+  try {
+    return new URL(url).pathname === "/" + key
+  } catch {
+    return false
+  }
+}
+
 export function compareShadow(slots) {
   const sorted = [...slots].sort((a, b) => a.slot_index - b.slot_index)
   const rows = sorted.map((s) => {
@@ -22,10 +32,13 @@ export function compareShadow(slots) {
     const sh = md.render_shadow
     const shadow = sh?.state === "done" ? hashOf(sh.mp4_url) : "-"
     let result
-    if (!sh || sh.state === "sent") result = "missing"
+    // Neither side rendered (e.g. a slot with no product): neutral, not a failure.
+    if (laptop === "-" && !sh) result = "not rendered"
+    else if (!sh || sh.state === "sent") result = "missing"
     else if (sh.state === "failed") result = "failed"
     else if (sh.state !== "done") result = "missing"
     else if (shadow === "-") result = "failed"
+    else if (!urlMatchesKey(sh.mp4_url, sh.output_key)) result = "failed"
     else if (Number(sh.duration_ms) >= SLOW_MS) result = "slow"
     else if (laptop === "-") result = "no laptop render"
     else result = laptop === shadow ? "same" : "inputs differ"

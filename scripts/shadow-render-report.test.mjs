@@ -10,6 +10,7 @@ const laptop = (id, h) => ({
 })
 const shadow = (id, h, extra = {}) => ({
   job_id: `${id}_${h}`,
+  output_key: `stories-shadow/${id}/${h}.mp4`,
   state: "done",
   sent_at: "2026-11-06T10:00:00Z",
   resolved_at: "2026-11-06T10:02:00Z",
@@ -79,10 +80,51 @@ test("no laptop render alone stays PASS", () => {
   assert.equal(r.rows[2].result, "no laptop render")
 })
 
-test("null metadata is missing; rows ordered by slot_index", () => {
+test("null metadata is not rendered; rows ordered by slot_index", () => {
   const r = compareShadow([{ id: "b", slot_index: 1, metadata: null }, slot(0, H(0), H(0))])
   assert.deepEqual(r.rows.map((x) => x.index), [0, 1])
-  assert.equal(r.rows[1].result, "missing")
+  assert.equal(r.rows[1].result, "not rendered")
+  assert.equal(r.verdict, "PASS")
+})
+
+test("neither side rendered is neutral: not rendered, verdict PASS", () => {
+  const s = seven()
+  s[6] = slot(6, null, null)
+  const r = compareShadow(s)
+  assert.equal(r.rows[6].result, "not rendered")
+  assert.equal(r.rows[6].laptop, "-")
+  assert.equal(r.rows[6].shadow, "-")
+  assert.equal(r.verdict, "PASS")
+})
+
+test("not rendered does not hide an inputs-differ CHECK", () => {
+  const s = seven()
+  s[6] = slot(6, null, null)
+  s[3] = slot(3, H(3), H(99))
+  assert.equal(compareShadow(s).verdict, "CHECK")
+})
+
+test("done shadow whose URL path is not its output_key counts as failed", () => {
+  const s = seven()
+  s[3].metadata.render_shadow.mp4_url = `https://cdn.dollupboutique.com/stories/slot_3/${H(3)}.mp4`
+  const r = compareShadow(s)
+  assert.equal(r.rows[3].result, "failed")
+  assert.equal(r.verdict, "FAIL")
+})
+
+test("done shadow with an unparseable URL counts as failed", () => {
+  const s = seven()
+  s[4].metadata.render_shadow.mp4_url = `not a url/${H(4)}.mp4`
+  const r = compareShadow(s)
+  assert.equal(r.rows[4].result, "failed")
+  assert.equal(r.verdict, "FAIL")
+})
+
+test("done shadow without an output_key counts as failed", () => {
+  const s = seven()
+  delete s[5].metadata.render_shadow.output_key
+  const r = compareShadow(s)
+  assert.equal(r.rows[5].result, "failed")
   assert.equal(r.verdict, "FAIL")
 })
 
