@@ -7,6 +7,11 @@ import { uploadStoryRenderToR2 } from "../../../../../../lib/r2-story-uploader"
 import { STORIES_MODULE } from "../../../../../../modules/stories"
 import type StoriesModuleService from "../../../../../../modules/stories/service"
 import type { ProductSnapshot } from "../../../../../../modules/stories/snapshot"
+import {
+  createCloudDeps,
+  dispatchSlot,
+} from "../../../../../../modules/stories-render/cloud/dispatch"
+import { resolveRenderMode } from "../../../../../../modules/stories-render/cloud/mode"
 import { STORIES_RENDER_MODULE } from "../../../../../../modules/stories-render"
 import { pickTemplate } from "../../../../../../modules/stories-render/picker"
 import type StoriesRenderModuleService from "../../../../../../modules/stories-render/service"
@@ -52,6 +57,28 @@ export async function POST(req: AuthenticatedMedusaRequest, res: MedusaResponse)
         ? "No in-stock photos to render"
         : "No product picked for this slot",
     })
+    return
+  }
+
+  if (resolveRenderMode() === "cloud") {
+    try {
+      const deps = createCloudDeps(req.scope)
+      const outcome = await dispatchSlot(
+        deps,
+        slot,
+        { ...picked, plan_id: slot.plan_id, slot_index: slot.slot_index },
+        { kind: "prod", manual: true },
+      )
+      res.status(202).json({
+        status: "queued",
+        slot_id: slotId,
+        template_slug: picked.template_slug,
+        remote: true,
+        outcome,
+      })
+    } catch (err) {
+      res.status(500).json({ message: (err as Error)?.message ?? "Dispatch failed" })
+    }
     return
   }
 

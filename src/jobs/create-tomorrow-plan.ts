@@ -12,6 +12,12 @@ import {
   batchRenderPlan,
   summarizeBatch,
 } from "../modules/stories-render/batch"
+import {
+  createCloudDeps,
+  dispatchPlan,
+  summarizeDispatch,
+} from "../modules/stories-render/cloud/dispatch"
+import { resolveRenderMode } from "../modules/stories-render/cloud/mode"
 
 const ADMIN_URL = process.env.ADMIN_URL ?? "https://api.dollupboutique.com/app"
 
@@ -154,7 +160,64 @@ export default async function createTomorrowPlan(
   // product picking still runs here; rendering is handed off to the local
   // CLI (src/scripts/local-render-stories.ts) running on a developer
   // laptop, which polls and renders any slot without metadata.render.
+  const renderMode = resolveRenderMode()
+
+  // Cloud mode: hand every slot to the render service, then report.
+  if (renderMode === "cloud") {
+    let summary
+    try {
+      const deps = createCloudDeps(container)
+      summary = summarizeDispatch(await dispatchPlan(deps, plan.id, { kind: "prod" }))
+    } catch (err) {
+      const msg = (err as Error)?.message ?? "cloud dispatch failed"
+      logger.error(`[auto-plan] cloud dispatch failed for plan ${plan.id}: ${msg}`)
+      await sendTelegram(
+        `⚠️ Cloud render is not configured: ${escapeTelegramHtml(msg)}`,
+      )
+      return
+    }
+    logger.info(
+      `[auto-plan] ${planDate}: plan ${plan.id} created with ${filledSlots.length} slot(s), cloud: ${summary.sent} sent, ${summary.failed} failed`,
+    )
+    await sendTelegram(
+      [
+        `📅 <b>Plan ready for ${escapeTelegramHtml(planDate)}</b>`,
+        "",
+        `📦 Slots: ${filledSlots.length}`,
+        noProductCount > 0
+          ? `🛒 Need manual swap (no eligible product): ${noProductCount}`
+          : null,
+        "",
+        `☁️ Rendering in the cloud: ${summary.sent} sent`,
+        summary.failed > 0
+          ? `⚠️ Not sent yet, retrying: ${summary.failed}`
+          : null,
+        "",
+        `<a href="${ADMIN_URL}/stories/${planDate}">Open in admin</a>`,
+      ]
+        .filter((l): l is string => l !== null)
+        .join("\n"),
+    )
+    return
+  }
+
   if (process.env.STORIES_RENDER_REMOTE_ONLY === "true") {
+    // Shadow mode: also send the plan to the cloud as shadow jobs. Never
+    // throws; plan creation and today's message must survive any failure.
+    let shadowLine: string | null = null
+    if (renderMode === "shadow") {
+      try {
+        const deps = createCloudDeps(container)
+        const shadow = summarizeDispatch(
+          await dispatchPlan(deps, plan.id, { kind: "shadow" }),
+        )
+        shadowLine = `🧪 Shadow: ${shadow.sent} sent to the cloud`
+      } catch (err) {
+        logger.error(
+          `[auto-plan] shadow dispatch failed for plan ${plan.id}: ${(err as Error)?.message ?? err}`,
+        )
+      }
+    }
     logger.info(
       `[auto-plan] ${planDate}: plan ${plan.id} created with ${filledSlots.length} slot(s), rendering deferred to local CLI (STORIES_RENDER_REMOTE_ONLY=true)`,
     )
@@ -168,6 +231,7 @@ export default async function createTomorrowPlan(
           : null,
         "",
         `⏳ Rendering will run on the local CLI next time it polls.`,
+        shadowLine,
         "",
         `<a href="${ADMIN_URL}/stories/${planDate}">Open in admin</a>`,
       ]
