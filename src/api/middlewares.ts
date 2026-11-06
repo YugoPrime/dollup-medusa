@@ -62,6 +62,13 @@ export default defineMiddlewares({
       middlewares: [raw({ type: "*/*", limit: "1mb" })],
     },
     {
+      // Render-service callback: HMAC over the raw body (same pattern as rapido).
+      matcher: "/hooks/story-render",
+      methods: ["POST"],
+      bodyParser: false,
+      middlewares: [raw({ type: "*/*", limit: "256kb" })],
+    },
+    {
       matcher: "/admin/chat/uploads",
       methods: ["POST"],
       // Disable Medusa's JSON body parser so Busboy can read the multipart stream
