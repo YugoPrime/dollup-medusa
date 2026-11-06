@@ -16,6 +16,25 @@ describe("mergeSlotMetadataSql", () => {
   })
 })
 
+describe("mergeSlotMetadataSql state guard", () => {
+  it("state.is adds an equality clause after the job id", () => {
+    const { sql, params } = mergeSlotMetadataSql("s1", {}, { jobId: "J", state: { is: "sent" } })
+    expect(sql).toContain("AND metadata -> 'render_job' ->> 'state' = ?")
+    expect(params).toEqual(["{}", "s1", "J", "sent"])
+  })
+
+  it("state.isNot adds an IS DISTINCT FROM clause after the job id", () => {
+    const { sql, params } = mergeSlotMetadataSql("s1", {}, { jobId: "J", state: { isNot: "done" } })
+    expect(sql).toContain("AND (metadata -> 'render_job' ->> 'state') IS DISTINCT FROM ?")
+    expect(params).toEqual(["{}", "s1", "J", "done"])
+  })
+
+  it("both clauses keep clause order in params", () => {
+    const { params } = mergeSlotMetadataSql("s1", {}, { jobId: "J", state: { is: "sent", isNot: "done" } })
+    expect(params).toEqual(["{}", "s1", "J", "sent", "done"])
+  })
+})
+
 describe("dropRenderKeysSql", () => {
   it("removes every render key from a live slot", () => {
     const { sql, params } = dropRenderKeysSql("stslot_1")

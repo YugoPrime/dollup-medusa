@@ -10,7 +10,7 @@ import { buildSnapshot, type ProductLike } from "./snapshot"
 import { DEFAULT_WEIGHTING, type WeightingConfig } from "./picker-weighting"
 import { activeFocusTag } from "./focus"
 import { chooseSlotProduct } from "./slot-choice"
-import { dropRenderKeysSql, mergeSlotMetadataSql } from "./slot-metadata-sql"
+import { dropRenderKeysSql, mergeSlotMetadataSql, type JobStateGuard } from "./slot-metadata-sql"
 import { clearSlotProductUpdate, swapSlotUpdate } from "./slot-update"
 
 export const STORY_SETTINGS_ID = "story_settings"
@@ -259,16 +259,17 @@ class StoriesModuleService extends MedusaService({
 
   /**
    * Like updateSlotMetadata, but writes only while the slot is unposted, live and
-   * its metadata.render_job.job_id is `jobId`. Returns whether a row changed.
+   * its metadata.render_job.job_id is `jobId` (and render_job.state matches `state`, if given). Returns whether a row changed.
    */
   @InjectManager()
   async updateSlotMetadataIfJob(
     slotId: string,
     jobId: string,
     patch: Record<string, unknown>,
+    state?: JobStateGuard,
     @MedusaContext() sharedContext?: Context<EntityManager>,
   ): Promise<boolean> {
-    const { sql, params } = mergeSlotMetadataSql(slotId, patch, { jobId })
+    const { sql, params } = mergeSlotMetadataSql(slotId, patch, { jobId, state })
     const rows = await sharedContext!.manager!.execute(sql, params)
     return rows.length > 0
   }

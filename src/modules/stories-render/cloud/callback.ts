@@ -1,4 +1,5 @@
 import type StoriesModuleService from "../../stories/service"
+import type { JobStateGuard } from "../../stories/slot-metadata-sql"
 import type { RenderResult } from "../types"
 import type { RemoteJob } from "./client"
 import {
@@ -36,6 +37,7 @@ export type CallbackDecision =
       kind: JobKind
       slotId: string
       guardJobId: string | null
+      guardState?: JobStateGuard
       patch: Record<string, unknown>
     }
 
@@ -166,6 +168,7 @@ export function decideCallbackWrite(
       kind: "prod",
       slotId: slot.id,
       guardJobId: job.job_id,
+      guardState: { isNot: "done" },
       patch: {
         render,
         render_started_at: null,
@@ -181,6 +184,7 @@ export function decideCallbackWrite(
     kind: "prod",
     slotId: slot.id,
     guardJobId: job.job_id,
+    guardState: { is: "sent" },
     patch: {
       render_error: {
         message: body.message,
@@ -255,7 +259,8 @@ export async function applyCallback(
   const wrote = await stories.updateSlotMetadataIfJob(
     decision.slotId,
     decision.guardJobId,
-    decision.patch
+    decision.patch,
+    decision.guardState
   )
   return wrote
     ? { action: "written" }

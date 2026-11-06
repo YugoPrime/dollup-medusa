@@ -7,18 +7,29 @@ import { RENDER_KEYS } from "./slot-update"
  * replaces that key's whole value, and `null` stores JSON null.
  *
  * With `guard`, the write also requires an unposted slot whose current
- * render job is `guard.jobId`, so a stale callback cannot overwrite newer state.
+ * render job is `guard.jobId` (and, optionally, in/not in a given state), so a stale callback cannot overwrite newer state.
  */
+export type RenderJobStateName = "sent" | "done" | "failed"
+export type JobStateGuard = { is?: RenderJobStateName; isNot?: RenderJobStateName }
+
 export function mergeSlotMetadataSql(
   slotId: string,
   patch: Record<string, unknown>,
-  guard?: { jobId: string },
+  guard?: { jobId: string; state?: JobStateGuard },
 ): { sql: string; params: unknown[] } {
   const params: unknown[] = [JSON.stringify(patch), slotId]
   let guardSql = ""
   if (guard) {
     guardSql = "\n   AND posted_at IS NULL AND metadata -> 'render_job' ->> 'job_id' = ?"
     params.push(guard.jobId)
+    if (guard.state?.is) {
+      guardSql += "\n   AND metadata -> 'render_job' ->> 'state' = ?"
+      params.push(guard.state.is)
+    }
+    if (guard.state?.isNot) {
+      guardSql += "\n   AND (metadata -> 'render_job' ->> 'state') IS DISTINCT FROM ?"
+      params.push(guard.state.isNot)
+    }
   }
   const sql =
     "UPDATE story_slot\n" +

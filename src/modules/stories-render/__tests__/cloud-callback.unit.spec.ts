@@ -189,6 +189,7 @@ describe("decideCallbackWrite", () => {
       kind: "prod",
       slotId: SLOT_ID,
       guardJobId: PROD_ID,
+      guardState: { isNot: "done" },
       patch: {
         render: {
           mp4_url: MP4_URL,
@@ -225,6 +226,7 @@ describe("decideCallbackWrite", () => {
       kind: "prod",
       slotId: SLOT_ID,
       guardJobId: PROD_ID,
+      guardState: { is: "sent" },
       patch: {
         render_error: {
           message: "boom",
@@ -356,12 +358,20 @@ describe("applyCallback", () => {
   }
 
   it("prod writes use updateSlotMetadataIfJob with the job id", async () => {
-    const { stories, calls } = fakeStories(slot(sentMeta()))
+    const { stories, mocks, calls } = fakeStories(slot(sentMeta()))
     expect(await applyCallback(stories, ok(), NOW)).toEqual({ action: "written" })
     expect(calls.guarded).toHaveLength(1)
     expect(calls.guarded[0][0]).toBe(SLOT_ID)
     expect(calls.guarded[0][1]).toBe(PROD_ID)
+    expect(calls.guarded[0][3]).toEqual({ isNot: "done" })
+    expect(mocks.listStorySlots).toHaveBeenCalledWith({ id: SLOT_ID })
     expect(calls.plain).toHaveLength(0)
+  })
+
+  it("an error write passes the sent-state guard", async () => {
+    const { stories, calls } = fakeStories(slot(sentMeta()))
+    await applyCallback(stories, err(), NOW)
+    expect(calls.guarded[0][3]).toEqual({ is: "sent" })
   })
 
   it("a false guard result is ignored", async () => {

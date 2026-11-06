@@ -111,6 +111,21 @@ moduleIntegrationTestRunner<StoriesModuleService>({
         expect(await meta(slot.id)).toEqual({ render_job: { job_id: "J1" }, render: { x: 1 } })
       })
 
+      it("IfJob state guards", async () => {
+        const patch = { render: { x: 1 } }
+        const done = await makeSlot({ render_job: { job_id: "J1", state: "done" } })
+        expect(await service.updateSlotMetadataIfJob(done.id, "J1", patch, { is: "sent" })).toBe(false)
+        expect(await meta(done.id)).toEqual({ render_job: { job_id: "J1", state: "done" } })
+        expect(await service.updateSlotMetadataIfJob(done.id, "J1", patch, { isNot: "done" })).toBe(false)
+
+        const failed = await makeSlot({ render_job: { job_id: "J1", state: "failed" } })
+        expect(await service.updateSlotMetadataIfJob(failed.id, "J1", patch, { isNot: "done" })).toBe(true)
+
+        const sent = await makeSlot({ render_job: { job_id: "J1", state: "sent" } })
+        expect(await service.updateSlotMetadataIfJob(sent.id, "J1", patch, { is: "sent" })).toBe(true)
+        expect((await meta(sent.id)).render).toEqual({ x: 1 })
+      })
+
       it("IfJob refuses a posted slot", async () => {
         const slot = await makeSlot({ render_job: { job_id: "J1" } }, true)
         expect(await service.updateSlotMetadataIfJob(slot.id, "J1", { render: { x: 1 } })).toBe(false)
