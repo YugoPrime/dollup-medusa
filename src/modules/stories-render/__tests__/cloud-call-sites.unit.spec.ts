@@ -188,6 +188,62 @@ describe("cloud call sites", () => {
     })
   })
 
+  describe("a slot that changed while sending", () => {
+    const CHANGED = {
+      message: "The slot changed while sending; refresh and try again.",
+    }
+    const routes = [
+      [
+        "render",
+        (res: any) =>
+          renderPost(
+            fakeReq(
+              { [STORIES_KEY]: { listStorySlots: jest.fn(async () => [slot]) } },
+              { id: "slot_1" },
+              { template_slug: "hero" },
+            ),
+            res,
+          ),
+      ],
+      [
+        "auto-render",
+        (res: any) =>
+          autoRenderPost(
+            fakeReq(
+              { [STORIES_KEY]: { listStorySlots: jest.fn(async () => [slot]) } },
+              { id: "slot_1" },
+            ),
+            res,
+          ),
+      ],
+    ] as const
+
+    it.each(routes)("%s answers 409 with the refresh message", async (_name, post) => {
+      mode.mockReturnValue("cloud")
+      ;(dispatchSlot as jest.Mock).mockResolvedValue("changed")
+      const { res, out } = fakeRes()
+      await post(res)
+      expect(dispatchSlot).toHaveBeenCalledTimes(1)
+      expect(out.status).toBe(409)
+      expect(out.body).toEqual(CHANGED)
+    })
+
+    it.each(
+      routes.flatMap(([name, post]) =>
+        (["sent", "applied", "rejected", "unavailable"] as const).map(
+          (outcome) => [name, outcome, post] as const,
+        ),
+      ),
+    )("%s still answers 202 for outcome %s", async (_name, outcome, post) => {
+      mode.mockReturnValue("cloud")
+      ;(dispatchSlot as jest.Mock).mockResolvedValue(outcome)
+      const { res, out } = fakeRes()
+      await post(res)
+      expect(out.status).toBe(202)
+      expect(out.body).toMatchObject({ status: "queued", remote: true, outcome })
+    })
+  })
+
   it("batch-render in cloud mode awaits dispatchPlan with force and manual", async () => {
     mode.mockReturnValue("cloud")
     const stories = {

@@ -69,6 +69,11 @@ export async function POST(req: AuthenticatedMedusaRequest, res: MedusaResponse)
         { ...picked, plan_id: slot.plan_id, slot_index: slot.slot_index },
         { kind: "prod", manual: true },
       )
+      // Swapped, cleared or deleted since it was read: nothing was sent.
+      if (outcome === "changed") {
+        res.status(409).json({ message: "The slot changed while sending; refresh and try again." })
+        return
+      }
       res.status(202).json({
         status: "queued",
         slot_id: slotId,
