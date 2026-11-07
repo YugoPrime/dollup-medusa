@@ -509,9 +509,19 @@ describe("sweepCloudRenders summary", () => {
   it("does not announce if another sweep already claimed the slot", async () => {
     const slot = done(makeSlot(1))
     const { deps, stories, telegram } = setup([slot])
-    stories.updateSlotMetadataIfJob.mockResolvedValue(false)
+    stories.claimSlotMetadata.mockResolvedValue(false)
     await sweepCloudRenders(deps)
     expect(telegram).not.toHaveBeenCalled()
+  })
+
+  it("two overlapping ticks on a settled plan send one summary", async () => {
+    const { deps, telegram } = setup(sixDone())
+    const [a, b] = await Promise.all([
+      sweepCloudRenders(deps),
+      sweepCloudRenders(deps),
+    ])
+    expect(telegram).toHaveBeenCalledTimes(1)
+    expect(a.summaries + b.summaries).toBe(1)
   })
 })
 

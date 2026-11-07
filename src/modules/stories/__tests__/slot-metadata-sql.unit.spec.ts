@@ -133,7 +133,7 @@ describe("dropRenderKeysSql", () => {
     const { sql, params } = dropRenderKeysSql("stslot_1")
     expect(params).toEqual(["stslot_1"])
     expect(sql).toContain(
-      "- ARRAY['render','render_error','render_started_at','render_job','render_shadow','render_unsent_alert']::text[]",
+      "- ARRAY['render','render_error','render_started_at','render_job','render_shadow','render_unsent_alert','render_summary_claim']::text[]",
     )
     expect(sql).toContain("deleted_at IS NULL")
   })

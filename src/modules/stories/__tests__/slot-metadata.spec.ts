@@ -158,6 +158,7 @@ moduleIntegrationTestRunner<StoriesModuleService>({
         render_job: { job_id: "J1" },
         render_shadow: { mp4_url: "shadow" },
         render_unsent_alert: "J1",
+        render_summary_claim: "J1",
         publish_error: { message: "earlier" },
       }
 

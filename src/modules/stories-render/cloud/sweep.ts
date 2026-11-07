@@ -2,7 +2,7 @@ import {
   escapeTelegramHtml,
   type TelegramSendResult,
 } from "../../../lib/telegram"
-import { UNSENT_ALERT_KEY } from "../../stories/slot-update"
+import { SUMMARY_CLAIM_KEY, UNSENT_ALERT_KEY } from "../../stories/slot-update"
 import type { StorySlotRow } from "../batch"
 import { applyCallback, remoteJobToCallback } from "./callback"
 import { dispatchPlan, sweepWouldPick, type CloudDeps } from "./dispatch"
@@ -212,9 +212,29 @@ async function summarizePlan(deps: SweepDeps, plan: SweepPlan): Promise<boolean>
   }
   if (jobs.some((j) => unsettled(j, deps.now()))) return false
 
+  // Which slots the summary announces, by this tick's (possibly stale) read.
+  const fresh = jobs.filter((s) => notified(s.slot) !== s.job.job_id)
+  if (fresh.length === 0) return false
+
+  // One plan-wide gate, so two overlapping ticks cannot each win different slots
+  // and send two summaries. Compare-and-set on the first job slot; the value is
+  // the plan's set of job ids, so a later swap or re-render (new ids) can announce again.
+  const anchor = jobs[0]
+  const gateValue = jobs.map((j) => j.job.job_id).join(",")
+  const gate = await deps.stories.claimSlotMetadata(
+    anchor.slot.id,
+    SUMMARY_CLAIM_KEY,
+    gateValue,
+    { jobId: anchor.job.job_id },
+  )
+  if (!gate) return false
+  const releaseGate = () =>
+    deps.stories.updateSlotMetadataIfJob(anchor.slot.id, anchor.job.job_id, {
+      [SUMMARY_CLAIM_KEY]: null,
+    })
+
   const claimed: Settled[] = []
-  for (const s of jobs) {
-    if (notified(s.slot) === s.job.job_id) continue
+  for (const s of fresh) {
     const won = await deps.stories.updateSlotMetadataIfJob(
       s.slot.id,
       s.job.job_id,
@@ -222,7 +242,10 @@ async function summarizePlan(deps: SweepDeps, plan: SweepPlan): Promise<boolean>
     )
     if (won) claimed.push(s)
   }
-  if (claimed.length === 0) return false
+  if (claimed.length === 0) {
+    await releaseGate()
+    return false
+  }
 
   const sent = await deps.telegram(summaryMessage(deps, plan, claimed))
   if (sent.ok) return true
@@ -234,6 +257,7 @@ async function summarizePlan(deps: SweepDeps, plan: SweepPlan): Promise<boolean>
       render_notified_job: null,
     })
   }
+  await releaseGate()
   logError("summary_failed", { plan_id: plan.id, status: sent.status })
   return false
 }

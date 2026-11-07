@@ -3,6 +3,9 @@ import { buildSnapshot, type ProductLike, type ProductSnapshot } from "./snapsho
 /** The sweep's "still unsent" Telegram claim key (a render key, so a swap or clear drops it). */
 export const UNSENT_ALERT_KEY = "render_unsent_alert"
 
+/** The sweep's plan-summary Telegram claim key, held on the plan's first job slot. */
+export const SUMMARY_CLAIM_KEY = "render_summary_claim"
+
 /**
  * Metadata keys that describe a slot's rendered video. A swap removes them via
  * dropRenderKeysSql (Medusa's update merges metadata, so omission would keep them).
@@ -16,6 +19,7 @@ export const RENDER_KEYS = [
   "render_job",
   "render_shadow",
   UNSENT_ALERT_KEY,
+  SUMMARY_CLAIM_KEY,
 ] as const
 
 type SlotLike = { id: string; pick_attempt?: number | null }
