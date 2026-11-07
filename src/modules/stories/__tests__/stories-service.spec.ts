@@ -1,3 +1,9 @@
+if (process.env.DB_PORT !== "55432") {
+  throw new Error(
+    "Refusing to run: set DB_PORT=55432. Port 5432 on this laptop is the production database tunnel.",
+  )
+}
+
 import { moduleIntegrationTestRunner } from "@medusajs/test-utils"
 
 import { STORIES_MODULE } from "../index"

@@ -1,4 +1,11 @@
-import { MedusaService } from "@medusajs/framework/utils"
+import {
+  InjectManager,
+  InjectTransactionManager,
+  MedusaContext,
+  MedusaService,
+} from "@medusajs/framework/utils"
+import type { Context } from "@medusajs/framework/types"
+import type { EntityManager } from "@medusajs/framework/mikro-orm/knex"
 
 import StoryPlan from "./models/story-plan"
 import StorySlot from "./models/story-slot"
@@ -8,6 +15,7 @@ import { buildSnapshot, type ProductLike } from "./snapshot"
 import { DEFAULT_WEIGHTING, type WeightingConfig } from "./picker-weighting"
 import { activeFocusTag } from "./focus"
 import { chooseSlotProduct } from "./slot-choice"
+import { dropRenderKeysSql, mergeSlotMetadataSql, type JobStateGuard } from "./slot-metadata-sql"
 import { clearSlotProductUpdate, swapSlotUpdate } from "./slot-update"
 
 export const STORY_SETTINGS_ID = "story_settings"
@@ -101,6 +109,15 @@ export const DEFAULT_STORY_SETTINGS: Omit<StorySettingsDTO, "id"> = {
   collection_boost_days: DEFAULT_WEIGHTING.collection_boost_days,
   focus_tag: null,
   focus_until: null,
+}
+
+/**
+ * The manager raw SQL must run on. Inside a transaction @InjectManager still
+ * sets `manager` to a fresh fork outside it; the caller's transaction is on
+ * `transactionManager`.
+ */
+function activeManager(sharedContext?: Context<EntityManager>): EntityManager {
+  return (sharedContext!.transactionManager ?? sharedContext!.manager!) as EntityManager
 }
 
 class StoriesModuleService extends MedusaService({
@@ -207,41 +224,142 @@ class StoriesModuleService extends MedusaService({
     await this.updateStorySlots({ id: slotId, scheduled_at: scheduledAt })
   }
 
+  /** Removes all render_* metadata (atomic). Runs before a swap/clear so a stale render callback fails its job guard. */
+  @InjectManager()
+  protected async dropRenderKeys(
+    slotId: string,
+    @MedusaContext() sharedContext?: Context<EntityManager>,
+  ): Promise<void> {
+    const { sql, params } = dropRenderKeysSql(slotId)
+    const rows = await activeManager(sharedContext).execute(sql, params)
+    if (!rows.length) throw new Error(`Slot ${slotId} not found`)
+  }
+
+  /**
+   * Drops the render keys, then puts the product on, in ONE transaction. A prod
+   * dispatch stamp (guarded on product_id + pick_attempt as read) waits on the
+   * row lock and then finds the new product, so it cannot re-attach the old
+   * product's job. Keep this order: product first would let a sweep between the
+   * two statements resend the old job and pass the new guard.
+   */
+  @InjectTransactionManager()
   async swapSlotProduct(
     slotId: string,
     product: ProductLike,
+    @MedusaContext() sharedContext?: Context<EntityManager>,
   ): Promise<void> {
-    const [slot] = await this.listStorySlots({ id: slotId })
+    const [slot] = await this.listStorySlots({ id: slotId }, {}, sharedContext)
     if (!slot) throw new Error(`Slot ${slotId} not found`)
     if (slot.posted_at) throw new Error("Cannot swap product on a posted slot")
+    await this.dropRenderKeys(slotId, sharedContext)
     await this.updateStorySlots(
       swapSlotUpdate(slot, product) as unknown as Parameters<this["updateStorySlots"]>[0],
+      sharedContext,
     )
   }
 
-  /** Leaves an unposted slot with no product (and no render), so it can't post. */
-  async clearSlotProduct(slotId: string): Promise<void> {
-    const [slot] = await this.listStorySlots({ id: slotId })
+  /** Leaves an unposted slot with no product (and no render), so it can't post. One transaction, like swapSlotProduct. */
+  @InjectTransactionManager()
+  async clearSlotProduct(
+    slotId: string,
+    @MedusaContext() sharedContext?: Context<EntityManager>,
+  ): Promise<void> {
+    const [slot] = await this.listStorySlots({ id: slotId }, {}, sharedContext)
     if (!slot) throw new Error(`Slot ${slotId} not found`)
     if (slot.posted_at) throw new Error("Cannot clear a posted slot")
+    await this.dropRenderKeys(slotId, sharedContext)
     await this.updateStorySlots(
       clearSlotProductUpdate(slot) as unknown as Parameters<this["updateStorySlots"]>[0],
+      sharedContext,
     )
   }
 
+  /** Atomic jsonb merge (see slot-metadata-sql.ts). Throws if no live slot matched. */
+  @InjectManager()
   async updateSlotMetadata(
     slotId: string,
     patch: Record<string, unknown>,
+    @MedusaContext() sharedContext?: Context<EntityManager>,
   ): Promise<void> {
-    const [slot] = await this.listStorySlots({ id: slotId })
-    if (!slot) throw new Error(`Slot ${slotId} not found`)
-    await this.updateStorySlots({
-      id: slotId,
-      metadata: {
-        ...((slot.metadata ?? {}) as Record<string, unknown>),
-        ...patch,
-      },
-    } as unknown as Parameters<this["updateStorySlots"]>[0])
+    const { sql, params } = mergeSlotMetadataSql(slotId, patch)
+    const rows = await activeManager(sharedContext).execute(sql, params)
+    if (!rows.length) throw new Error(`Slot ${slotId} not found`)
+  }
+
+  /**
+   * Like updateSlotMetadata, but writes only while the slot is unposted, live and
+   * its metadata.render_job.job_id is `jobId` (and render_job.state matches `state`, if given). Returns whether a row changed.
+   */
+  @InjectManager()
+  async updateSlotMetadataIfJob(
+    slotId: string,
+    jobId: string,
+    patch: Record<string, unknown>,
+    state?: JobStateGuard,
+    @MedusaContext() sharedContext?: Context<EntityManager>,
+  ): Promise<boolean> {
+    const { sql, params } = mergeSlotMetadataSql(slotId, patch, { jobId, state })
+    const rows = await activeManager(sharedContext).execute(sql, params)
+    return rows.length > 0
+  }
+
+  /**
+   * Like updateSlotMetadata, but writes only while the live slot still has the
+   * product_id and pick_attempt in `expect` (the slot as the caller read it). A
+   * swap bumps pick_attempt and a clear nulls product_id, so either one makes
+   * this a no-op. Returns whether a row changed.
+   */
+  @InjectManager()
+  async updateSlotMetadataIfUnchanged(
+    slotId: string,
+    expect: { product_id: string | null; pick_attempt: number | null },
+    patch: Record<string, unknown>,
+    @MedusaContext() sharedContext?: Context<EntityManager>,
+  ): Promise<boolean> {
+    const { sql, params } = mergeSlotMetadataSql(slotId, patch, undefined, {
+      productId: expect.product_id,
+      pickAttempt: expect.pick_attempt,
+    })
+    const rows = await activeManager(sharedContext).execute(sql, params)
+    return rows.length > 0
+  }
+
+  /**
+   * Compare-and-set claim: writes metadata[key] = value only while that key holds
+   * anything else, so of two overlapping callers exactly one wins. Scoped to an
+   * unposted slot whose render job is `on.jobId` (in `on.state`, if given); with
+   * `jobId: null`, to a slot with no render job that still has the product_id and
+   * pick_attempt as read. Returns whether this call won the claim.
+   */
+  @InjectManager()
+  async claimSlotMetadata(
+    slotId: string,
+    key: string,
+    value: string,
+    on:
+      | { jobId: string; state?: JobStateGuard }
+      | { jobId: null; product_id: string | null; pick_attempt: number | null },
+    @MedusaContext() sharedContext?: Context<EntityManager>,
+  ): Promise<boolean> {
+    const claim = { key, value }
+    const { sql, params } =
+      on.jobId === null
+        ? mergeSlotMetadataSql(
+            slotId,
+            { [key]: value },
+            { jobId: null },
+            { productId: on.product_id, pickAttempt: on.pick_attempt },
+            claim,
+          )
+        : mergeSlotMetadataSql(
+            slotId,
+            { [key]: value },
+            { jobId: on.jobId, state: on.state },
+            undefined,
+            claim,
+          )
+    const rows = await activeManager(sharedContext).execute(sql, params)
+    return rows.length > 0
   }
 
   /**

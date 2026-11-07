@@ -1,20 +1,28 @@
 import { buildSnapshot, type ProductLike, type ProductSnapshot } from "./snapshot"
 
-/** Metadata keys that describe a slot's rendered video. */
-const RENDER_KEYS = ["render", "render_error", "render_started_at"] as const
+/** The sweep's "still unsent" Telegram claim key (a render key, so a swap or clear drops it). */
+export const UNSENT_ALERT_KEY = "render_unsent_alert"
+
+/** The sweep's plan-summary Telegram claim key, held on the plan's first job slot. */
+export const SUMMARY_CLAIM_KEY = "render_summary_claim"
 
 /**
- * Slot metadata without its render, so the old product's video can never be
- * published and the renderer (which skips slots that already have one) makes a
- * new video for the slot's new product.
+ * Metadata keys that describe a slot's rendered video. A swap removes them via
+ * dropRenderKeysSql (Medusa's update merges metadata, so omission would keep them).
+ * `render_unsent_alert` is the sweep's "still unsent" Telegram claim, so the new
+ * product can alert again.
  */
-function withoutRender(metadata: unknown): Record<string, unknown> {
-  const copy = { ...((metadata ?? {}) as Record<string, unknown>) }
-  for (const key of RENDER_KEYS) delete copy[key]
-  return copy
-}
+export const RENDER_KEYS = [
+  "render",
+  "render_error",
+  "render_started_at",
+  "render_job",
+  "render_shadow",
+  UNSENT_ALERT_KEY,
+  SUMMARY_CLAIM_KEY,
+] as const
 
-type SlotLike = { id: string; pick_attempt?: number | null; metadata?: unknown }
+type SlotLike = { id: string; pick_attempt?: number | null }
 
 /** Update for putting `product` on an unposted slot (manual swap or re-pick). */
 export function swapSlotUpdate(
@@ -26,7 +34,6 @@ export function swapSlotUpdate(
   product_snapshot: ProductSnapshot
   fallback_used: boolean
   pick_attempt: number
-  metadata: Record<string, unknown>
 } {
   return {
     id: slot.id,
@@ -34,7 +41,6 @@ export function swapSlotUpdate(
     product_snapshot: buildSnapshot(product),
     fallback_used: false,
     pick_attempt: (slot.pick_attempt ?? 1) + 1,
-    metadata: withoutRender(slot.metadata),
   }
 }
 
@@ -43,7 +49,6 @@ export function clearSlotProductUpdate(slot: SlotLike): {
   id: string
   product_id: null
   product_snapshot: null
-  metadata: Record<string, unknown>
 } {
-  return { id: slot.id, product_id: null, product_snapshot: null, metadata: withoutRender(slot.metadata) }
+  return { id: slot.id, product_id: null, product_snapshot: null }
 }

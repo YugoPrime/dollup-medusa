@@ -6,6 +6,11 @@ import type {
 import { uploadStoryRenderToR2 } from "../../../../../../lib/r2-story-uploader"
 import { STORIES_MODULE } from "../../../../../../modules/stories"
 import type StoriesModuleService from "../../../../../../modules/stories/service"
+import {
+  createCloudDeps,
+  dispatchSlot,
+} from "../../../../../../modules/stories-render/cloud/dispatch"
+import { resolveRenderMode } from "../../../../../../modules/stories-render/cloud/mode"
 import { STORIES_RENDER_MODULE } from "../../../../../../modules/stories-render"
 import type StoriesRenderModuleService from "../../../../../../modules/stories-render/service"
 import type { RenderRequest } from "../../../../../../modules/stories-render/types"
@@ -55,6 +60,34 @@ export async function POST(req: AuthenticatedMedusaRequest, res: MedusaResponse)
     }
     if (slot.posted_at) {
       res.status(409).json({ message: "Slot is already posted" })
+      return
+    }
+
+    if (resolveRenderMode() === "cloud") {
+      const renderRequest: RenderRequest = {
+        template_slug: body.template_slug,
+        slot_inputs: body.slot_inputs ?? {},
+        text_overrides: body.text_overrides ?? {},
+        plan_id: slot.plan_id,
+        slot_index: slot.slot_index,
+      }
+      const deps = createCloudDeps(req.scope)
+      const outcome = await dispatchSlot(deps, slot, renderRequest, {
+        kind: "prod",
+        manual: true,
+      })
+      // Swapped, cleared or deleted since it was read: nothing was sent.
+      if (outcome === "changed") {
+        res.status(409).json({ message: "The slot changed while sending; refresh and try again." })
+        return
+      }
+      res.status(202).json({
+        status: "queued",
+        slot_id: slotId,
+        template_slug: body.template_slug,
+        remote: true,
+        outcome,
+      })
       return
     }
 

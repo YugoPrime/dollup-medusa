@@ -34,6 +34,7 @@ import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
 import { uploadStoryRenderToR2 } from "../lib/r2-story-uploader"
 import { addDaysToMauritiusDate, mauritiusToday } from "../lib/mauritius-date"
 import { escapeTelegramHtml, sendTelegram } from "../lib/telegram"
+import { listUpcomingPlans, normalizePlanDate } from "../lib/upcoming-story-plans"
 import { STORIES_MODULE } from "../modules/stories"
 import type StoriesModuleService from "../modules/stories/service"
 import {
@@ -132,18 +133,7 @@ async function runOnce(
   const today = mauritiusToday()
   const horizon = addDaysToMauritiusDate(today, settings.lookaheadDays)
 
-  // listStoryPlans doesn't have a "between dates" filter exposed, so list a
-  // generous window and filter in-process. Volumes are small (<= 30 plans).
-  const allPlans = await stories.listStoryPlans({} as any, { take: 200 })
-  const planDates = new Set<string>()
-  for (let i = 0; i <= settings.lookaheadDays; i++) {
-    planDates.add(addDaysToMauritiusDate(today, i))
-  }
-  const upcoming = allPlans
-    .filter((p) => planDates.has(normalizeDate(p.plan_date)))
-    .sort((a, b) =>
-      normalizeDate(a.plan_date).localeCompare(normalizeDate(b.plan_date)),
-    )
+  const upcoming = await listUpcomingPlans(stories, settings.lookaheadDays, today)
 
   if (upcoming.length === 0) {
     logger.info(
@@ -168,13 +158,13 @@ async function runOnce(
     )
     if (pending.length === 0) {
       logger.info(
-        `[local-render] plan ${plan.id} (${normalizeDate(plan.plan_date)}): all ${slots.length} slot(s) already rendered or posted`,
+        `[local-render] plan ${plan.id} (${normalizePlanDate(plan.plan_date)}): all ${slots.length} slot(s) already rendered or posted`,
       )
       continue
     }
 
     logger.info(
-      `[local-render] plan ${plan.id} (${normalizeDate(plan.plan_date)}): ${pending.length}/${slots.length} slot(s) need rendering`,
+      `[local-render] plan ${plan.id} (${normalizePlanDate(plan.plan_date)}): ${pending.length}/${slots.length} slot(s) need rendering`,
     )
 
     const results = await batchRenderPlan(container, plan.id)
@@ -309,21 +299,6 @@ async function runOneSlot(
     )
     if (e.stderrTail) logger.error(`[local-render]   stderr: ${e.stderrTail}`)
   }
-}
-
-function normalizeDate(value: unknown): string {
-  if (typeof value === "string") return value.slice(0, 10)
-  if (value instanceof Date) {
-    // Postgres `date` columns come back as midnight in the server's local TZ;
-    // calling .toISOString() shifts the moment into UTC which can land on
-    // the previous calendar day for UTC+N timezones (e.g. Mauritius UTC+4 -> -4h).
-    // Use the local components instead so the calendar day is preserved.
-    const y = value.getFullYear()
-    const m = String(value.getMonth() + 1).padStart(2, "0")
-    const d = String(value.getDate()).padStart(2, "0")
-    return `${y}-${m}-${d}`
-  }
-  return String(value).slice(0, 10)
 }
 
 function hasExistingRender(metadata: unknown): boolean {

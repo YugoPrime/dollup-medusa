@@ -4,6 +4,7 @@ import type {
 } from "@medusajs/framework/http"
 
 import { uploadStoryRenderToR2 } from "../../../../../../lib/r2-story-uploader"
+import { resolveRenderMode } from "../../../../../../modules/stories-render/cloud/mode"
 import { STORIES_RENDER_MODULE } from "../../../../../../modules/stories-render"
 import type StoriesRenderModuleService from "../../../../../../modules/stories-render/service"
 
@@ -39,6 +40,12 @@ const SAMPLE_TEXT: Record<string, string> = {
 }
 
 export async function POST(req: AuthenticatedMedusaRequest, res: MedusaResponse) {
+  if (resolveRenderMode() === "cloud") {
+    res
+      .status(409)
+      .json({ message: "Sample renders are off while stories render in the cloud." })
+    return
+  }
   const slug = req.params.slug
   const svc = req.scope.resolve<StoriesRenderModuleService>(STORIES_RENDER_MODULE)
   svc.uploadToR2 = uploadStoryRenderToR2

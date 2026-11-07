@@ -7,6 +7,11 @@ import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
 import { STORIES_MODULE } from "../../../../../../modules/stories"
 import type StoriesModuleService from "../../../../../../modules/stories/service"
 import { batchRenderPlan } from "../../../../../../modules/stories-render/batch"
+import {
+  createCloudDeps,
+  dispatchPlan,
+} from "../../../../../../modules/stories-render/cloud/dispatch"
+import { resolveRenderMode } from "../../../../../../modules/stories-render/cloud/mode"
 
 type BatchBody = { force?: boolean }
 
@@ -60,6 +65,28 @@ export async function POST(req: AuthenticatedMedusaRequest, res: MedusaResponse)
       continue
     }
     queuedCount++
+  }
+
+  // Cloud mode: dispatch is a few quick POSTs, so no in-memory lock and the
+  // reply waits for it. Local and shadow keep today's behaviour below.
+  if (resolveRenderMode() === "cloud") {
+    try {
+      const deps = createCloudDeps(req.scope)
+      await dispatchPlan(deps, planId, { kind: "prod", force, manual: true })
+    } catch (err) {
+      res.status(500).json({ message: (err as Error)?.message ?? "Dispatch failed" })
+      return
+    }
+    res.status(202).json({
+      status: "queued",
+      plan_id: planId,
+      queued: queuedCount,
+      skipped_posted: skippedPostedCount,
+      skipped_already_rendered: skippedAlreadyRenderedCount,
+      force,
+      remote: true,
+    })
+    return
   }
 
   planLocks.add(planId)
