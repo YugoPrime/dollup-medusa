@@ -1,4 +1,9 @@
-import { InjectManager, MedusaContext, MedusaService } from "@medusajs/framework/utils"
+import {
+  InjectManager,
+  InjectTransactionManager,
+  MedusaContext,
+  MedusaService,
+} from "@medusajs/framework/utils"
 import type { Context } from "@medusajs/framework/types"
 import type { EntityManager } from "@medusajs/framework/mikro-orm/knex"
 
@@ -217,31 +222,49 @@ class StoriesModuleService extends MedusaService({
     @MedusaContext() sharedContext?: Context<EntityManager>,
   ): Promise<void> {
     const { sql, params } = dropRenderKeysSql(slotId)
-    const rows = await sharedContext!.manager!.execute(sql, params)
+    // Inside a transaction @InjectManager still sets `manager` to a fresh fork
+    // (outside it); the caller's transaction is on `transactionManager`.
+    const manager = sharedContext!.transactionManager ?? sharedContext!.manager!
+    const rows = await manager.execute(sql, params)
     if (!rows.length) throw new Error(`Slot ${slotId} not found`)
   }
 
+  /**
+   * Drops the render keys, then puts the product on, in ONE transaction. A prod
+   * dispatch stamp (guarded on product_id + pick_attempt as read) waits on the
+   * row lock and then finds the new product, so it cannot re-attach the old
+   * product's job. Keep this order: product first would let a sweep between the
+   * two statements resend the old job and pass the new guard.
+   */
+  @InjectTransactionManager()
   async swapSlotProduct(
     slotId: string,
     product: ProductLike,
+    @MedusaContext() sharedContext?: Context<EntityManager>,
   ): Promise<void> {
-    const [slot] = await this.listStorySlots({ id: slotId })
+    const [slot] = await this.listStorySlots({ id: slotId }, {}, sharedContext)
     if (!slot) throw new Error(`Slot ${slotId} not found`)
     if (slot.posted_at) throw new Error("Cannot swap product on a posted slot")
-    await this.dropRenderKeys(slotId)
+    await this.dropRenderKeys(slotId, sharedContext)
     await this.updateStorySlots(
       swapSlotUpdate(slot, product) as unknown as Parameters<this["updateStorySlots"]>[0],
+      sharedContext,
     )
   }
 
-  /** Leaves an unposted slot with no product (and no render), so it can't post. */
-  async clearSlotProduct(slotId: string): Promise<void> {
-    const [slot] = await this.listStorySlots({ id: slotId })
+  /** Leaves an unposted slot with no product (and no render), so it can't post. One transaction, like swapSlotProduct. */
+  @InjectTransactionManager()
+  async clearSlotProduct(
+    slotId: string,
+    @MedusaContext() sharedContext?: Context<EntityManager>,
+  ): Promise<void> {
+    const [slot] = await this.listStorySlots({ id: slotId }, {}, sharedContext)
     if (!slot) throw new Error(`Slot ${slotId} not found`)
     if (slot.posted_at) throw new Error("Cannot clear a posted slot")
-    await this.dropRenderKeys(slotId)
+    await this.dropRenderKeys(slotId, sharedContext)
     await this.updateStorySlots(
       clearSlotProductUpdate(slot) as unknown as Parameters<this["updateStorySlots"]>[0],
+      sharedContext,
     )
   }
 

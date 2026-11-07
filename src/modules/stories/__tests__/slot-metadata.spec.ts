@@ -166,6 +166,7 @@ moduleIntegrationTestRunner<StoriesModuleService>({
         expect(await service.updateSlotMetadataIfJob(slot.id, "J1", { render: { x: 1 } })).toBe(false)
         const [row] = await service.listStorySlots({ id: slot.id })
         expect(row.product_id).toBe("p_new")
+        expect(row.pick_attempt).toBe(2)
       })
 
       it("clearSlotProduct drops every render key and fails the old job's guard", async () => {
@@ -173,6 +174,37 @@ moduleIntegrationTestRunner<StoriesModuleService>({
         await service.clearSlotProduct(slot.id)
         expect(await meta(slot.id)).toEqual({ publish_error: { message: "earlier" } })
         expect(await service.updateSlotMetadataIfJob(slot.id, "J1", { render: { x: 1 } })).toBe(false)
+        const [row] = await service.listStorySlots({ id: slot.id })
+        expect(row.product_id).toBeNull()
+      })
+
+      // The drop and the product update are one transaction: if the update
+      // fails, the render keys come back, so no prod stamp can land between them.
+      async function failingProductUpdate(run: () => Promise<void>) {
+        // `service` is a get-only proxy, so spy where the method lives.
+        const spy = jest
+          .spyOn(StoriesModuleService.prototype, "updateStorySlots")
+          .mockRejectedValueOnce(new Error("boom"))
+        try {
+          await expect(run()).rejects.toThrow("boom")
+          expect(spy).toHaveBeenCalledTimes(1)
+        } finally {
+          spy.mockRestore()
+        }
+      }
+
+      it("swapSlotProduct keeps the render keys when the product update fails", async () => {
+        const slot = await makeSlot(RENDERED)
+        await failingProductUpdate(() => service.swapSlotProduct(slot.id, NEW_PRODUCT))
+        expect(await meta(slot.id)).toEqual(RENDERED)
+        expect(await asRead(slot.id)).toEqual({ product_id: "prod_test", pick_attempt: 1 })
+      })
+
+      it("clearSlotProduct keeps the render keys when the product update fails", async () => {
+        const slot = await makeSlot(RENDERED)
+        await failingProductUpdate(() => service.clearSlotProduct(slot.id))
+        expect(await meta(slot.id)).toEqual(RENDERED)
+        expect(await asRead(slot.id)).toEqual({ product_id: "prod_test", pick_attempt: 1 })
       })
 
       const STAMP = { render_job: { job_id: "J_old" } }
@@ -244,6 +276,41 @@ moduleIntegrationTestRunner<StoriesModuleService>({
         await service.clearSlotProduct(slot.id)
         expect(await asRead(slot.id)).toEqual({ product_id: null, pick_attempt: 1 })
         expect(await service.updateSlotMetadataIfUnchanged(slot.id, before, STAMP)).toBe(false)
+        expect(await meta(slot.id)).toEqual({ publish_error: { message: "earlier" } })
+      })
+
+      it("a prod stamp sent between the drop and the product update waits, then misses", async () => {
+        const slot = await makeSlot(RENDERED)
+        const before = await asRead(slot.id)
+        const real = StoriesModuleService.prototype.updateStorySlots as (...a: unknown[]) => unknown
+        let stamp: Promise<boolean> | undefined
+        let waiting = false
+        const spy = jest
+          .spyOn(StoriesModuleService.prototype, "updateStorySlots")
+          .mockImplementationOnce(async function (this: unknown, ...args: unknown[]) {
+            // The render keys are dropped; the old product is still on the row.
+            stamp = service.updateSlotMetadataIfUnchanged(slot.id, before, STAMP)
+            let settled = false
+            stamp.then(
+              () => (settled = true),
+              () => (settled = true),
+            )
+            for (let i = 0; i < 50 && !waiting && !settled; i++) {
+              const rows = await MikroOrmWrapper.forkManager().execute(
+                `SELECT 1 FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query ILIKE '%story_slot%'`,
+              )
+              waiting = rows.length > 0
+              if (!waiting) await new Promise((r) => setTimeout(r, 100))
+            }
+            return real.apply(this, args)
+          } as never)
+        try {
+          await service.swapSlotProduct(slot.id, NEW_PRODUCT)
+        } finally {
+          spy.mockRestore()
+        }
+        expect(waiting).toBe(true)
+        expect(await stamp).toBe(false)
         expect(await meta(slot.id)).toEqual({ publish_error: { message: "earlier" } })
       })
 
