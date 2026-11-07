@@ -30,6 +30,29 @@ export type UploadInput = {
 
 export type UploadResult = { key: string; url: string }
 
+/** Puts `body` at `key` in the public R2 bucket (overwrites) and returns its public URL. */
+export async function uploadPublicObject(input: {
+  key: string
+  body: Buffer
+  contentType: string
+}): Promise<string> {
+  const bucket = process.env.R2_BUCKET
+  const publicBase = process.env.R2_PUBLIC_URL
+  if (!bucket || !publicBase) {
+    throw new Error("R2 not configured: set R2_BUCKET and R2_PUBLIC_URL")
+  }
+  await getClient().send(
+    new PutObjectCommand({
+      Bucket: bucket,
+      Key: input.key,
+      Body: input.body,
+      ContentType: input.contentType,
+      CacheControl: "public, max-age=31536000, immutable",
+    }),
+  )
+  return `${publicBase.replace(/\/$/, "")}/${input.key}`
+}
+
 export async function uploadDraftImage(
   input: UploadInput,
 ): Promise<UploadResult> {

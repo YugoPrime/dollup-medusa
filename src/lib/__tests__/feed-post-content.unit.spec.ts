@@ -68,6 +68,29 @@ describe("selectFeedImages", () => {
     expect(selectFeedImages(many)).toHaveLength(IG_CAROUSEL_MAX)
   })
 
+  // Publishing converts every photo to JPEG (feed-image-prep), so a product's
+  // PNG/WebP photos must not be dropped just because one JPEG exists.
+  it("keeps PNG and WebP photos next to JPEGs, in upload order", () => {
+    const mixed: typeof snap = {
+      ...snap,
+      variants_in_stock: [
+        {
+          id: "v",
+          sku: "X",
+          color: "Red",
+          color_code: null,
+          sizes: ["S"],
+          image_urls: ["https://cdn/x-front.png", "https://cdn/x-back.jpeg", "https://cdn/x-side.webp"],
+        },
+      ],
+    }
+    expect(selectFeedImages(mixed)).toEqual([
+      "https://cdn/x-front.png",
+      "https://cdn/x-back.jpeg",
+      "https://cdn/x-side.webp",
+    ])
+  })
+
   it("falls back to non-jpeg photos when no jpeg exists", () => {
     const pngOnly: typeof snap = {
       ...snap,
