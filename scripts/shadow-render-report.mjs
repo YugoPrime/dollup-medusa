@@ -45,9 +45,14 @@ export function compareShadow(slots) {
     return { index: s.slot_index, laptop, shadow, result }
   })
   const bad = new Set(["missing", "failed", "slow"])
+  // No row compared (all "not rendered", or no rows): FAIL, never a vacuous PASS.
+  const compared = rows.some((r) => r.result !== "not rendered")
   let verdict = "PASS"
-  if (rows.length === 0 || rows.some((r) => bad.has(r.result))) verdict = "FAIL"
+  if (!compared || rows.some((r) => bad.has(r.result))) verdict = "FAIL"
   else if (rows.some((r) => r.result === "inputs differ")) verdict = "CHECK"
+  if (rows.length > 0 && !compared) {
+    return { rows, verdict, reason: "Nothing was compared: no slot was rendered by either side." }
+  }
   return { rows, verdict }
 }
 
@@ -119,7 +124,7 @@ async function main() {
     process.exit(1)
   }
   if (slots.length === 0) console.log(`No slots in plan ${plan.id}`)
-  const { rows, verdict } = compareShadow(slots)
+  const { rows, verdict, reason } = compareShadow(slots)
   console.log(`Plan ${plan.id} (${date})`)
   console.log("slot  laptop            shadow            result")
   for (const r of rows) console.log(`${String(r.index).padEnd(5)} ${r.laptop.padEnd(17)} ${r.shadow.padEnd(17)} ${r.result}`)
@@ -129,6 +134,7 @@ async function main() {
   console.log("\nShadow MP4s:")
   if (urls.length === 0) console.log("  (none)")
   for (const x of urls) console.log(`  ${x.i}: ${x.u}`)
+  if (reason) console.log(`\n${reason}`)
   console.log(`\nVerdict: ${verdict}`)
 }
 

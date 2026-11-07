@@ -141,3 +141,20 @@ test("done shadow without mp4_url counts as failed", () => {
   assert.equal(r.rows[2].result, "failed")
   assert.equal(r.verdict, "FAIL")
 })
+
+test("every slot not rendered is FAIL: nothing was compared", () => {
+  const s = [0, 1, 2].map((i) => slot(i, null, null))
+  s.push({ id: "n", slot_index: 3, metadata: null })
+  const r = compareShadow(s)
+  assert.ok(r.rows.every((x) => x.result === "not rendered"))
+  assert.equal(r.verdict, "FAIL")
+  assert.equal(r.reason, "Nothing was compared: no slot was rendered by either side.")
+})
+
+test("same plus not rendered stays PASS, with no reason line", () => {
+  const s = [slot(0, H(0), H(0)), slot(1, null, null), slot(2, H(2), H(2))]
+  const r = compareShadow(s)
+  assert.deepEqual(r.rows.map((x) => x.result), ["same", "not rendered", "same"])
+  assert.equal(r.verdict, "PASS")
+  assert.equal(r.reason, undefined)
+})
