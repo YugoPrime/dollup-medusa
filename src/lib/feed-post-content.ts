@@ -24,17 +24,11 @@ function isFeedPhoto(url: string): boolean {
   return /\.(jpe?g|png|webp)$/.test(file)
 }
 
-function isJpeg(url: string): boolean {
-  const file = url.split("?")[0].split("#")[0].toLowerCase()
-  return /\.jpe?g$/.test(file)
-}
-
 /**
  * Ordered, deduped photo URLs for the carousel: walks the in-stock colors
  * (each already carries its front/back images in upload order) so the post
- * reads color-by-color. Instagram only accepts JPEG, so we prefer the JPEG
- * subset and fall back to the full real-photo set only if no JPEGs exist
- * (better to attempt than skip the day's post).
+ * reads color-by-color. Any format is kept: publishing posts JPEG copies
+ * (feed-image-prep), since Instagram only accepts JPEG.
  */
 export function selectFeedImages(
   snapshot: Pick<ProductSnapshot, "variants_in_stock">,
@@ -49,9 +43,7 @@ export function selectFeedImages(
       ordered.push(url)
     }
   }
-  const jpegs = ordered.filter(isJpeg)
-  const chosen = jpegs.length > 0 ? jpegs : ordered
-  return chosen.slice(0, Math.max(1, max))
+  return ordered.slice(0, Math.max(1, max))
 }
 
 export type FeedCaptionOptions = {

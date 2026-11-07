@@ -11,6 +11,7 @@ import {
   selectFeedImages,
 } from "./feed-post-content"
 import { isUniqueViolation } from "./db-errors"
+import { prepareFeedImages } from "./feed-image-prep"
 import { isMetaIgConfigured, publishFeedImages } from "./meta-ig"
 import { isFeedFbCrosspostEnabled, publishFbPhotoPost } from "./meta-fb"
 
@@ -107,9 +108,12 @@ export async function publishFeedPostRow(args: {
     return { ok: false, error: "Meta IG not configured", attempt_count: attempts }
   }
 
+  // IG only takes 4:5–1.91:1 JPEGs: post 1080x1350 JPEG copies, never the originals.
+  let postImages: string[]
   let igMediaId: string
   try {
-    igMediaId = await publishFeedImages({ imageUrls: images, caption })
+    postImages = await prepareFeedImages(images, { postDate: row.post_date })
+    igMediaId = await publishFeedImages({ imageUrls: postImages, caption })
   } catch (err) {
     const message = (err as Error)?.message ?? "IG publish failed"
     const attempts = await feed.markFailed(args.feedPostId, message)
@@ -120,7 +124,7 @@ export async function publishFeedPostRow(args: {
   let fbPostId: string | undefined
   if (isFeedFbCrosspostEnabled()) {
     try {
-      fbPostId = await publishFbPhotoPost({ imageUrls: images, caption })
+      fbPostId = await publishFbPhotoPost({ imageUrls: postImages, caption })
     } catch {
       fbPostId = undefined
     }
