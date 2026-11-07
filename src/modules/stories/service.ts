@@ -319,6 +319,44 @@ class StoriesModuleService extends MedusaService({
   }
 
   /**
+   * Compare-and-set claim: writes metadata[key] = value only while that key holds
+   * anything else, so of two overlapping callers exactly one wins. Scoped to an
+   * unposted slot whose render job is `on.jobId` (in `on.state`, if given); with
+   * `jobId: null`, to a slot with no render job that still has the product_id and
+   * pick_attempt as read. Returns whether this call won the claim.
+   */
+  @InjectManager()
+  async claimSlotMetadata(
+    slotId: string,
+    key: string,
+    value: string,
+    on:
+      | { jobId: string; state?: JobStateGuard }
+      | { jobId: null; product_id: string | null; pick_attempt: number | null },
+    @MedusaContext() sharedContext?: Context<EntityManager>,
+  ): Promise<boolean> {
+    const claim = { key, value }
+    const { sql, params } =
+      on.jobId === null
+        ? mergeSlotMetadataSql(
+            slotId,
+            { [key]: value },
+            { jobId: null },
+            { productId: on.product_id, pickAttempt: on.pick_attempt },
+            claim,
+          )
+        : mergeSlotMetadataSql(
+            slotId,
+            { [key]: value },
+            { jobId: on.jobId, state: on.state },
+            undefined,
+            claim,
+          )
+    const rows = await sharedContext!.manager!.execute(sql, params)
+    return rows.length > 0
+  }
+
+  /**
    * Returns deduped product IDs that have been posted within the last
    * `days` days. Used by the picker to enforce anti-repeat.
    */

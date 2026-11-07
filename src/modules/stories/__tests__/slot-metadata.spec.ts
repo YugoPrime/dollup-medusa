@@ -8,6 +8,7 @@ import { moduleIntegrationTestRunner } from "@medusajs/test-utils"
 
 import { STORIES_MODULE } from "../index"
 import StoriesModuleService from "../service"
+import { mergeSlotMetadataSql } from "../slot-metadata-sql"
 
 jest.setTimeout(60 * 1000)
 
@@ -156,6 +157,7 @@ moduleIntegrationTestRunner<StoriesModuleService>({
         render_started_at: "2026-11-02T10:00:00Z",
         render_job: { job_id: "J1" },
         render_shadow: { mp4_url: "shadow" },
+        render_unsent_alert: "J1",
         publish_error: { message: "earlier" },
       }
 
@@ -319,6 +321,71 @@ moduleIntegrationTestRunner<StoriesModuleService>({
         const before = await asRead(slot.id)
         await service.softDeleteStorySlots([slot.id])
         expect(await service.updateSlotMetadataIfUnchanged(slot.id, before, STAMP)).toBe(false)
+      })
+
+      const CLAIM_KEY = "render_unsent_alert"
+      const ON_FAILED_J1 = { jobId: "J1", state: { is: "failed" as const } }
+
+      it("claimSlotMetadata on a job claims once, for that job in that state", async () => {
+        const slot = await makeSlot({ render_job: { job_id: "J1", state: "failed" } })
+        expect(await service.claimSlotMetadata(slot.id, CLAIM_KEY, "J1", ON_FAILED_J1)).toBe(true)
+        expect(await service.claimSlotMetadata(slot.id, CLAIM_KEY, "J1", ON_FAILED_J1)).toBe(false)
+        expect((await meta(slot.id))[CLAIM_KEY]).toBe("J1")
+        // A release (JSON null) makes it claimable again.
+        await service.updateSlotMetadataIfJob(slot.id, "J1", { [CLAIM_KEY]: null })
+        expect(await service.claimSlotMetadata(slot.id, CLAIM_KEY, "J1", ON_FAILED_J1)).toBe(true)
+        expect(await service.claimSlotMetadata(slot.id, CLAIM_KEY, "J2", { jobId: "J2" })).toBe(false)
+
+        const sent = await makeSlot({ render_job: { job_id: "J1", state: "sent" } })
+        expect(await service.claimSlotMetadata(sent.id, CLAIM_KEY, "J1", ON_FAILED_J1)).toBe(false)
+        const posted = await makeSlot({ render_job: { job_id: "J1", state: "failed" } }, true)
+        expect(await service.claimSlotMetadata(posted.id, CLAIM_KEY, "J1", ON_FAILED_J1)).toBe(false)
+      })
+
+      it("claimSlotMetadata with no job claims only while there is none and the slot is as read", async () => {
+        const on = { jobId: null, product_id: "prod_test", pick_attempt: 1 }
+        const slot = await makeSlot({ forced_template_slug: "x" })
+        expect(
+          await service.claimSlotMetadata(slot.id, CLAIM_KEY, "no_job", { ...on, pick_attempt: 2 }),
+        ).toBe(false)
+        expect(await service.claimSlotMetadata(slot.id, CLAIM_KEY, "no_job", on)).toBe(true)
+        expect(await service.claimSlotMetadata(slot.id, CLAIM_KEY, "no_job", on)).toBe(false)
+        expect(await meta(slot.id)).toEqual({ forced_template_slug: "x", [CLAIM_KEY]: "no_job" })
+
+        const withJob = await makeSlot({ render_job: { job_id: "J1", state: "failed" } })
+        expect(await service.claimSlotMetadata(withJob.id, CLAIM_KEY, "no_job", on)).toBe(false)
+        const nullMeta = await makeSlot(null)
+        expect(await service.claimSlotMetadata(nullMeta.id, CLAIM_KEY, "no_job", on)).toBe(true)
+      })
+
+      it("a claim queued behind another tick's uncommitted claim loses", async () => {
+        const slot = await makeSlot({ render_job: { job_id: "J1", state: "failed" } })
+        // Tick A has claimed but not committed, so it holds the row lock.
+        const em = MikroOrmWrapper.forkManager()
+        await em.begin()
+        const a = mergeSlotMetadataSql(slot.id, { [CLAIM_KEY]: "J1" }, ON_FAILED_J1, undefined, {
+          key: CLAIM_KEY,
+          value: "J1",
+        })
+        expect(await em.execute(a.sql, a.params)).toHaveLength(1)
+        let pending: Promise<boolean> | undefined
+        let waiting = false
+        try {
+          pending = service.claimSlotMetadata(slot.id, CLAIM_KEY, "J1", ON_FAILED_J1)
+          pending.catch(() => undefined)
+          for (let i = 0; i < 50 && !waiting; i++) {
+            const rows = await MikroOrmWrapper.forkManager().execute(
+              `SELECT 1 FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query ILIKE '%story_slot%'`,
+            )
+            waiting = rows.length > 0
+            if (!waiting) await new Promise((r) => setTimeout(r, 100))
+          }
+        } finally {
+          await em.commit()
+        }
+        expect(waiting).toBe(true)
+        expect(await pending).toBe(false)
+        expect((await meta(slot.id))[CLAIM_KEY]).toBe("J1")
       })
     })
   },

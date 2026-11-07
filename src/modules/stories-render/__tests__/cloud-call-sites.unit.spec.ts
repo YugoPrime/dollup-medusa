@@ -469,7 +469,7 @@ describe("sweep-story-renders job", () => {
 
   it("logs nothing when the sweep did nothing", async () => {
     mode.mockReturnValue("cloud")
-    sweep.mockResolvedValue({ reconciled: 0, dispatched: 0, summaries: 0 })
+    sweep.mockResolvedValue({ reconciled: 0, dispatched: 0, summaries: 0, alerts: 0 })
     await sweepStoryRenders(container())
     expect(sweep).toHaveBeenCalledTimes(1)
     expect(logger.info).not.toHaveBeenCalled()
@@ -477,16 +477,17 @@ describe("sweep-story-renders job", () => {
   })
 
   it.each([
-    [{ reconciled: 1, dispatched: 0, summaries: 0 }],
-    [{ reconciled: 0, dispatched: 2, summaries: 0 }],
-    [{ reconciled: 0, dispatched: 0, summaries: 1 }],
+    [{ reconciled: 1, dispatched: 0, summaries: 0, alerts: 0 }],
+    [{ reconciled: 0, dispatched: 2, summaries: 0, alerts: 0 }],
+    [{ reconciled: 0, dispatched: 0, summaries: 1, alerts: 0 }],
+    [{ reconciled: 0, dispatched: 0, summaries: 0, alerts: 1 }],
   ])("logs the summary line when something happened (%j)", async (summary) => {
     mode.mockReturnValue("cloud")
     sweep.mockResolvedValue(summary)
     await sweepStoryRenders(container())
     expect(logger.info).toHaveBeenCalledTimes(1)
     expect(logger.info).toHaveBeenCalledWith(
-      `[story-sweep] reconciled ${summary.reconciled}, dispatched ${summary.dispatched}, summaries ${summary.summaries}`,
+      `[story-sweep] reconciled ${summary.reconciled}, dispatched ${summary.dispatched}, summaries ${summary.summaries}, unsent alerts ${summary.alerts}`,
     )
   })
 

@@ -27,8 +27,8 @@ function makeSlot(index: number, over: Partial<Slot> = {}): Slot {
     id: `stslot_s${index}`,
     plan_id: PLAN_ID,
     slot_index: index,
-    // far enough in the future that dispatch has nothing to do with it
-    scheduled_at: new Date(NOW.getTime() + 120 * MIN),
+    // far from too late to post, and outside the 3 h unsent-alert window
+    scheduled_at: new Date(NOW.getTime() + 240 * MIN),
     posted_at: null,
     metadata: null,
     product_snapshot: null,
@@ -135,6 +135,34 @@ function setup(
         if (state?.is && job.state !== state.is) return false
         if (state?.isNot && job.state === state.isNot) return false
         merge(id, patch)
+        return true
+      },
+    ),
+    claimSlotMetadata: jest.fn(
+      async (
+        id: string,
+        key: string,
+        value: string,
+        on:
+          | { jobId: string; state?: { is?: string } }
+          | { jobId: null; product_id: string | null; pick_attempt: number | null },
+      ) => {
+        const s = byId.get(id)
+        const job = (s?.metadata?.render_job ?? null) as Patch | null
+        if (!s || s.posted_at) return false
+        if (on.jobId === null) {
+          if (
+            job ||
+            (s.product_id ?? null) !== on.product_id ||
+            (s.pick_attempt ?? null) !== on.pick_attempt
+          ) {
+            return false
+          }
+        } else if (job?.job_id !== on.jobId || (on.state?.is && job.state !== on.state.is)) {
+          return false
+        }
+        if ((s.metadata?.[key] ?? null) === value) return false
+        merge(id, { [key]: value })
         return true
       },
     ),
@@ -483,6 +511,171 @@ describe("sweepCloudRenders summary", () => {
     const { deps, stories, telegram } = setup([slot])
     stories.updateSlotMetadataIfJob.mockResolvedValue(false)
     await sweepCloudRenders(deps)
+    expect(telegram).not.toHaveBeenCalled()
+  })
+})
+
+describe("sweepCloudRenders unsent alert", () => {
+  const at = (min: number) => ({
+    scheduled_at: new Date(NOW.getTime() + min * MIN),
+  })
+  // Failed below the cap and inside the retry gap, so this tick does not resend it.
+  const failedBelowCap = (slot: Slot, meta: Patch = {}) =>
+    withJob(
+      slot,
+      {
+        state: "failed",
+        dispatch_count: 0,
+        resolved_at: new Date(NOW.getTime() - 2 * MIN).toISOString(),
+      },
+      {
+        render_error: {
+          message: "render service unavailable (timeout)",
+          name: "CloudDispatchError",
+          stage: "dispatch",
+        },
+        ...meta,
+      },
+    )
+  const alertsSent = (telegram: jest.Mock) =>
+    telegram.mock.calls
+      .map((c) => c[0] as string)
+      .filter((m) => m.includes("not sent yet"))
+  // A slot with no render job that the sweep's dispatch would send.
+  const neverSent = (min: number) =>
+    makeSlot(3, {
+      ...at(min),
+      product_id: null,
+      pick_attempt: 1,
+      metadata: { forced_template_slug: "how-to-order" },
+    })
+
+  it("fires once at T−3h for a failed job below the cap", async () => {
+    const slot = failedBelowCap(makeSlot(3, at(180)))
+    const { deps, telegram, client } = setup([slot])
+    const out = await sweepCloudRenders(deps)
+    expect(client.submit).not.toHaveBeenCalled()
+    expect(out.alerts).toBe(1)
+    expect(telegram).toHaveBeenCalledTimes(1)
+    expect(telegram.mock.calls[0][0]).toBe(
+      [
+        "⏰ <b>Story #3 for 2026-11-07 not sent yet</b> (cloud)",
+        "",
+        "Scheduled: 21:00 Mauritius time",
+        "Reason: dispatch: render service unavailable (timeout)",
+        "",
+        '<a href="https://admin.example/app/stories/2026-11-07">Open in admin</a>',
+      ].join("\n"),
+    )
+    expect(slot.metadata!.render_unsent_alert).toBe(jobOf(slot).job_id)
+  })
+
+  it("does not fire before T−3h", async () => {
+    const { deps, telegram } = setup([failedBelowCap(makeSlot(3, at(181)))])
+    const out = await sweepCloudRenders(deps)
+    expect(out.alerts).toBe(0)
+    expect(telegram).not.toHaveBeenCalled()
+  })
+
+  it("does not fire once the slot is too late to post", async () => {
+    const { deps, telegram } = setup([failedBelowCap(makeSlot(3, at(-121)))])
+    const out = await sweepCloudRenders(deps)
+    expect(out.alerts).toBe(0)
+    expect(alertsSent(telegram)).toEqual([])
+  })
+
+  it("does not fire twice across two ticks", async () => {
+    const { deps, telegram } = setup([failedBelowCap(makeSlot(3, at(170)))])
+    expect((await sweepCloudRenders(deps)).alerts).toBe(1)
+    expect((await sweepCloudRenders(deps)).alerts).toBe(0)
+    expect(telegram).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not fire for a rendered slot", async () => {
+    const slot = failedBelowCap(makeSlot(3, at(180)), {
+      render: { mp4_url: "https://cdn.example.com/x.mp4", template_slug: "t" },
+    })
+    const { deps, telegram } = setup([slot])
+    await sweepCloudRenders(deps)
+    expect(telegram).not.toHaveBeenCalled()
+  })
+
+  it("does not fire for a posted slot", async () => {
+    const slot = failedBelowCap(makeSlot(3, { ...at(180), posted_at: NOW }))
+    const { deps, telegram } = setup([slot])
+    await sweepCloudRenders(deps)
+    expect(telegram).not.toHaveBeenCalled()
+  })
+
+  it("does not fire for a job at the send cap", async () => {
+    const { deps, telegram } = setup([failedAtCap(makeSlot(3, at(180)))])
+    const out = await sweepCloudRenders(deps)
+    expect(out.alerts).toBe(0)
+    expect(alertsSent(telegram)).toEqual([])
+  })
+
+  it("fires once for a slot with no render job that the sweep would send", async () => {
+    const slot = neverSent(180)
+    const { deps, telegram, stories, client } = setup([slot])
+    // The dispatch stamp finds the slot changed, so nothing is sent this tick.
+    stories.updateSlotMetadataIfUnchanged.mockResolvedValue(false)
+    const out = await sweepCloudRenders(deps)
+    expect(client.submit).not.toHaveBeenCalled()
+    expect(out.alerts).toBe(1)
+    expect(telegram.mock.calls[0][0]).toContain("Reason: never sent")
+    expect(slot.metadata!.render_unsent_alert).toBe("no_job")
+    expect(stories.claimSlotMetadata).toHaveBeenCalledWith(
+      slot.id,
+      "render_unsent_alert",
+      "no_job",
+      { jobId: null, product_id: null, pick_attempt: 1 },
+    )
+    expect((await sweepCloudRenders(deps)).alerts).toBe(0)
+    expect(telegram).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not fire for a slot with no render job that the sweep skips", async () => {
+    // No product, no forced template: the dispatcher never sends it.
+    const { deps, telegram } = setup([makeSlot(3, at(180))])
+    await sweepCloudRenders(deps)
+    expect(telegram).not.toHaveBeenCalled()
+  })
+
+  it("a real Telegram failure releases the claim and the next tick alerts", async () => {
+    const slot = failedBelowCap(makeSlot(3, at(180)))
+    const { deps, telegram } = setup([slot])
+    const errors = jest.spyOn(console, "error").mockImplementation(() => {})
+    telegram.mockResolvedValueOnce({ ok: false, status: 500, message: "secret body" })
+    const first = await sweepCloudRenders(deps)
+    const logged = errors.mock.calls.map((c) => String(c[0])).join("\n")
+    errors.mockRestore()
+    expect(first.alerts).toBe(0)
+    expect(slot.metadata!.render_unsent_alert).toBeNull()
+    expect(JSON.parse(logged)).toEqual({
+      msg: "[stories-render:sweep]",
+      event: "unsent_alert_failed",
+      slot_id: slot.id,
+      status: 500,
+    })
+    expect((await sweepCloudRenders(deps)).alerts).toBe(1)
+    expect(telegram).toHaveBeenCalledTimes(2)
+  })
+
+  it("a dormant Telegram keeps the claim", async () => {
+    const slot = failedBelowCap(makeSlot(3, at(180)))
+    const { deps, telegram } = setup([slot])
+    telegram.mockResolvedValue({ ok: false, skipped: true })
+    expect((await sweepCloudRenders(deps)).alerts).toBe(0)
+    expect(slot.metadata!.render_unsent_alert).toBe(jobOf(slot).job_id)
+    await sweepCloudRenders(deps)
+    expect(telegram).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not alert when another tick won the claim", async () => {
+    const { deps, stories, telegram } = setup([failedBelowCap(makeSlot(3, at(180)))])
+    stories.claimSlotMetadata.mockResolvedValue(false)
+    await sweepCloudRenders(deps)
+    expect(stories.claimSlotMetadata).toHaveBeenCalledTimes(1)
     expect(telegram).not.toHaveBeenCalled()
   })
 })

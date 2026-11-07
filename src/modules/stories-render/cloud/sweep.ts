@@ -2,8 +2,9 @@ import {
   escapeTelegramHtml,
   type TelegramSendResult,
 } from "../../../lib/telegram"
+import type { StorySlotRow } from "../batch"
 import { applyCallback, remoteJobToCallback } from "./callback"
-import { dispatchPlan, type CloudDeps } from "./dispatch"
+import { dispatchPlan, sweepWouldPick, type CloudDeps } from "./dispatch"
 import {
   countBeforeSend,
   failedJobPatch,
@@ -29,10 +30,26 @@ export type SweepSummary = {
   reconciled: number
   dispatched: number
   summaries: number
+  /** "Still unsent" Telegrams delivered this tick. */
+  alerts: number
 }
 
 const MAX_FAILURE_LINES = 5
 const MAX_MESSAGE_CHARS = 120
+
+/** A slot still unsent this long before its scheduled time gets one Telegram. */
+export const UNSENT_ALERT_LEAD_MS = 3 * 60 * 60 * 1000
+/** That alert's claim. A render key, so a swap or clear drops it. */
+const UNSENT_ALERT_KEY = "render_unsent_alert"
+/** Claim value for a slot with no render job (otherwise the claim is the job id). */
+const NO_JOB_CLAIM = "no_job"
+
+const muTime = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Indian/Mauritius",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+})
 
 function logError(event: string, fields: Record<string, unknown>): void {
   console.error(
@@ -143,14 +160,19 @@ const unsettled = (s: Settled, now: Date): boolean =>
 const notified = (slot: CloudSlot): unknown =>
   (slot.metadata as Record<string, unknown> | null)?.render_notified_job
 
-function failureLine(s: Settled): string {
-  const err = (s.slot.metadata as Record<string, any> | null)?.render_error
+/** The slot's last render error as escaped HTML: "stage: message". */
+function lastErrorHtml(slot: CloudSlot): string {
+  const err = (slot.metadata as Record<string, any> | null)?.render_error
   const stage = typeof err?.stage === "string" ? err.stage : "unknown"
   const message =
     typeof err?.message === "string" ? err.message : "render failed"
-  return `• #${s.slot.slot_index} ${escapeTelegramHtml(stage)}: ${escapeTelegramHtml(
+  return `${escapeTelegramHtml(stage)}: ${escapeTelegramHtml(
     message.slice(0, MAX_MESSAGE_CHARS),
   )}`
+}
+
+function failureLine(s: Settled): string {
+  return `• #${s.slot.slot_index} ${lastErrorHtml(s.slot)}`
 }
 
 function summaryMessage(
@@ -217,8 +239,91 @@ async function summarizePlan(deps: SweepDeps, plan: SweepPlan): Promise<boolean>
   return false
 }
 
+/** A slot that has not reached the service, and why (escaped HTML). */
+type Unsent = { slot: CloudSlot; job: RenderJobState | null; reasonHtml: string }
+
+/**
+ * Unposted, unrendered and still sendable: a failed job below the send cap (it
+ * will be retried), or no job at all on a slot the sweep's dispatch would send.
+ * Only inside the alert window and while the slot can still post.
+ */
+function unsentSlot(slot: CloudSlot, wouldPick: Set<string>, now: Date): Unsent | null {
+  const alertFrom = new Date(slot.scheduled_at).getTime() - UNSENT_ALERT_LEAD_MS
+  if (now.getTime() < alertFrom || isTooLateToPost(slot, now)) return null
+  if ((slot.metadata as Record<string, unknown> | null)?.render != null) return null
+  const job = readRenderJob(slot.metadata)
+  if (!job) {
+    return wouldPick.has(slot.id) ? { slot, job: null, reasonHtml: "never sent" } : null
+  }
+  if (job.state !== "failed" || job.dispatch_count >= MAX_SENDS_PER_SLOT) return null
+  return { slot, job, reasonHtml: lastErrorHtml(slot) }
+}
+
+function unsentMessage(deps: SweepDeps, plan: SweepPlan, u: Unsent): string {
+  const date = escapeTelegramHtml(plan.plan_date)
+  return [
+    `⏰ <b>Story #${u.slot.slot_index} for ${date} not sent yet</b> (cloud)`,
+    "",
+    `Scheduled: ${muTime.format(new Date(u.slot.scheduled_at))} Mauritius time`,
+    `Reason: ${u.reasonHtml}`,
+    "",
+    `<a href="${escapeTelegramHtml(deps.adminUrl)}/stories/${date}">Open in admin</a>`,
+  ].join("\n")
+}
+
+/**
+ * Step 4: one Telegram per slot still unsent UNSENT_ALERT_LEAD_MS before its
+ * time. Uncounted sends (service unreachable) never reach the cap, so the plan
+ * summary can wait for hours; this says so while there is time to act.
+ */
+async function alertUnsentPlan(deps: SweepDeps, plan: SweepPlan): Promise<number> {
+  const now = deps.now()
+  const slots = await planSlots(deps, plan.id)
+  const wouldPick = sweepWouldPick(slots as unknown as StorySlotRow[], now)
+  let alerts = 0
+  for (const slot of slots) {
+    const u = unsentSlot(slot, wouldPick, now)
+    if (!u) continue
+    // Claimed once per job (the job id); for a slot with no job, once until a
+    // swap or clear drops the claim.
+    const claim = u.job?.job_id ?? NO_JOB_CLAIM
+    const asRead = {
+      product_id: slot.product_id ?? null,
+      pick_attempt: slot.pick_attempt ?? null,
+    }
+    if ((slot.metadata as Record<string, unknown> | null)?.[UNSENT_ALERT_KEY] === claim) {
+      continue
+    }
+    const won = await deps.stories.claimSlotMetadata(
+      slot.id,
+      UNSENT_ALERT_KEY,
+      claim,
+      u.job
+        ? { jobId: u.job.job_id, state: { is: "failed" } }
+        : { jobId: null, ...asRead },
+    )
+    if (!won) continue
+
+    const sent = await deps.telegram(unsentMessage(deps, plan, u))
+    if (sent.ok) {
+      alerts++
+      continue
+    }
+    // As the summary: dormant Telegram keeps the claim, a real failure releases it.
+    if ("skipped" in sent) continue
+    const release = { [UNSENT_ALERT_KEY]: null }
+    if (u.job) {
+      await deps.stories.updateSlotMetadataIfJob(slot.id, u.job.job_id, release)
+    } else {
+      await deps.stories.updateSlotMetadataIfUnchanged(slot.id, asRead, release)
+    }
+    logError("unsent_alert_failed", { slot_id: slot.id, status: sent.status })
+  }
+  return alerts
+}
+
 export async function sweepCloudRenders(deps: SweepDeps): Promise<SweepSummary> {
-  const out: SweepSummary = { reconciled: 0, dispatched: 0, summaries: 0 }
+  const out: SweepSummary = { reconciled: 0, dispatched: 0, summaries: 0, alerts: 0 }
   const plans = await deps.upcomingPlans()
 
   for (const plan of plans) {
@@ -257,6 +362,18 @@ export async function sweepCloudRenders(deps: SweepDeps): Promise<SweepSummary> 
     } catch (err) {
       logError("plan_error", {
         step: "summary",
+        plan_id: plan.id,
+        message: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
+
+  for (const plan of plans) {
+    try {
+      out.alerts += await alertUnsentPlan(deps, plan)
+    } catch (err) {
+      logError("plan_error", {
+        step: "unsent_alert",
         plan_id: plan.id,
         message: err instanceof Error ? err.message : String(err),
       })

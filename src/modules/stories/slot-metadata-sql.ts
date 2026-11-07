@@ -8,24 +8,34 @@ import { RENDER_KEYS } from "./slot-update"
  *
  * With `guard`, the write also requires an unposted slot whose current
  * render job is `guard.jobId` (and, optionally, in/not in a given state), so a stale callback cannot overwrite newer state.
+ * `jobId: null` requires an unposted slot with no render job at all.
  *
  * With `slotGuard`, the write also requires the product_id and pick_attempt the
  * caller read. A swap bumps pick_attempt and a clear nulls product_id, so a
  * write planned from a slot read before either one finds no row.
+ *
+ * With `claim`, the write also requires metadata[claim.key] to hold anything
+ * but `claim.value` (absent and JSON null included): a compare-and-set, so of
+ * two overlapping writers of the same claim exactly one finds the row.
  */
 export type RenderJobStateName = "sent" | "done" | "failed"
 export type JobStateGuard = { is?: RenderJobStateName; isNot?: RenderJobStateName }
+export type JobGuard = { jobId: string; state?: JobStateGuard } | { jobId: null }
 export type SlotGuard = { productId: string | null; pickAttempt: number | null }
+export type ClaimGuard = { key: string; value: string }
 
 export function mergeSlotMetadataSql(
   slotId: string,
   patch: Record<string, unknown>,
-  guard?: { jobId: string; state?: JobStateGuard },
+  guard?: JobGuard,
   slotGuard?: SlotGuard,
+  claim?: ClaimGuard,
 ): { sql: string; params: unknown[] } {
   const params: unknown[] = [JSON.stringify(patch), slotId]
   let guardSql = ""
-  if (guard) {
+  if (guard && guard.jobId === null) {
+    guardSql = "\n   AND posted_at IS NULL AND (metadata ->> 'render_job') IS NULL"
+  } else if (guard) {
     guardSql = "\n   AND posted_at IS NULL AND metadata -> 'render_job' ->> 'job_id' = ?"
     params.push(guard.jobId)
     if (guard.state?.is) {
@@ -41,6 +51,10 @@ export function mergeSlotMetadataSql(
     guardSql +=
       "\n   AND product_id IS NOT DISTINCT FROM ? AND pick_attempt IS NOT DISTINCT FROM ?"
     params.push(slotGuard.productId, slotGuard.pickAttempt)
+  }
+  if (claim) {
+    guardSql += "\n   AND (metadata ->> ?::text) IS DISTINCT FROM ?"
+    params.push(claim.key, claim.value)
   }
   const sql =
     "UPDATE story_slot\n" +

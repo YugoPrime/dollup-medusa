@@ -86,12 +86,54 @@ describe("mergeSlotMetadataSql slot guard", () => {
   })
 })
 
+describe("mergeSlotMetadataSql no-job guard and claim", () => {
+  const CLAIM_CLAUSE = "AND (metadata ->> ?::text) IS DISTINCT FROM ?"
+
+  it("jobId null requires an unposted slot with no render job, no job id param", () => {
+    const { sql, params } = mergeSlotMetadataSql("s1", {}, { jobId: null })
+    expect(sql).toContain("AND posted_at IS NULL AND (metadata ->> 'render_job') IS NULL")
+    expect(sql).not.toContain("job_id")
+    expect(params).toEqual(["{}", "s1"])
+  })
+
+  it("the claim comes last, with key then value params", () => {
+    const { sql, params } = mergeSlotMetadataSql(
+      "s1",
+      { k: "v" },
+      { jobId: null },
+      { productId: null, pickAttempt: 1 },
+      { key: "k", value: "v" },
+    )
+    expect(sql).toBe(
+      "UPDATE story_slot\n" +
+        "   SET metadata = COALESCE(metadata, '{}'::jsonb) || ?::jsonb, updated_at = now()\n" +
+        " WHERE id = ? AND deleted_at IS NULL\n" +
+        "   AND posted_at IS NULL AND (metadata ->> 'render_job') IS NULL\n" +
+        "   AND product_id IS NOT DISTINCT FROM ? AND pick_attempt IS NOT DISTINCT FROM ?\n" +
+        `   ${CLAIM_CLAUSE}\n` +
+        "RETURNING id",
+    )
+    expect(params).toEqual(['{"k":"v"}', "s1", null, 1, "k", "v"])
+  })
+
+  it("the claim follows a job guard's params", () => {
+    const { params } = mergeSlotMetadataSql(
+      "s1",
+      {},
+      { jobId: "J", state: { is: "failed" } },
+      undefined,
+      { key: "k", value: "J" },
+    )
+    expect(params).toEqual(["{}", "s1", "J", "failed", "k", "J"])
+  })
+})
+
 describe("dropRenderKeysSql", () => {
   it("removes every render key from a live slot", () => {
     const { sql, params } = dropRenderKeysSql("stslot_1")
     expect(params).toEqual(["stslot_1"])
     expect(sql).toContain(
-      "- ARRAY['render','render_error','render_started_at','render_job','render_shadow']::text[]",
+      "- ARRAY['render','render_error','render_started_at','render_job','render_shadow','render_unsent_alert']::text[]",
     )
     expect(sql).toContain("deleted_at IS NULL")
   })

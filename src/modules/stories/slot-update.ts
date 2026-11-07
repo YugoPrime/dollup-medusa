@@ -3,6 +3,8 @@ import { buildSnapshot, type ProductLike, type ProductSnapshot } from "./snapsho
 /**
  * Metadata keys that describe a slot's rendered video. A swap removes them via
  * dropRenderKeysSql (Medusa's update merges metadata, so omission would keep them).
+ * `render_unsent_alert` is the sweep's "still unsent" Telegram claim, so the new
+ * product can alert again.
  */
 export const RENDER_KEYS = [
   "render",
@@ -10,6 +12,7 @@ export const RENDER_KEYS = [
   "render_started_at",
   "render_job",
   "render_shadow",
+  "render_unsent_alert",
 ] as const
 
 type SlotLike = { id: string; pick_attempt?: number | null }

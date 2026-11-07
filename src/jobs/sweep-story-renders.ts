@@ -12,8 +12,9 @@ const LOOKAHEAD_DAYS = 7
 
 /**
  * Cloud-mode safety net, every 5 minutes: reconciles jobs whose callback never
- * arrived, re-dispatches slots that need it, and sends one Telegram summary per
- * plan once its renders have settled. No-op unless STORIES_RENDER_MODE=cloud.
+ * arrived, re-dispatches slots that need it, sends one Telegram summary per
+ * plan once its renders have settled, and one Telegram per slot still unsent
+ * 3 h before its time. No-op unless STORIES_RENDER_MODE=cloud.
  */
 export default async function sweepStoryRenders(
   container: MedusaContainer,
@@ -29,9 +30,12 @@ export default async function sweepStoryRenders(
       adminUrl: ADMIN_URL,
     })
     // Quiet ticks (most of them) log nothing.
-    if (summary.reconciled + summary.dispatched + summary.summaries > 0) {
+    if (
+      summary.reconciled + summary.dispatched + summary.summaries + summary.alerts >
+      0
+    ) {
       logger.info(
-        `[story-sweep] reconciled ${summary.reconciled}, dispatched ${summary.dispatched}, summaries ${summary.summaries}`,
+        `[story-sweep] reconciled ${summary.reconciled}, dispatched ${summary.dispatched}, summaries ${summary.summaries}, unsent alerts ${summary.alerts}`,
       )
     }
   } catch (err) {

@@ -30,6 +30,7 @@ export type CloudDeps = {
     | "updateSlotMetadata"
     | "updateSlotMetadataIfJob"
     | "updateSlotMetadataIfUnchanged"
+    | "claimSlotMetadata"
   >
   client: RenderClient
   cfg: CloudRenderConfig
@@ -268,6 +269,15 @@ function prodSkip(
     return holding(RESEND)
   }
   return null
+}
+
+/** Ids of the slots a sweep dispatch would pick a fresh template for and send now (its own eligibility). */
+export function sweepWouldPick(slots: StorySlotRow[], now: Date): Set<string> {
+  const planned = planBatchSlots(slots, {
+    force: false,
+    skip: (slot) => prodSkip(slot, now, { manual: false, sweep: true }),
+  })
+  return new Set(planned.filter((p) => "picked" in p).map((p) => p.slot.id))
 }
 
 /**
