@@ -111,6 +111,15 @@ export const DEFAULT_STORY_SETTINGS: Omit<StorySettingsDTO, "id"> = {
   focus_until: null,
 }
 
+/**
+ * The manager raw SQL must run on. Inside a transaction @InjectManager still
+ * sets `manager` to a fresh fork outside it; the caller's transaction is on
+ * `transactionManager`.
+ */
+function activeManager(sharedContext?: Context<EntityManager>): EntityManager {
+  return (sharedContext!.transactionManager ?? sharedContext!.manager!) as EntityManager
+}
+
 class StoriesModuleService extends MedusaService({
   StoryPlan,
   StorySlot,
@@ -222,10 +231,7 @@ class StoriesModuleService extends MedusaService({
     @MedusaContext() sharedContext?: Context<EntityManager>,
   ): Promise<void> {
     const { sql, params } = dropRenderKeysSql(slotId)
-    // Inside a transaction @InjectManager still sets `manager` to a fresh fork
-    // (outside it); the caller's transaction is on `transactionManager`.
-    const manager = sharedContext!.transactionManager ?? sharedContext!.manager!
-    const rows = await manager.execute(sql, params)
+    const rows = await activeManager(sharedContext).execute(sql, params)
     if (!rows.length) throw new Error(`Slot ${slotId} not found`)
   }
 
@@ -276,7 +282,7 @@ class StoriesModuleService extends MedusaService({
     @MedusaContext() sharedContext?: Context<EntityManager>,
   ): Promise<void> {
     const { sql, params } = mergeSlotMetadataSql(slotId, patch)
-    const rows = await sharedContext!.manager!.execute(sql, params)
+    const rows = await activeManager(sharedContext).execute(sql, params)
     if (!rows.length) throw new Error(`Slot ${slotId} not found`)
   }
 
@@ -293,7 +299,7 @@ class StoriesModuleService extends MedusaService({
     @MedusaContext() sharedContext?: Context<EntityManager>,
   ): Promise<boolean> {
     const { sql, params } = mergeSlotMetadataSql(slotId, patch, { jobId, state })
-    const rows = await sharedContext!.manager!.execute(sql, params)
+    const rows = await activeManager(sharedContext).execute(sql, params)
     return rows.length > 0
   }
 
@@ -314,7 +320,7 @@ class StoriesModuleService extends MedusaService({
       productId: expect.product_id,
       pickAttempt: expect.pick_attempt,
     })
-    const rows = await sharedContext!.manager!.execute(sql, params)
+    const rows = await activeManager(sharedContext).execute(sql, params)
     return rows.length > 0
   }
 
@@ -352,7 +358,7 @@ class StoriesModuleService extends MedusaService({
             undefined,
             claim,
           )
-    const rows = await sharedContext!.manager!.execute(sql, params)
+    const rows = await activeManager(sharedContext).execute(sql, params)
     return rows.length > 0
   }
 
