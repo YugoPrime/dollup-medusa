@@ -671,6 +671,31 @@ describe("sweepCloudRenders unsent alert", () => {
     expect(telegram).toHaveBeenCalledTimes(1)
   })
 
+  it("one alert across ticks that each re-send and rewrite render_job", async () => {
+    // Outage: the gap since the last failure is over, so every tick re-sends and
+    // `unavailable` rewrites render_job whole (same job id). A claim kept inside
+    // render_job would be wiped by that rewrite and alert again on every retry.
+    const slot = failedBelowCap(makeSlot(3, at(180)), {})
+    jobOf(slot).resolved_at = new Date(NOW.getTime() - 11 * MIN).toISOString()
+    const jobId = jobOf(slot).job_id
+    const { deps, telegram, client } = setup([slot])
+    client.submit.mockResolvedValue({ kind: "unavailable", reason: "timeout" } as never)
+
+    let clock = NOW
+    deps.now = () => clock
+    const first = await sweepCloudRenders(deps)
+    expect(client.submit).toHaveBeenCalledTimes(1)
+    expect(first.alerts).toBe(1)
+
+    clock = new Date(NOW.getTime() + 11 * MIN)
+    const second = await sweepCloudRenders(deps)
+    expect(client.submit).toHaveBeenCalledTimes(2)
+    expect(jobOf(slot).job_id).toBe(jobId)
+    expect(jobOf(slot).resolved_at).toBe(clock.toISOString())
+    expect(second.alerts).toBe(0)
+    expect(alertsSent(telegram)).toHaveLength(1)
+  })
+
   it("does not alert when another tick won the claim", async () => {
     const { deps, stories, telegram } = setup([failedBelowCap(makeSlot(3, at(180)))])
     stories.claimSlotMetadata.mockResolvedValue(false)
