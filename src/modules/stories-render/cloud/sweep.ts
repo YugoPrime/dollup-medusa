@@ -2,6 +2,7 @@ import {
   escapeTelegramHtml,
   type TelegramSendResult,
 } from "../../../lib/telegram"
+import { UNSENT_ALERT_KEY } from "../../stories/slot-update"
 import type { StorySlotRow } from "../batch"
 import { applyCallback, remoteJobToCallback } from "./callback"
 import { dispatchPlan, sweepWouldPick, type CloudDeps } from "./dispatch"
@@ -39,8 +40,6 @@ const MAX_MESSAGE_CHARS = 120
 
 /** A slot still unsent this long before its scheduled time gets one Telegram. */
 export const UNSENT_ALERT_LEAD_MS = 3 * 60 * 60 * 1000
-/** That alert's claim. A render key, so a swap or clear drops it. */
-const UNSENT_ALERT_KEY = "render_unsent_alert"
 /** Claim value for a slot with no render job (otherwise the claim is the job id). */
 const NO_JOB_CLAIM = "no_job"
 
