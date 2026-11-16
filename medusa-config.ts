@@ -33,7 +33,16 @@ module.exports = defineConfig({
       // out daily; extend it so the session lasts a month. `ms` format.
       jwtExpiresIn: process.env.JWT_EXPIRES_IN || "30d",
       cookieSecret: process.env.COOKIE_SECRET || "supersecret",
-    }
+    },
+    // Storefront customers sign in with a session cookie (`connect.sid`), not
+    // the JWT above. Medusa's default session is 10 h and NOT rolling, so a
+    // shopper who logged in last night was logged out by morning and asked to
+    // sign in again on every visit. 30 days, renewed on each request while
+    // they keep using the site. `ttl` is in milliseconds.
+    sessionOptions: {
+      ttl: 30 * 24 * 60 * 60 * 1000,
+      rolling: true,
+    },
   },
   modules: [
     {
