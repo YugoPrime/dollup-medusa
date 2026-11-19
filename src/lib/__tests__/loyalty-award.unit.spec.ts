@@ -52,4 +52,30 @@ describe("loyalty-award subscriber", () => {
       reason: "Order #101 completed",
     })
   })
+
+  describe("skips still win on a double-points day", () => {
+    const doubleDay = new Date("2026-12-07T06:00:00Z")
+
+    it("guest order (no customer_id) is not awarded", async () => {
+      order = { ...base, customer_id: null, created_at: doubleDay, metadata: { cart_type: "instock" } }
+      await loyaltyAwardSubscriber({ event: { data: { id: "order_1" } }, container } as any)
+      expect(awardPoints).not.toHaveBeenCalled()
+    })
+
+    it("loyalty_skip order is not awarded", async () => {
+      order = {
+        ...base,
+        created_at: doubleDay,
+        metadata: { cart_type: "instock", loyalty_skip: true },
+      }
+      await loyaltyAwardSubscriber({ event: { data: { id: "order_1" } }, container } as any)
+      expect(awardPoints).not.toHaveBeenCalled()
+    })
+
+    it("non-MUR order is not awarded", async () => {
+      order = { ...base, currency_code: "eur", created_at: doubleDay, metadata: { cart_type: "instock" } }
+      await loyaltyAwardSubscriber({ event: { data: { id: "order_1" } }, container } as any)
+      expect(awardPoints).not.toHaveBeenCalled()
+    })
+  })
 })

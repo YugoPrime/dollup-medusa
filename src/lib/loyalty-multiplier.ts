@@ -13,13 +13,20 @@ export function muYmd(at: Date | string): string {
   return new Date(d.getTime() + MU_OFFSET_MS).toISOString().slice(0, 10)
 }
 
-/** 2 for a website in-stock order placed on a double-points MU day, else 1. */
+/**
+ * 2 for a website in-stock order placed on a double-points MU day, else 1.
+ *
+ * Website orders are identified by the `cart_type` key being present on the metadata and not "preorder".
+ * `null` counts as website: the storefront clears the type when a bag is emptied and re-stamps it later.
+ * DM orders never carry the `cart_type` key at all, so they stay single.
+ */
 export function loyaltyMultiplier(order: {
   created_at?: Date | string | null
   metadata?: Record<string, unknown> | null
 }): 1 | 2 {
   if (!order.created_at) return 1
-  if (order.metadata?.cart_type !== "instock") return 1
+  const m = order.metadata
+  if (!m || !Object.prototype.hasOwnProperty.call(m, "cart_type") || m.cart_type === "preorder") return 1
   const d = order.created_at instanceof Date ? order.created_at : new Date(order.created_at)
   if (Number.isNaN(d.getTime())) return 1
   return DOUBLE_POINTS_MU_DATES.includes(muYmd(d)) ? 2 : 1

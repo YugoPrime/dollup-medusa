@@ -12,6 +12,8 @@ describe("loyaltyMultiplier", () => {
     ["2026-12-07T08:00:00Z", { cart_type: "preorder" }, 1],
     ["2026-12-07T08:00:00Z", { dm_status: "confirmed" }, 1],
     ["2026-12-07T08:00:00Z", null, 1],
+    ["2026-12-07T08:00:00Z", { cart_type: null }, 2],
+    ["2026-12-07T08:00:00Z", {}, 1],
   ])("%s %j -> %d", (at, metadata, expected) => {
     expect(loyaltyMultiplier({ created_at: at, metadata })).toBe(expected)
     expect(loyaltyMultiplier({ created_at: new Date(at), metadata })).toBe(expected)
