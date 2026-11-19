@@ -68,9 +68,14 @@ ENV PRODUCER_HEADLESS_SHELL_PATH=/usr/local/bin/chrome-headless-shell
 # Install Node deps + immediately purge the yarn berry cache. The cache
 # holds .zip copies of every installed package (~1.4GB on this project)
 # which gets baked into the image layer and isn't needed at runtime.
+#
+# npm_config_onnxruntime_node_install_cuda=skip: onnxruntime-node 1.17.3 (via
+# @imgly/background-removal-node) downloads CUDA binaries from
+# github.com/microsoft/onnxruntime releases on linux x64. That repo 404s since
+# Nov 2026, which fails the install. The VPS has no GPU, so skip them.
 COPY package.json yarn.lock .yarnrc.yml ./
 COPY .yarn .yarn
-RUN yarn install --immutable && \
+RUN npm_config_onnxruntime_node_install_cuda=skip yarn install --immutable && \
     rm -rf .yarn/cache /root/.yarn/berry/cache /root/.cache/yarn 2>/dev/null || true
 
 # Copy source + build (backend + admin dashboard).

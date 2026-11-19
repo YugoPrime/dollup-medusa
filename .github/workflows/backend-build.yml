@@ -24,6 +24,12 @@ jobs:
         run: corepack enable
 
       - name: Install dependencies
+        # onnxruntime-node 1.17.3 (via @imgly/background-removal-node) downloads
+        # CUDA binaries from github.com/microsoft/onnxruntime releases on
+        # linux x64; that repo 404s since Nov 2026 and fails the install.
+        # No GPU anywhere we run, so skip them.
+        env:
+          npm_config_onnxruntime_node_install_cuda: skip
         run: yarn install --immutable
 
       - name: Build
