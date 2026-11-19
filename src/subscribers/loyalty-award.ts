@@ -5,12 +5,16 @@ import type {
 import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils"
 
 import { LOYALTY_MODULE } from "../modules/loyalty"
+import { loyaltyMultiplier } from "../lib/loyalty-multiplier"
 import type LoyaltyModuleService from "../modules/loyalty/service"
 
 /**
  * Award loyalty points whenever an order is placed.
  *
- *   - 1 point per Rs 10 (MUR) — Math.floor(total / 10)
+ *   - Points = Math.floor(total * earn_rate_per_100_mur * multiplier / 100).
+ *     The rate comes from the loyalty settings; the multiplier is 2 for
+ *     website in-stock orders placed on advent double-points days
+ *     (7, 14, 21 Dec 2026 MU), else 1 (see lib/loyalty-multiplier).
  *   - Mauritius (MUR) only; we are a single-region store today, but this
  *     guard means a future EUR/USD region won't accidentally start handing
  *     out points until product owners decide the rate.
@@ -39,6 +43,7 @@ export default async function loyaltyAwardSubscriber({
         "customer_id",
         "currency_code",
         "total",
+        "created_at",
         "metadata",
       ],
     })
@@ -72,8 +77,12 @@ export default async function loyaltyAwardSubscriber({
       LOYALTY_MODULE,
     )
     const settings = await loyaltyService.getSettings()
+    const multiplier = loyaltyMultiplier({
+      created_at: order.created_at as Date | string | null | undefined,
+      metadata: order.metadata as Record<string, unknown> | null | undefined,
+    })
     const points = Math.floor(
-      (totalNumber * settings.earn_rate_per_100_mur) / 100,
+      (totalNumber * settings.earn_rate_per_100_mur * multiplier) / 100,
     )
     if (points <= 0) {
       return
@@ -81,7 +90,9 @@ export default async function loyaltyAwardSubscriber({
 
     await loyaltyService.awardPoints(order.customer_id, points, {
       orderId: order.id,
-      reason: `Order #${order.display_id ?? order.id} completed`,
+      reason: `Order #${order.display_id ?? order.id} completed${
+        multiplier === 2 ? " (double points)" : ""
+      }`,
     })
 
     logger.info(
