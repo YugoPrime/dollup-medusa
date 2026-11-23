@@ -39,12 +39,15 @@ export async function loadCatalogueProducts(
   scope: Scope,
   ids: string[],
 ): Promise<CatalogueProduct[]> {
-  if (ids.length === 0) return []
+  const unique = [...new Set(ids)]
+  if (unique.length === 0) return []
   const query = scope.resolve(ContainerRegistrationKeys.QUERY)
   const { data } = await query.graph({
     entity: "product",
     fields: CATALOGUE_FIELDS,
-    filters: { id: ids },
+    filters: { id: unique },
+    // Explicit take: query.graph applies a default page size that would silently drop products.
+    pagination: { take: unique.length },
     context: {
       variants: {
         calculated_price: QueryContext({ currency_code: "mur" }),
