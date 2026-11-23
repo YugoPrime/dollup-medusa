@@ -40,34 +40,34 @@ export const POST = async (req: AuthenticatedMedusaRequest, res: MedusaResponse)
     }
 
     const service = req.scope.resolve<NewsletterModuleService>(NEWSLETTER_MODULE)
-    const { added, skipped } = await service.importSubscribers(list, parsed.rows)
+    const { added, skipped, unsubscribed } = await service.importSubscribers(list, parsed.rows)
 
     res.json({
       added: added.length,
       skipped,
       invalid: parsed.invalid,
-      sync_pending: added.length,
+      sync_pending: added.length + unsubscribed.length,
     })
 
     // Not awaited: syncing thousands of rows at 10 requests/second outlasts the request.
-    if (added.length > 0) {
+    if (added.length + unsubscribed.length > 0) {
       void syncImportedRows(
         {
           service,
           getResend: (l) => {
             const config = getNewsletterConfig()
             return {
-              segmentId: requireSegment(config, l),
+              segmentId: () => requireSegment(config, l),
               resend: createNewsletterResend(config),
             }
           },
         },
         list,
-        added,
+        [...added, ...unsubscribed],
         logger,
       ).catch((e) => {
         try {
-          logger.error(`newsletter import sync crashed: ${(e as Error).message}`)
+          logger.error(`[newsletter] import sync crashed: ${(e as Error).message}`)
         } catch {
           // best-effort
         }

@@ -3,15 +3,10 @@ import type {
   MedusaResponse,
 } from "@medusajs/framework/http"
 
-import { NEWSLETTER_MODULE } from "../../../../../modules/newsletter"
 import { assertEditable, parseCampaignPatch } from "../../../../../modules/newsletter/campaign-rules"
-import { makeWithLock, sendError } from "../../../../../modules/newsletter/route-deps"
-import type { CampaignDeps } from "../../../../../modules/newsletter/send-campaign"
+import { makeWithLock, newsletterService, sendError } from "../../../../../modules/newsletter/route-deps"
 
-const serviceOf = (req: AuthenticatedMedusaRequest) =>
-  req.scope.resolve(NEWSLETTER_MODULE) as unknown as CampaignDeps["service"] & {
-    deleteNewsletterCampaigns: (id: string) => Promise<void>
-  }
+const serviceOf = (req: AuthenticatedMedusaRequest) => newsletterService(req.scope)
 
 export const GET = async (req: AuthenticatedMedusaRequest, res: MedusaResponse) => {
   try {

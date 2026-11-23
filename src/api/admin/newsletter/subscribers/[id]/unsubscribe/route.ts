@@ -22,7 +22,12 @@ export const POST = async (req: AuthenticatedMedusaRequest, res: MedusaResponse)
       await createNewsletterResend(getNewsletterConfig()).setUnsubscribed(subscriber.email)
     } catch (e) {
       syncError = e instanceof Error ? e.message : String(e)
-      logger.error(`newsletter: Resend unsubscribe failed: ${syncError}`)
+      logger.error(`[newsletter] Resend unsubscribe failed: ${syncError}`)
+      try {
+        await service.markSyncError(subscriber.id, syncError)
+      } catch (e2) {
+        logger.error(`[newsletter] could not record sync error: ${(e2 as Error).message}`)
+      }
     }
     res.json({ subscriber, sync_error: syncError })
   } catch (err) {

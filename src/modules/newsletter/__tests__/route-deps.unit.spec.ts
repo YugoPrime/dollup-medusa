@@ -2,8 +2,12 @@ import { MedusaError } from "@medusajs/framework/utils"
 
 import {
   buildCampaignDeps,
+  bannerFilename,
   errorBody,
+  hasImageMagic,
   httpStatusFor,
+  parseIdsParam,
+  pickerRowsInOrder,
   sendError,
   syncImportedRows,
 } from "../route-deps"
@@ -57,6 +61,9 @@ describe("errorBody / sendError", () => {
     expect(res.statusCode).toBe(500)
     expect(res.body).toEqual({ message: "You have reached your contacts quota." })
     expect(logger.error).toHaveBeenCalledTimes(1)
+    expect(typeof logger.error.mock.calls[0][0]).toBe("string")
+    expect(logger.error.mock.calls[0][0]).toContain("You have reached your contacts quota.")
+    expect(logger.error.mock.calls[0]).toHaveLength(1)
 
     const res2 = fakeRes()
     sendError(res2, new MedusaError(MedusaError.Types.INVALID_DATA, "bad"), logger)
@@ -94,19 +101,19 @@ describe("syncImportedRows", () => {
     return { service, logger }
   }
 
-  it("pushes unsubscribed rows with unsubscribed: true and marks synced", async () => {
+  it("pushes subscribed rows with ensureContact(false) and marks synced", async () => {
     const { service, logger } = mk()
     const resend = {
       ensureContact: jest.fn().mockResolvedValue({ ok: true, contactId: "c1" }),
     }
     const out = await syncImportedRows(
-      { service, getResend: () => ({ resend: resend as any, segmentId: "seg" }) },
+      { service, getResend: () => ({ resend: resend as any, segmentId: () => "seg" }) },
       "main",
-      [row("a@x.com"), row("b@x.com", true)],
+      [row("a@x.com"), row("b@x.com")],
       logger,
     )
     expect(resend.ensureContact).toHaveBeenNthCalledWith(1, "a@x.com", "seg", false)
-    expect(resend.ensureContact).toHaveBeenNthCalledWith(2, "b@x.com", "seg", true)
+    expect(resend.ensureContact).toHaveBeenNthCalledWith(2, "b@x.com", "seg", false)
     expect(service.markSynced).toHaveBeenCalledWith("id_a@x.com", "c1")
     expect(out).toEqual({ synced: 2, failed: 0 })
     expect(logger.info).toHaveBeenCalledWith(expect.stringContaining("synced 2, failed 0"))
@@ -122,7 +129,7 @@ describe("syncImportedRows", () => {
         .mockResolvedValueOnce({ ok: true, contactId: null }),
     }
     const out = await syncImportedRows(
-      { service, getResend: () => ({ resend: resend as any, segmentId: "seg" }) },
+      { service, getResend: () => ({ resend: resend as any, segmentId: () => "seg" }) },
       "main",
       [row("a@x.com"), row("b@x.com"), row("c@x.com")],
       logger,
@@ -154,6 +161,64 @@ describe("syncImportedRows", () => {
     expect(out).toEqual({ synced: 0, failed: 2 })
   })
 
+  it("unsubscribed rows only get setUnsubscribed, never ensureContact", async () => {
+    const { service, logger } = mk()
+    const resend = {
+      ensureContact: jest.fn(),
+      setUnsubscribed: jest.fn().mockResolvedValue(undefined),
+    }
+    const out = await syncImportedRows(
+      { service, getResend: () => ({ resend: resend as any, segmentId: () => "seg" }) },
+      "main",
+      [row("new@x.com", true), row("flipped@x.com", true)],
+      logger,
+    )
+    expect(resend.setUnsubscribed).toHaveBeenCalledWith("new@x.com")
+    expect(resend.setUnsubscribed).toHaveBeenCalledWith("flipped@x.com")
+    expect(resend.ensureContact).not.toHaveBeenCalled()
+    expect(service.markSynced).toHaveBeenCalledWith("id_new@x.com", null)
+    expect(out).toEqual({ synced: 2, failed: 0 })
+  })
+
+  it("records a throwing setUnsubscribed", async () => {
+    const { service, logger } = mk()
+    const resend = { setUnsubscribed: jest.fn().mockRejectedValue(new Error("403")) }
+    const out = await syncImportedRows(
+      { service, getResend: () => ({ resend: resend as any, segmentId: () => "seg" }) },
+      "main",
+      [row("a@x.com", true)],
+      logger,
+    )
+    expect(service.markSyncError).toHaveBeenCalledWith("id_a@x.com", "403")
+    expect(out).toEqual({ synced: 0, failed: 1 })
+  })
+
+  it("a missing segment fails subscribed rows but still unsubscribes the others", async () => {
+    const { service, logger } = mk()
+    const resend = {
+      ensureContact: jest.fn(),
+      setUnsubscribed: jest.fn().mockResolvedValue(undefined),
+    }
+    const out = await syncImportedRows(
+      {
+        service,
+        getResend: () => ({
+          resend: resend as any,
+          segmentId: () => {
+            throw new Error("segment unset")
+          },
+        }),
+      },
+      "main",
+      [row("a@x.com"), row("u@x.com", true)],
+      logger,
+    )
+    expect(service.markSyncError).toHaveBeenCalledWith("id_a@x.com", "segment unset")
+    expect(resend.setUnsubscribed).toHaveBeenCalledWith("u@x.com")
+    expect(resend.ensureContact).not.toHaveBeenCalled()
+    expect(out).toEqual({ synced: 1, failed: 1 })
+  })
+
   it("never throws even when markSynced itself fails", async () => {
     const { logger } = mk()
     const service = {
@@ -163,7 +228,7 @@ describe("syncImportedRows", () => {
     const resend = { ensureContact: jest.fn().mockResolvedValue({ ok: true, contactId: "c" }) }
     await expect(
       syncImportedRows(
-        { service, getResend: () => ({ resend: resend as any, segmentId: "s" }) },
+        { service, getResend: () => ({ resend: resend as any, segmentId: () => "s" }) },
         "main",
         [row("a@x.com")],
         logger,
@@ -171,3 +236,68 @@ describe("syncImportedRows", () => {
     ).resolves.toBeDefined()
   })
 })
+
+describe("bannerFilename", () => {
+  it("forces the extension from the content type", () => {
+    expect(bannerFilename("Spring Sale.WEBP", "image/jpeg")).toBe("spring_sale.jpg")
+    expect(bannerFilename("hero.jpeg", "image/png")).toBe("hero.png")
+    expect(bannerFilename("a.b.c", "image/jpeg")).toBe("a.b.jpg")
+  })
+  it("falls back to banner for empty or dot-only names", () => {
+    expect(bannerFilename("blob", "image/jpeg")).toBe("blob.jpg")
+    expect(bannerFilename("..", "image/jpeg")).toBe("banner.jpg")
+    expect(bannerFilename(".png", "image/png")).toBe("banner.png")
+    expect(bannerFilename("../../x", "image/png")).toBe("x.png")
+  })
+})
+
+describe("hasImageMagic", () => {
+  it("checks JPEG and PNG signatures", () => {
+    const jpg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0])
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d])
+    expect(hasImageMagic(jpg, "image/jpeg")).toBe(true)
+    expect(hasImageMagic(png, "image/png")).toBe(true)
+    expect(hasImageMagic(png, "image/jpeg")).toBe(false)
+    expect(hasImageMagic(jpg, "image/png")).toBe(false)
+    expect(hasImageMagic(Buffer.from([0xff, 0xd8]), "image/jpeg")).toBe(false)
+    expect(hasImageMagic(Buffer.from("<html>"), "image/jpeg")).toBe(false)
+  })
+})
+
+describe("parseIdsParam / pickerRowsInOrder", () => {
+  it("trims and de-duplicates", () => {
+    expect(parseIdsParam(" a, b ,a,,c")).toEqual(["a", "b", "c"])
+  })
+  it("rejects more than 24 ids with INVALID_DATA", () => {
+    const many = Array.from({ length: 25 }, (_, i) => "p" + i).join(",")
+    expect(() => parseIdsParam(many)).toThrow(/at most 24/)
+    expect(httpStatusFor(safe(() => parseIdsParam(many)))).toBe(400)
+  })
+  it("returns rows in the requested order, omits missing, keeps adult/unlisted", () => {
+    const mkp = (id: string, extra: object = {}) =>
+      ({
+        id,
+        title: id,
+        handle: id,
+        status: "published",
+        thumbnail: null,
+        images: [],
+        categories: [{ handle: "toys" }],
+        metadata: { unlisted: true },
+        variants: [],
+        ...extra,
+      }) as any
+    const rows = pickerRowsInOrder(["b", "x", "a"], [mkp("a"), mkp("b")])
+    expect(rows.map((r) => r.id)).toEqual(["b", "a"])
+    expect(rows[0].adult).toBe(true)
+  })
+})
+
+function safe(fn: () => unknown): unknown {
+  try {
+    fn()
+  } catch (e) {
+    return e
+  }
+  return undefined
+}

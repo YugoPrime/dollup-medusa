@@ -73,9 +73,14 @@ class NewsletterModuleService extends MedusaService({
   async importSubscribers(
     list: NewsletterList,
     rows: Array<{ email: string; unsubscribed: boolean }>
-  ): Promise<{ added: SubscriberDTO[]; skipped: number }> {
+  ): Promise<{
+    added: SubscriberDTO[]
+    skipped: number
+    unsubscribed: SubscriberDTO[]
+  }> {
     const svc = this as any
     const added: SubscriberDTO[] = []
+    const flipped: SubscriberDTO[] = []
     let skipped = 0
     for (const row of rows) {
       const email = normalizeEmail(row.email)
@@ -97,17 +102,18 @@ class NewsletterModuleService extends MedusaService({
         })) as SubscriberDTO
         added.push(created)
       } else if (decision === "unsubscribe") {
-        await svc.updateNewsletterSubscribers({
+        const updated = (await svc.updateNewsletterSubscribers({
           id: existing!.id,
           status: "unsubscribed",
           unsubscribed_at: new Date(),
-        })
+        })) as SubscriberDTO
+        flipped.push(updated)
         skipped++
       } else {
         skipped++
       }
     }
-    return { added, skipped }
+    return { added, skipped, unsubscribed: flipped }
   }
 
   async listSubscribersPage(f: {
