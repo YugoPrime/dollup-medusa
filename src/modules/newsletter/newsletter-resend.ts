@@ -91,7 +91,9 @@ const MAX_RETRIES = 3
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
 const isNotFound = (e: ResendError | null) => !!e && (e.statusCode === 404 || e.name === "not_found")
-const isRateLimited = (e: ResendError | null) => !!e && (e.statusCode === 429 || e.name === "rate_limit_exceeded")
+// Only the per-second limit is worth retrying; daily/monthly quota 429s will not clear in seconds.
+const isRateLimited = (e: ResendError | null) =>
+  !!e && (e.name === "rate_limit_exceeded" || (e.statusCode === 429 && !e.name))
 const isAlreadyExists = (e: ResendError | null) =>
   !!e && (e.statusCode === 409 || /already exist/i.test(e.message))
 
@@ -113,12 +115,25 @@ export function createNewsletterResend(
     return result
   }
 
-  async function ensureContact(email: string, segmentId: string, unsubscribed: boolean) {
+  // Adding a contact to a segment it is already in is a success.
+  async function addToSegment(email: string, segmentId: string) {
+    const added = await withRetry(() => resend.contacts.segments.add({ email, segmentId }))
+    if (added.error && !(added.error.statusCode === 409 || /already/i.test(added.error.message))) {
+      return { ok: false as const, error: added.error.message }
+    }
+    return { ok: true as const }
+  }
+
+  async function ensureContactUnsafe(
+    email: string,
+    segmentId: string,
+    unsubscribed: boolean
+  ): Promise<{ ok: true; contactId: string | null } | { ok: false; error: string }> {
     const existing = await withRetry(() => resend.contacts.get({ email }))
     if (existing.data && !existing.error) {
       // Existing contact: never touch its unsubscribed flag.
-      const added = await withRetry(() => resend.contacts.segments.add({ email, segmentId }))
-      if (added.error) return { ok: false as const, error: added.error.message }
+      const added = await addToSegment(email, segmentId)
+      if (!added.ok) return added
       return { ok: true as const, contactId: existing.data.id }
     }
     if (!isNotFound(existing.error)) {
@@ -134,11 +149,20 @@ export function createNewsletterResend(
     )
     if (created.data && !created.error) return { ok: true as const, contactId: created.data.id }
     if (isAlreadyExists(created.error)) {
-      const added = await withRetry(() => resend.contacts.segments.add({ email, segmentId }))
-      if (added.error) return { ok: false as const, error: added.error.message }
+      const added = await addToSegment(email, segmentId)
+      if (!added.ok) return added
       return { ok: true as const, contactId: null }
     }
     return { ok: false as const, error: created.error?.message ?? "Unknown Resend error" }
+  }
+
+  // Never throws: SDK exceptions (network etc.) become { ok: false }.
+  async function ensureContact(email: string, segmentId: string, unsubscribed: boolean) {
+    try {
+      return await ensureContactUnsafe(email, segmentId, unsubscribed)
+    } catch (e) {
+      return { ok: false as const, error: e instanceof Error ? e.message : String(e) }
+    }
   }
 
   return {
@@ -172,8 +196,10 @@ export function createNewsletterResend(
     // The ONLY path that writes unsubscribed: false (explicit admin re-add).
     async resubscribe(email, segmentId) {
       const res = await withRetry(() => resend.contacts.update({ email, unsubscribed: false }))
-      if (res.error) throw new Error(res.error.message)
-      await ensureContact(email, segmentId, false)
+      // A 404 means the contact was never in Resend: ensureContact creates it subscribed.
+      if (res.error && !isNotFound(res.error)) throw new Error(res.error.message)
+      const ensured = await ensureContact(email, segmentId, false)
+      if (!ensured.ok) throw new Error(ensured.error)
     },
 
     async createAndSendBroadcast({ segmentId, subject, html, name, previewText }) {

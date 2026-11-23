@@ -113,6 +113,28 @@ describe("newsletter-resend", () => {
     })
   })
 
+  describe("ensureContact hardening", () => {
+    it("treats an already-in-segment add error as success", async () => {
+      fake.contacts.get.mockResolvedValue({ data: { id: "ct_9", email: "a@x.mu", unsubscribed: false }, error: null })
+      fake.contacts.segments.add.mockResolvedValue({ data: null, error: { statusCode: 422, name: "x", message: "Contact is already in segment" } })
+      expect(await r.ensureContact("a@x.mu", "seg_main", false)).toEqual({ ok: true, contactId: "ct_9" })
+      fake.contacts.segments.add.mockResolvedValue({ data: null, error: { statusCode: 409, name: "conflict", message: "dup" } })
+      expect(await r.ensureContact("a@x.mu", "seg_main", false)).toEqual({ ok: true, contactId: "ct_9" })
+    })
+
+    it("returns ok:false when the SDK throws", async () => {
+      fake.contacts.get.mockRejectedValue(new Error("network down"))
+      expect(await r.ensureContact("a@x.mu", "seg_main", false)).toEqual({ ok: false, error: "network down" })
+    })
+
+    it("does not retry a 429 that is a quota error", async () => {
+      fake.contacts.get.mockResolvedValue({ data: null, error: { statusCode: 429, name: "daily_quota_exceeded", message: "daily quota" } })
+      expect(await r.ensureContact("a@x.mu", "seg_main", false)).toEqual({ ok: false, error: "daily quota" })
+      expect(fake.contacts.get).toHaveBeenCalledTimes(1)
+      expect(sleep).not.toHaveBeenCalled()
+    })
+  })
+
   describe("listUnsubscribedEmails", () => {
     it("pages with after=last id and normalises emails", async () => {
       fake.contacts.list
@@ -150,6 +172,21 @@ describe("newsletter-resend", () => {
       await r.resubscribe("a@x.mu", "seg_main")
       expect(fake.contacts.update).toHaveBeenCalledWith({ email: "a@x.mu", unsubscribed: false })
       expect(fake.contacts.segments.add).toHaveBeenCalledWith({ email: "a@x.mu", segmentId: "seg_main" })
+    })
+
+    it("resubscribe on an update 404 falls through to ensureContact, which creates the contact", async () => {
+      fake.contacts.update.mockResolvedValue(NOT_FOUND)
+      fake.contacts.get.mockResolvedValue(NOT_FOUND)
+      fake.contacts.create.mockResolvedValue({ data: { id: "ct_new" }, error: null })
+      await expect(r.resubscribe("a@x.mu", "seg_main")).resolves.toBeUndefined()
+      expect(fake.contacts.create).toHaveBeenCalledWith({ email: "a@x.mu", segments: [{ id: "seg_main" }] })
+    })
+
+    it("resubscribe rejects when the segment add fails", async () => {
+      fake.contacts.update.mockResolvedValue({ data: { id: "1" }, error: null })
+      fake.contacts.get.mockResolvedValue({ data: { id: "1", email: "a@x.mu", unsubscribed: false }, error: null })
+      fake.contacts.segments.add.mockResolvedValue({ data: null, error: { statusCode: 422, name: "x", message: "segment gone" } })
+      await expect(r.resubscribe("a@x.mu", "seg_main")).rejects.toThrow("segment gone")
     })
 
     it("resubscribe throws when the update errors", async () => {
