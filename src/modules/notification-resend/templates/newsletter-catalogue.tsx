@@ -178,9 +178,11 @@ export default function NewsletterCatalogueEmail({
   introText,
   bannerUrl,
   cards,
-  storefrontUrl,
+  storefrontUrl: rawStorefrontUrl,
   unsubscribeUrl,
 }: NewsletterCatalogueProps) {
+  // Defensive: a trailing slash would give `//logo.png`.
+  const storefrontUrl = rawStorefrontUrl.replace(/\/+$/, "")
   return (
     <Html>
       <Head>

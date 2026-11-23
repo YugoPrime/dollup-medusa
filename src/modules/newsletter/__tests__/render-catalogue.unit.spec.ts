@@ -36,6 +36,13 @@ describe("renderCatalogueEmail", () => {
     expect(Buffer.byteLength(html, "utf8")).toBeLessThan(100_000)
   })
 
+  it("never builds a double slash from a storefront URL with a trailing slash", async () => {
+    const html = await renderCatalogueEmail({ ...base, storefrontUrl: "https://dollupboutique.com//" })
+    expect(html).not.toContain("dollupboutique.com//")
+    expect(html).toContain('src="https://dollupboutique.com/logo.png"')
+    expect(html).toContain('href="https://dollupboutique.com"')
+  })
+
   it("omits banner, and a missing card image renders no img", async () => {
     const noBanner = await renderCatalogueEmail({
       ...base,

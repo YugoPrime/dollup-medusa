@@ -25,6 +25,12 @@ export const POST = async (req: AuthenticatedMedusaRequest, res: MedusaResponse)
   try {
     const body = (req.body ?? {}) as Record<string, unknown>
     const list = parseList(body.list)
+    if (list !== "main") {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        "In Part 1 the CSV import goes to the Main list only.",
+      )
+    }
     const csv = body.csv
     if (typeof csv !== "string" || csv.length === 0 || csv.length > MAX_CSV_CHARS) {
       throw new MedusaError(
@@ -47,6 +53,7 @@ export const POST = async (req: AuthenticatedMedusaRequest, res: MedusaResponse)
       skipped,
       invalid: parsed.invalid,
       sync_pending: added.length + unsubscribed.length,
+      csv_unsubscribed: parsed.unsubscribedCount,
     })
 
     // Not awaited: syncing thousands of rows at 10 requests/second outlasts the request.
