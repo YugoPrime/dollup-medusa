@@ -1,10 +1,14 @@
+import { MedusaError } from "@medusajs/framework/utils"
+
 import {
   previewCampaign,
   sendCampaign,
   sendTestCampaign,
+  syncList,
   type CampaignDeps,
 } from "../send-campaign"
 import type { CatalogueProduct } from "../lib/catalogue"
+import { createNewsletterResend, type ResendLike } from "../newsletter-resend"
 import type { CampaignDTO, SubscriberDTO } from "../types"
 
 const prod = (o: Partial<CatalogueProduct> = {}): CatalogueProduct => ({
@@ -47,7 +51,15 @@ const baseCampaign = (o: Partial<CampaignDTO> = {}): CampaignDTO => ({
 const sub = (id: string, email: string): SubscriberDTO =>
   ({ id, email, list: "main", status: "subscribed" }) as SubscriberDTO
 
-function setup(opts: { unsynced?: SubscriberDTO[]; totalMain?: number; segmentMain?: string | null } = {}) {
+function setup(
+  opts: {
+    unsynced?: SubscriberDTO[]
+    totalMain?: number
+    segmentMain?: string | null
+    medusaUnsubscribed?: string[]
+    segment?: { subscribed: string[]; unsubscribed: string[] }
+  } = {}
+) {
   const callOrder: string[] = []
   const store = { campaign: baseCampaign() }
   const unsynced = opts.unsynced ?? [sub("s1", "new@x.mu")]
@@ -65,6 +77,10 @@ function setup(opts: { unsynced?: SubscriberDTO[]; totalMain?: number; segmentMa
       callOrder.push("markUnsubscribedByEmails")
       return 1
     }),
+    unsubscribedEmails: jest.fn(async (): Promise<string[]> => {
+      callOrder.push("unsubscribedEmails")
+      return opts.medusaUnsubscribed ?? []
+    }),
     subscribedTotals: jest.fn(async () => {
       callOrder.push("subscribedTotals")
       return { main: opts.totalMain ?? 2, after_dark: 0, contacts: 2 }
@@ -76,13 +92,15 @@ function setup(opts: { unsynced?: SubscriberDTO[]; totalMain?: number; segmentMa
       callOrder.push("ensureContact")
       return { ok: true, contactId: "ct_1" }
     }),
-    listUnsubscribedEmails: jest.fn(async (): Promise<string[]> => {
-      callOrder.push("listUnsubscribedEmails")
-      return []
+    listSegmentEmails: jest.fn(async (): Promise<{ subscribed: string[]; unsubscribed: string[] }> => {
+      callOrder.push("listSegmentEmails")
+      return opts.segment ?? { subscribed: [], unsubscribed: [] }
     }),
-    setUnsubscribed: jest.fn(),
+    setUnsubscribed: jest.fn(async (email: string): Promise<void> => {
+      callOrder.push("setUnsubscribed:" + email)
+    }),
     resubscribe: jest.fn(),
-    createAndSendBroadcast: jest.fn(async (): Promise<{ id: string }> => {
+    createAndSendBroadcast: jest.fn(async (_input?: unknown): Promise<{ id: string }> => {
       callOrder.push("createAndSendBroadcast")
       return { id: "bc_1" }
     }),
@@ -113,24 +131,119 @@ function setup(opts: { unsynced?: SubscriberDTO[]; totalMain?: number; segmentMa
 
 describe("sendCampaign", () => {
   it("pulls unsubscribes before counting and only syncs unsynced rows as subscribed", async () => {
-    const t = setup()
-    t.resend.listUnsubscribedEmails.mockImplementationOnce(async () => {
-      t.callOrder.push("listUnsubscribedEmails")
-      return ["gone@x.mu"]
-    })
+    const t = setup({ segment: { subscribed: ["stay@x.mu"], unsubscribed: ["gone@x.mu"] } })
     await sendCampaign(t.deps, "nlcamp_1", "rahvi")
     expect(t.service.markUnsubscribedByEmails).toHaveBeenCalledWith("main", ["gone@x.mu"])
     expect(t.callOrder).toEqual([
-      "listUnsubscribedEmails",
+      "listSegmentEmails",
       "markUnsubscribedByEmails",
+      "unsubscribedEmails",
       "ensureContact",
       "subscribedTotals",
       "createAndSendBroadcast",
     ])
+    expect(t.resend.setUnsubscribed).not.toHaveBeenCalled()
     expect(t.resend.ensureContact).toHaveBeenCalledTimes(1)
     expect(t.resend.ensureContact).toHaveBeenCalledWith("new@x.mu", "seg_main", false)
     expect(t.resend.resubscribe).not.toHaveBeenCalled()
     expect(t.service.markSynced).toHaveBeenCalledWith("s1", "ct_1")
+  })
+
+  describe("pushing Medusa unsubscribes to Resend (R16)", () => {
+    const opts = {
+      medusaUnsubscribed: ["left@x.mu", "gone@x.mu", "never-in-resend@x.mu"],
+      segment: { subscribed: ["left@x.mu", "stay@x.mu"], unsubscribed: ["gone@x.mu"] },
+    }
+
+    it("unsubscribes in Resend anyone Medusa has unsubscribed but the segment still has subscribed, before the broadcast", async () => {
+      const t = setup(opts)
+      const sent = await sendCampaign(t.deps, "nlcamp_1", "rahvi")
+      expect(t.resend.setUnsubscribed).toHaveBeenCalledTimes(1)
+      expect(t.resend.setUnsubscribed).toHaveBeenCalledWith("left@x.mu")
+      expect(t.callOrder).toEqual([
+        "listSegmentEmails",
+        "markUnsubscribedByEmails",
+        "unsubscribedEmails",
+        "setUnsubscribed:left@x.mu",
+        "ensureContact",
+        "subscribedTotals",
+        "createAndSendBroadcast",
+      ])
+      expect(sent.status).toBe("sent")
+    })
+
+    it("syncList reports pulled, pushed and failed counts", async () => {
+      const t = setup(opts)
+      expect(await syncList(t.deps, "main")).toEqual({
+        unsubscribedPulled: 1,
+        unsubscribedPushed: 1,
+        pushFailed: 0,
+        synced: 1,
+        failed: 0,
+      })
+      t.resend.setUnsubscribed.mockRejectedValueOnce(new Error("Resend 500"))
+      expect(await syncList(t.deps, "main")).toMatchObject({ unsubscribedPushed: 0, pushFailed: 1 })
+    })
+
+    it("a failed push sends nothing, marks the campaign failed, and a retry can succeed", async () => {
+      const t = setup(opts)
+      t.resend.setUnsubscribed.mockRejectedValueOnce(new Error("Resend 500"))
+      let err: unknown
+      try {
+        await sendCampaign(t.deps, "nlcamp_1", "rahvi")
+      } catch (e) {
+        err = e
+      }
+      expect(err).toBeInstanceOf(MedusaError)
+      expect((err as MedusaError).type).toBe(MedusaError.Types.INVALID_DATA)
+      expect((err as Error).message).toBe("Couldn't unsubscribe 1 person in Resend; not sending. Try again.")
+      expect(t.resend.createAndSendBroadcast).not.toHaveBeenCalled()
+      expect(t.store.campaign).toMatchObject({
+        status: "failed",
+        resend_broadcast_id: null,
+        error: "Couldn't unsubscribe 1 person in Resend; not sending. Try again.",
+      })
+
+      const sent = await sendCampaign(t.deps, "nlcamp_1", "rahvi")
+      expect(sent.status).toBe("sent")
+      expect(t.resend.createAndSendBroadcast).toHaveBeenCalledTimes(1)
+    })
+
+    it("counts several failed pushes", async () => {
+      const t = setup({ ...opts, segment: { subscribed: ["left@x.mu", "never-in-resend@x.mu"], unsubscribed: [] } })
+      t.resend.setUnsubscribed.mockRejectedValue(new Error("down"))
+      await expect(sendCampaign(t.deps, "nlcamp_1", "rahvi")).rejects.toThrow(
+        "Couldn't unsubscribe 2 people in Resend; not sending. Try again."
+      )
+      expect(t.store.campaign.status).toBe("failed")
+      expect(t.resend.createAndSendBroadcast).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("expected_list (R20)", () => {
+    it("refuses with CONFLICT when the campaign's list changed since the preview, touching nothing", async () => {
+      const t = setup()
+      let err: unknown
+      try {
+        await sendCampaign(t.deps, "nlcamp_1", "rahvi", "after_dark")
+      } catch (e) {
+        err = e
+      }
+      expect(err).toBeInstanceOf(MedusaError)
+      expect((err as MedusaError).type).toBe(MedusaError.Types.CONFLICT)
+      expect((err as Error).message).toBe("The campaign's list changed since the preview. Preview again.")
+      expect(t.store.campaign.status).toBe("draft")
+      expect(t.service.updateNewsletterCampaigns).not.toHaveBeenCalled()
+      expect(t.resend.listSegmentEmails).not.toHaveBeenCalled()
+      expect(t.resend.createAndSendBroadcast).not.toHaveBeenCalled()
+    })
+
+    it("sends normally when the list matches", async () => {
+      const t = setup()
+      const sent = await sendCampaign(t.deps, "nlcamp_1", "rahvi", "main")
+      expect(sent.status).toBe("sent")
+      expect(t.resend.createAndSendBroadcast).toHaveBeenCalledWith(expect.objectContaining({ segmentId: "seg_main" }))
+    })
   })
 
   it("creates exactly one broadcast when sent twice at once", async () => {
@@ -199,6 +312,76 @@ describe("sendCampaign", () => {
       expect(t.store.campaign.resend_broadcast_id).toBe("bc_2")
     })
 
+    // Classification comes from the real wrapper, so these cover Resend result -> campaign state.
+    const viaRealWrapper = (create: jest.Mock) =>
+      createNewsletterResend(
+        {
+          apiKey: "k",
+          from: "Doll Up Team <hello@dollupboutique.com>",
+          replyTo: "hello@dollupboutique.com",
+          segments: { main: "seg_main", after_dark: "seg_ad" },
+          storefrontUrl: "https://dollupboutique.com",
+        },
+        { broadcasts: { create } } as unknown as ResendLike,
+        { sleep: async () => undefined, now: () => 0 }
+      )
+    const UNCONFIRMED = "Resend did not confirm the send — check the Resend dashboard before doing anything else."
+
+    it("a 403 from Resend marks failed and stays retryable", async () => {
+      const t = setup()
+      const wrapper = viaRealWrapper(
+        jest.fn().mockResolvedValue({
+          data: null,
+          error: { statusCode: 403, name: "validation_error", message: "You have reached your contacts quota." },
+        })
+      )
+      t.resend.createAndSendBroadcast.mockImplementationOnce((i: any) => wrapper.createAndSendBroadcast(i))
+      await expect(sendCampaign(t.deps, "nlcamp_1", "rahvi")).rejects.toThrow("You have reached your contacts quota.")
+      expect(t.store.campaign).toMatchObject({ status: "failed", resend_broadcast_id: null })
+      await expect(sendCampaign(t.deps, "nlcamp_1", "rahvi")).resolves.toMatchObject({ status: "sent" })
+    })
+
+    it.each([
+      ["a null status code", (m: jest.Mock) => m.mockResolvedValue({ data: null, error: { statusCode: null, name: "application_error", message: "Unable to fetch data." } })],
+      ["a 503", (m: jest.Mock) => m.mockResolvedValue({ data: null, error: { statusCode: 503, name: "internal_server_error", message: "Service unavailable" } })],
+      ["an SDK throw", (m: jest.Mock) => m.mockRejectedValue(new Error("socket hang up"))],
+    ])("%s on create leaves the campaign sending, says check Resend, and blocks a retry", async (_label, arrange) => {
+      const t = setup()
+      const create = jest.fn()
+      arrange(create)
+      const wrapper = viaRealWrapper(create)
+      t.resend.createAndSendBroadcast.mockImplementationOnce((i: any) => wrapper.createAndSendBroadcast(i))
+
+      let err: unknown
+      try {
+        await sendCampaign(t.deps, "nlcamp_1", "rahvi")
+      } catch (e) {
+        err = e
+      }
+      expect(err).toBeInstanceOf(MedusaError)
+      expect((err as MedusaError).type).toBe(MedusaError.Types.UNEXPECTED_STATE)
+      expect((err as Error).message).toBe(UNCONFIRMED)
+      expect(t.store.campaign).toMatchObject({ status: "sending", resend_broadcast_id: null, error: UNCONFIRMED })
+
+      await expect(sendCampaign(t.deps, "nlcamp_1", "rahvi")).rejects.toThrow(/already sent or sending/)
+      expect(t.resend.createAndSendBroadcast).toHaveBeenCalledTimes(1)
+      expect(create).toHaveBeenCalledTimes(1)
+    })
+
+    it("unconfirmed still throws the check-Resend error, never failed, when saving the note fails", async () => {
+      const t = setup()
+      const wrapper = viaRealWrapper(jest.fn().mockRejectedValue(new Error("socket hang up")))
+      t.resend.createAndSendBroadcast.mockImplementationOnce((i: any) => wrapper.createAndSendBroadcast(i))
+      const real = t.service.updateNewsletterCampaigns.getMockImplementation()!
+      t.service.updateNewsletterCampaigns.mockImplementation(async (p) => {
+        if (p.status === undefined && "error" in p) throw new Error("db down")
+        return real(p)
+      })
+      await expect(sendCampaign(t.deps, "nlcamp_1", "rahvi")).rejects.toThrow(UNCONFIRMED)
+      expect(t.store.campaign.status).toBe("sending")
+      expect(t.service.updateNewsletterCampaigns).not.toHaveBeenCalledWith(expect.objectContaining({ status: "failed" }))
+    })
+
     it("keeps the broadcast id and never marks failed when the final update throws", async () => {
       const t = setup()
       t.resend.createAndSendBroadcast.mockResolvedValueOnce({ id: "bc_3" })
@@ -260,7 +443,8 @@ describe("previewCampaign", () => {
     expect(p).toMatchObject({ html: "<html>2", cardCount: 2, recipientEstimate: 5, unsyncedCount: 2 })
     expect((t.render.mock.calls[0][0] as any).unsubscribeUrl).toBe("#")
     expect(t.service.updateNewsletterCampaigns).not.toHaveBeenCalled()
-    expect(t.resend.listUnsubscribedEmails).not.toHaveBeenCalled()
+    expect(t.resend.listSegmentEmails).not.toHaveBeenCalled()
+    expect(t.resend.setUnsubscribed).not.toHaveBeenCalled()
     expect(t.resend.ensureContact).not.toHaveBeenCalled()
   })
 })

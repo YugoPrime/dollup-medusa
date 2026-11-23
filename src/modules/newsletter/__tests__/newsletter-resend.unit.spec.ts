@@ -1,4 +1,8 @@
+import { MedusaError } from "@medusajs/framework/utils"
+
 import {
+  BroadcastRefusedError,
+  BroadcastUnconfirmedError,
   createNewsletterResend,
   getNewsletterConfig,
   requireSegment,
@@ -33,12 +37,17 @@ const NOT_FOUND = { data: null, error: { statusCode: 404, name: "not_found", mes
 describe("newsletter-resend", () => {
   let fake: ReturnType<typeof makeFake>
   let sleep: jest.Mock
+  let clock: number
   let r: ReturnType<typeof createNewsletterResend>
 
   beforeEach(() => {
     fake = makeFake()
-    sleep = jest.fn().mockResolvedValue(undefined)
-    r = createNewsletterResend(config, fake as unknown as ResendLike, { sleep })
+    // A fake clock that only moves when the wrapper sleeps, so pacing is deterministic.
+    clock = 0
+    sleep = jest.fn(async (ms: number) => {
+      clock += ms
+    })
+    r = createNewsletterResend(config, fake as unknown as ResendLike, { sleep, now: () => clock })
   })
 
   describe("ensureContact", () => {
@@ -135,19 +144,70 @@ describe("newsletter-resend", () => {
     })
   })
 
-  describe("listUnsubscribedEmails", () => {
-    it("pages with after=last id and normalises emails", async () => {
+  describe("listSegmentEmails", () => {
+    it("pages with after=last id, normalises emails and splits by unsubscribed", async () => {
       fake.contacts.list
-        .mockResolvedValueOnce({ data: { has_more: true, data: [{ id: "1", email: "A@x.mu", unsubscribed: true }, { id: "2", email: "b@x.mu", unsubscribed: false }] }, error: null })
-        .mockResolvedValueOnce({ data: { has_more: false, data: [{ id: "3", email: "c@x.mu", unsubscribed: true }] }, error: null })
-      expect(await r.listUnsubscribedEmails("seg_main")).toEqual(["a@x.mu", "c@x.mu"])
+        .mockResolvedValueOnce({ data: { has_more: true, data: [{ id: "1", email: "A@x.mu", unsubscribed: true }, { id: "2", email: " B@x.mu ", unsubscribed: false }] }, error: null })
+        .mockResolvedValueOnce({ data: { has_more: false, data: [{ id: "3", email: "c@x.mu", unsubscribed: true }, { id: "4", email: "not-an-email", unsubscribed: false }] }, error: null })
+      expect(await r.listSegmentEmails("seg_main")).toEqual({
+        subscribed: ["b@x.mu"],
+        unsubscribed: ["a@x.mu", "c@x.mu"],
+      })
+      expect(fake.contacts.list).toHaveBeenCalledTimes(2)
       expect(fake.contacts.list).toHaveBeenNthCalledWith(1, { segmentId: "seg_main", limit: 100 })
       expect(fake.contacts.list).toHaveBeenNthCalledWith(2, { segmentId: "seg_main", limit: 100, after: "2" })
     })
 
     it("throws on a list error", async () => {
       fake.contacts.list.mockResolvedValue({ data: null, error: { statusCode: 500, name: "x", message: "list failed" } })
-      await expect(r.listUnsubscribedEmails("seg_main")).rejects.toThrow(/list failed/)
+      await expect(r.listSegmentEmails("seg_main")).rejects.toThrow(/list failed/)
+    })
+  })
+
+  describe("pacing (R19)", () => {
+    it("spaces two back-to-back calls 250 ms apart", async () => {
+      fake.contacts.update.mockResolvedValue({ data: { id: "1" }, error: null })
+      await r.setUnsubscribed("a@x.mu")
+      expect(sleep).not.toHaveBeenCalled()
+      await r.setUnsubscribed("b@x.mu")
+      expect(sleep.mock.calls).toEqual([[250]])
+    })
+
+    it("waits only the remainder when time already passed, and not at all after 250 ms", async () => {
+      fake.contacts.update.mockResolvedValue({ data: { id: "1" }, error: null })
+      await r.setUnsubscribed("a@x.mu")
+      clock += 100
+      await r.setUnsubscribed("b@x.mu")
+      expect(sleep.mock.calls).toEqual([[150]])
+      clock += 300
+      await r.setUnsubscribed("c@x.mu")
+      expect(sleep.mock.calls).toEqual([[150]])
+    })
+
+    it("paces every SDK call, including the ones inside one method", async () => {
+      fake.contacts.get.mockResolvedValue(NOT_FOUND)
+      fake.contacts.create.mockResolvedValue({ data: { id: "ct_1" }, error: null })
+      await r.ensureContact("a@x.mu", "seg_main", false)
+      expect(sleep.mock.calls).toEqual([[250]])
+    })
+
+    it("queues concurrent calls instead of firing them together", async () => {
+      const starts: number[] = []
+      fake.contacts.update.mockImplementation(async () => {
+        starts.push(clock)
+        return { data: { id: "1" }, error: null }
+      })
+      await Promise.all([r.setUnsubscribed("a@x.mu"), r.setUnsubscribed("b@x.mu"), r.setUnsubscribed("c@x.mu")])
+      expect(starts).toEqual([0, 250, 500])
+    })
+
+    it("still paces after a call that threw", async () => {
+      fake.contacts.update
+        .mockRejectedValueOnce(new Error("network"))
+        .mockResolvedValueOnce({ data: { id: "1" }, error: null })
+      await expect(r.setUnsubscribed("a@x.mu")).rejects.toThrow("network")
+      await r.setUnsubscribed("b@x.mu")
+      expect(sleep.mock.calls).toEqual([[250]])
     })
   })
 
@@ -196,12 +256,60 @@ describe("newsletter-resend", () => {
   })
 
   describe("broadcasts and test sends", () => {
+    const send = () => r.createAndSendBroadcast({ segmentId: "s", subject: "x", html: "<p/>", name: "n" })
+    const caught = async (): Promise<unknown> => {
+      try {
+        await send()
+      } catch (e) {
+        return e
+      }
+      throw new Error("expected createAndSendBroadcast to throw")
+    }
+
     it("surfaces the Resend message and sends with the right shape", async () => {
       fake.broadcasts.create.mockResolvedValue({ data: null, error: { statusCode: 403, name: "validation_error", message: "You have reached your contacts quota." } })
-      await expect(r.createAndSendBroadcast({ segmentId: "s", subject: "x", html: "<p/>", name: "n" })).rejects.toThrow(/contacts quota/)
+      await expect(send()).rejects.toThrow(/contacts quota/)
       expect(fake.broadcasts.create).toHaveBeenCalledWith(
         expect.objectContaining({ segmentId: "s", send: true, from: "Doll Up Team <hello@dollupboutique.com>", replyTo: "hello@dollupboutique.com" })
       )
+    })
+
+    it("a 4xx is a definite refusal (BroadcastRefusedError with Resend's message)", async () => {
+      fake.broadcasts.create.mockResolvedValue({ data: null, error: { statusCode: 403, name: "validation_error", message: "You have reached your contacts quota." } })
+      const e403 = await caught()
+      expect(e403).toBeInstanceOf(BroadcastRefusedError)
+      expect((e403 as Error).message).toBe("You have reached your contacts quota.")
+      fake.broadcasts.create.mockResolvedValue({ data: null, error: { statusCode: 422, name: "validation_error", message: "segment not found" } })
+      expect(await caught()).toBeInstanceOf(BroadcastRefusedError)
+    })
+
+    it("a 429 rate limit that outlasts the retries is a refusal (never created)", async () => {
+      fake.broadcasts.create.mockResolvedValue({ data: null, error: { statusCode: 429, name: "rate_limit_exceeded", message: "Too many requests" } })
+      expect(await caught()).toBeInstanceOf(BroadcastRefusedError)
+      expect(fake.broadcasts.create).toHaveBeenCalledTimes(4)
+    })
+
+    it.each([
+      ["a null status code", { data: null, error: { statusCode: null, name: "application_error", message: "Unable to fetch data." } }, "Unable to fetch data."],
+      ["a 503", { data: null, error: { statusCode: 503, name: "internal_server_error", message: "Service unavailable" } }, "Service unavailable"],
+      ["a 500", { data: null, error: { statusCode: 500, name: "internal_server_error", message: "boom" } }, "boom"],
+      ["no data and no error", { data: null, error: null }, null],
+    ])("%s is unconfirmed and is not retried", async (_label, result, detail) => {
+      fake.broadcasts.create.mockResolvedValue(result)
+      const e = await caught()
+      expect(e).toBeInstanceOf(BroadcastUnconfirmedError)
+      expect(e).not.toBeInstanceOf(BroadcastRefusedError)
+      expect((e as Error).message).toMatch(/^Resend did not confirm the send \(.+\)$/)
+      if (detail) expect((e as Error).message).toBe(`Resend did not confirm the send (${detail})`)
+      expect(fake.broadcasts.create).toHaveBeenCalledTimes(1)
+    })
+
+    it("an SDK throw is unconfirmed and keeps the original message", async () => {
+      fake.broadcasts.create.mockRejectedValue(new Error("socket hang up"))
+      const e = await caught()
+      expect(e).toBeInstanceOf(BroadcastUnconfirmedError)
+      expect((e as Error).message).toBe("Resend did not confirm the send (socket hang up)")
+      expect(fake.broadcasts.create).toHaveBeenCalledTimes(1)
     })
 
     it("returns the broadcast id and passes previewText only when non-empty", async () => {
@@ -262,6 +370,37 @@ describe("newsletter-resend", () => {
       expect(c.from).toBe("Me <h@d.com>")
       expect(c.replyTo).toBe("r@d.com")
       expect(c.storefrontUrl).toBe("https://s.test")
+    })
+
+    it("strips trailing slashes from STOREFRONT_URL", () => {
+      const base = { RESEND_API_KEY: "k", RESEND_FROM_EMAIL: "h@d.com" }
+      expect(getNewsletterConfig({ ...base, STOREFRONT_URL: "https://dollupboutique.com/" }).storefrontUrl).toBe("https://dollupboutique.com")
+      expect(getNewsletterConfig({ ...base, STOREFRONT_URL: "https://dollupboutique.com///" }).storefrontUrl).toBe("https://dollupboutique.com")
+      expect(getNewsletterConfig({ ...base, STOREFRONT_URL: "/" }).storefrontUrl).toBe("https://dollupboutique.com")
+    })
+
+    it("rejects the same segment id for both lists", () => {
+      const env = {
+        RESEND_API_KEY: "k",
+        RESEND_FROM_EMAIL: "h@d.com",
+        RESEND_NEWSLETTER_SEGMENT_MAIN: "seg_same",
+        RESEND_NEWSLETTER_SEGMENT_AFTER_DARK: "seg_same",
+      }
+      let err: unknown
+      try {
+        getNewsletterConfig(env)
+      } catch (e) {
+        err = e
+      }
+      expect(err).toBeInstanceOf(MedusaError)
+      expect((err as MedusaError).type).toBe(MedusaError.Types.INVALID_DATA)
+      expect((err as Error).message).toBe(
+        "RESEND_NEWSLETTER_SEGMENT_MAIN and RESEND_NEWSLETTER_SEGMENT_AFTER_DARK must be different segments"
+      )
+      expect(getNewsletterConfig({ ...env, RESEND_NEWSLETTER_SEGMENT_AFTER_DARK: "seg_ad" }).segments).toEqual({
+        main: "seg_same",
+        after_dark: "seg_ad",
+      })
     })
 
     it("requireSegment throws naming the env var", () => {

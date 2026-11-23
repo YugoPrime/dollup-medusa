@@ -95,6 +95,8 @@ export function buildCampaignDeps(scope: Scope): CampaignDeps {
 
 export type ImportSyncDeps = {
   service: {
+    /** Medusa's generated retrieve: throws MedusaError NOT_FOUND for a deleted row. */
+    retrieveNewsletterSubscriber(id: string): Promise<Pick<SubscriberDTO, "id" | "email" | "status">>
     markSynced(id: string, contactId: string | null): Promise<unknown>
     markSyncError(id: string, message: string): Promise<unknown>
   }
@@ -103,11 +105,15 @@ export type ImportSyncDeps = {
 }
 
 const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e))
+const isNotFound = (e: unknown) =>
+  e instanceof MedusaError && e.type === MedusaError.Types.NOT_FOUND
 
 /**
  * Background Resend sync of imported rows. Sequential (Resend allows 10 req/s).
- * Unsubscribed rows (new or flipped) only get setUnsubscribed, never ensureContact, so no
- * contact is created for someone who opted out. Subscribed rows get ensureContact(.., false).
+ * Each row is re-read first and handled by its CURRENT status (an admin may unsubscribe
+ * someone while a long import is still syncing); rows deleted since are skipped.
+ * Unsubscribed rows only get setUnsubscribed, never ensureContact, so no contact is
+ * created for someone who opted out. Subscribed rows get ensureContact(.., false).
  * Never throws: failures are recorded per row with markSyncError.
  */
 export async function syncImportedRows(
@@ -142,16 +148,27 @@ export async function syncImportedRows(
     } catch (e) {
       segmentError = messageOf(e)
     }
+    let skipped = 0
     for (const row of rows) {
       try {
-        if (row.status === "unsubscribed") {
-          await target.resend.setUnsubscribed(row.email)
+        let current: Pick<SubscriberDTO, "id" | "email" | "status">
+        try {
+          current = await deps.service.retrieveNewsletterSubscriber(row.id)
+        } catch (e) {
+          if (isNotFound(e)) {
+            skipped++
+            continue
+          }
+          throw e
+        }
+        if (current.status === "unsubscribed") {
+          await target.resend.setUnsubscribed(current.email)
           await deps.service.markSynced(row.id, null)
           synced++
         } else if (segmentId === null) {
           await record(row, segmentError ?? "segment is not set")
         } else {
-          const r = await target.resend.ensureContact(row.email, segmentId, false)
+          const r = await target.resend.ensureContact(current.email, segmentId, false)
           if (r.ok) {
             await deps.service.markSynced(row.id, r.contactId)
             synced++
@@ -163,7 +180,9 @@ export async function syncImportedRows(
         await record(row, messageOf(e))
       }
     }
-    logger.info?.(`[newsletter] import (${list}): synced ${synced}, failed ${failed}`)
+    logger.info?.(
+      `[newsletter] import (${list}): synced ${synced}, failed ${failed}, skipped ${skipped}`
+    )
   } catch (e) {
     try {
       logger.error(`[newsletter] import sync crashed: ${messageOf(e)}`)
@@ -177,6 +196,15 @@ export async function syncImportedRows(
 export function parseList(raw: unknown): NewsletterList {
   if (typeof raw !== "string" || !NEWSLETTER_LISTS.includes(raw as NewsletterList)) {
     throw new MedusaError(MedusaError.Types.INVALID_DATA, "list must be main or after_dark")
+  }
+  return raw as NewsletterList
+}
+
+/** Optional `expected_list` on send: absent (undefined/null) or one of the lists. */
+export function parseExpectedList(raw: unknown): NewsletterList | undefined {
+  if (raw === undefined || raw === null) return undefined
+  if (typeof raw !== "string" || !NEWSLETTER_LISTS.includes(raw as NewsletterList)) {
+    throw new MedusaError(MedusaError.Types.INVALID_DATA, "expected_list must be main or after_dark")
   }
   return raw as NewsletterList
 }

@@ -20,15 +20,39 @@ export function getNewsletterConfig(env: NodeJS.ProcessEnv = process.env): Newsl
   if (missing.length > 0 || !apiKey || !fromEmail) {
     throw new MedusaError(MedusaError.Types.INVALID_DATA, `Missing env: ${missing.join(", ")}`)
   }
+  const main = env.RESEND_NEWSLETTER_SEGMENT_MAIN?.trim() || null
+  const afterDark = env.RESEND_NEWSLETTER_SEGMENT_AFTER_DARK?.trim() || null
+  // One shared segment would send After Dark catalogues to the Main list.
+  if (main && afterDark && main === afterDark) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      "RESEND_NEWSLETTER_SEGMENT_MAIN and RESEND_NEWSLETTER_SEGMENT_AFTER_DARK must be different segments"
+    )
+  }
   return {
     apiKey,
     from: `${env.RESEND_FROM_NAME || "Doll Up Team"} <${fromEmail}>`,
     replyTo: env.RESEND_REPLY_TO || fromEmail,
-    segments: {
-      main: env.RESEND_NEWSLETTER_SEGMENT_MAIN || null,
-      after_dark: env.RESEND_NEWSLETTER_SEGMENT_AFTER_DARK || null,
-    },
-    storefrontUrl: env.STOREFRONT_URL || "https://dollupboutique.com",
+    segments: { main, after_dark: afterDark },
+    storefrontUrl: (env.STOREFRONT_URL ?? "").trim().replace(/\/+$/, "") || "https://dollupboutique.com",
+  }
+}
+
+/** Resend definitely did not create the broadcast (a 4xx answer): safe to retry. */
+export class BroadcastRefusedError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "BroadcastRefusedError"
+    Object.setPrototypeOf(this, new.target.prototype)
+  }
+}
+
+/** Resend may have created (and sent) the broadcast: never retry without checking Resend. */
+export class BroadcastUnconfirmedError extends Error {
+  constructor(detail: string) {
+    super(`Resend did not confirm the send (${detail})`)
+    this.name = "BroadcastUnconfirmedError"
+    Object.setPrototypeOf(this, new.target.prototype)
   }
 }
 
@@ -74,7 +98,8 @@ export interface NewsletterResend {
     segmentId: string,
     unsubscribed: boolean
   ): Promise<{ ok: true; contactId: string | null } | { ok: false; error: string }>
-  listUnsubscribedEmails(segmentId: string): Promise<string[]>
+  /** Every contact in the segment, normalised and split by Resend's unsubscribed flag. */
+  listSegmentEmails(segmentId: string): Promise<{ subscribed: string[]; unsubscribed: string[] }>
   setUnsubscribed(email: string): Promise<void>
   resubscribe(email: string, segmentId: string): Promise<void>
   createAndSendBroadcast(i: {
@@ -88,7 +113,10 @@ export interface NewsletterResend {
 }
 
 const MAX_RETRIES = 3
+// Order emails share Resend's 10 req/s team limit and are dropped on a 429: stay well under it.
+const MIN_CALL_GAP_MS = 250
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
 const isNotFound = (e: ResendError | null) => !!e && (e.statusCode === 404 || e.name === "not_found")
 // Only the per-second limit is worth retrying; daily/monthly quota 429s will not clear in seconds.
@@ -100,17 +128,34 @@ const isAlreadyExists = (e: ResendError | null) =>
 export function createNewsletterResend(
   config: NewsletterConfig,
   client?: ResendLike,
-  options: { sleep?: (ms: number) => Promise<void> } = {}
+  options: { sleep?: (ms: number) => Promise<void>; now?: () => number } = {}
 ): NewsletterResend {
   const resend: ResendLike = client ?? new Resend(config.apiKey)
   const sleep = options.sleep ?? defaultSleep
+  const now = options.now ?? Date.now
 
-  // Resend allows 10 req/s per team: retry 429s with a growing pause.
+  // Starts SDK calls at least MIN_CALL_GAP_MS apart. Calls queue on `gate`, so concurrent
+  // callers on one instance are spaced out too; a call that throws still used its slot.
+  let gate: Promise<void> = Promise.resolve()
+  let lastStart: number | null = null
+  function paced<T>(fn: () => Promise<T>): Promise<T> {
+    const turn = gate.then(async () => {
+      if (lastStart !== null) {
+        const wait = lastStart + MIN_CALL_GAP_MS - now()
+        if (wait > 0) await sleep(wait)
+      }
+      lastStart = now()
+    })
+    gate = turn.catch(() => undefined)
+    return turn.then(fn)
+  }
+
+  // Resend allows 10 req/s per team: pace every call and retry 429s with a growing pause.
   async function withRetry<T extends { error: ResendError | null }>(fn: () => Promise<T>): Promise<T> {
-    let result = await fn()
+    let result = await paced(fn)
     for (let attempt = 1; attempt <= MAX_RETRIES && isRateLimited(result.error); attempt++) {
       await sleep(1000 * attempt)
-      result = await fn()
+      result = await paced(fn)
     }
     return result
   }
@@ -168,8 +213,9 @@ export function createNewsletterResend(
   return {
     ensureContact,
 
-    async listUnsubscribedEmails(segmentId) {
-      const out: string[] = []
+    async listSegmentEmails(segmentId) {
+      const subscribed: string[] = []
+      const unsubscribed: string[] = []
       let after: string | undefined
       for (;;) {
         const res = await withRetry(() =>
@@ -177,15 +223,16 @@ export function createNewsletterResend(
         )
         if (res.error || !res.data) throw new Error(res.error?.message ?? "Resend contacts.list failed")
         for (const c of res.data.data) {
-          if (!c.unsubscribed) continue
           const email = normalizeEmail(c.email)
-          if (email) out.push(email)
+          if (!email) continue
+          if (c.unsubscribed) unsubscribed.push(email)
+          else subscribed.push(email)
         }
         const last = res.data.data[res.data.data.length - 1]
         if (!res.data.has_more || !last) break
         after = last.id
       }
-      return out
+      return { subscribed, unsubscribed }
     },
 
     async setUnsubscribed(email) {
@@ -202,21 +249,33 @@ export function createNewsletterResend(
       if (!ensured.ok) throw new Error(ensured.error)
     },
 
+    // Throws BroadcastRefusedError (4xx: not created, retryable) or BroadcastUnconfirmedError
+    // (no answer, 5xx, SDK throw: it may have gone out, so it must never be retried blindly).
     async createAndSendBroadcast({ segmentId, subject, html, name, previewText }) {
-      const res = await withRetry(() =>
-        resend.broadcasts.create({
-          segmentId,
-          from: config.from,
-          replyTo: config.replyTo,
-          subject,
-          html,
-          name,
-          ...(previewText ? { previewText } : {}),
-          send: true,
-        })
-      )
-      if (res.error || !res.data) throw new Error(res.error?.message ?? "Resend broadcast failed")
-      return { id: res.data.id }
+      let res: Result<{ id: string }>
+      try {
+        res = await withRetry(() =>
+          resend.broadcasts.create({
+            segmentId,
+            from: config.from,
+            replyTo: config.replyTo,
+            subject,
+            html,
+            name,
+            ...(previewText ? { previewText } : {}),
+            send: true,
+          })
+        )
+      } catch (e) {
+        throw new BroadcastUnconfirmedError(messageOf(e))
+      }
+      if (!res.error && res.data?.id) return { id: res.data.id }
+      const err = res.error
+      // A 4xx (a 429 rate limit included: withRetry already retried it) means Resend refused it.
+      if (err && typeof err.statusCode === "number" && err.statusCode >= 400 && err.statusCode < 500) {
+        throw new BroadcastRefusedError(err.message)
+      }
+      throw new BroadcastUnconfirmedError(err?.message || "no broadcast id returned")
     },
 
     async sendTest({ to, subject, html }) {

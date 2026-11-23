@@ -93,13 +93,112 @@ describe("buildCampaignDeps", () => {
 })
 
 describe("syncImportedRows", () => {
-  const row = (email: string, unsub = false) =>
-    ({ id: "id_" + email, email, status: unsub ? "unsubscribed" : "subscribed" }) as SubscriberDTO
+  // Fake subscriber table: syncImportedRows re-reads every row before pushing it.
+  let db: Map<string, SubscriberDTO>
+  beforeEach(() => {
+    db = new Map()
+  })
+  const row = (email: string, unsub = false) => {
+    const r = { id: "id_" + email, email, status: unsub ? "unsubscribed" : "subscribed" } as SubscriberDTO
+    db.set(r.id, r)
+    return r
+  }
+  const setStatus = (r: SubscriberDTO, status: SubscriberDTO["status"]) => db.set(r.id, { ...r, status })
+  const retrieve = () =>
+    jest.fn(async (id: string) => {
+      const r = db.get(id)
+      if (!r) {
+        throw new MedusaError(MedusaError.Types.NOT_FOUND, `NewsletterSubscriber with id: ${id} was not found`)
+      }
+      return { ...r }
+    })
   const mk = () => {
-    const service = { markSynced: jest.fn(), markSyncError: jest.fn() }
+    const service = { markSynced: jest.fn(), markSyncError: jest.fn(), retrieveNewsletterSubscriber: retrieve() }
     const logger = { info: jest.fn(), error: jest.fn() }
     return { service, logger }
   }
+
+  it("uses the row's CURRENT status: flipped to unsubscribed mid-sync → setUnsubscribed, no ensureContact", async () => {
+    const { service, logger } = mk()
+    const a = row("a@x.com")
+    const b = row("b@x.com")
+    const resend = {
+      ensureContact: jest.fn(async () => {
+        setStatus(b, "unsubscribed") // b unsubscribes while a is being synced
+        return { ok: true, contactId: "c1" }
+      }),
+      setUnsubscribed: jest.fn().mockResolvedValue(undefined),
+    }
+    const out = await syncImportedRows(
+      { service, getResend: () => ({ resend: resend as any, segmentId: () => "seg" }) },
+      "main",
+      [a, b],
+      logger,
+    )
+    expect(resend.ensureContact).toHaveBeenCalledTimes(1)
+    expect(resend.ensureContact).toHaveBeenCalledWith("a@x.com", "seg", false)
+    expect(resend.setUnsubscribed).toHaveBeenCalledTimes(1)
+    expect(resend.setUnsubscribed).toHaveBeenCalledWith("b@x.com")
+    expect(service.markSynced).toHaveBeenCalledWith("id_b@x.com", null)
+    expect(service.retrieveNewsletterSubscriber).toHaveBeenCalledWith("id_b@x.com")
+    expect(out).toEqual({ synced: 2, failed: 0 })
+  })
+
+  it("a row passed as unsubscribed but re-added since gets ensureContact(false), not setUnsubscribed", async () => {
+    const { service, logger } = mk()
+    const u = row("u@x.com", true)
+    setStatus(u, "subscribed")
+    const resend = {
+      ensureContact: jest.fn().mockResolvedValue({ ok: true, contactId: "c9" }),
+      setUnsubscribed: jest.fn(),
+    }
+    await syncImportedRows(
+      { service, getResend: () => ({ resend: resend as any, segmentId: () => "seg" }) },
+      "main",
+      [u],
+      logger,
+    )
+    expect(resend.setUnsubscribed).not.toHaveBeenCalled()
+    expect(resend.ensureContact).toHaveBeenCalledWith("u@x.com", "seg", false)
+  })
+
+  it("skips rows that no longer exist without touching Resend or recording an error", async () => {
+    const { service, logger } = mk()
+    const gone = row("gone@x.com")
+    const kept = row("kept@x.com")
+    db.delete(gone.id)
+    const resend = {
+      ensureContact: jest.fn().mockResolvedValue({ ok: true, contactId: "c1" }),
+      setUnsubscribed: jest.fn(),
+    }
+    const out = await syncImportedRows(
+      { service, getResend: () => ({ resend: resend as any, segmentId: () => "seg" }) },
+      "main",
+      [gone, kept],
+      logger,
+    )
+    expect(resend.ensureContact).toHaveBeenCalledTimes(1)
+    expect(resend.ensureContact).toHaveBeenCalledWith("kept@x.com", "seg", false)
+    expect(service.markSyncError).not.toHaveBeenCalled()
+    expect(out).toEqual({ synced: 1, failed: 0 })
+  })
+
+  it("a failing re-read is recorded and nothing is pushed for that row", async () => {
+    const { service, logger } = mk()
+    const a = row("a@x.com")
+    service.retrieveNewsletterSubscriber.mockRejectedValueOnce(new Error("db down"))
+    const resend = { ensureContact: jest.fn(), setUnsubscribed: jest.fn() }
+    const out = await syncImportedRows(
+      { service, getResend: () => ({ resend: resend as any, segmentId: () => "seg" }) },
+      "main",
+      [a],
+      logger,
+    )
+    expect(resend.ensureContact).not.toHaveBeenCalled()
+    expect(resend.setUnsubscribed).not.toHaveBeenCalled()
+    expect(service.markSyncError).toHaveBeenCalledWith("id_a@x.com", "db down")
+    expect(out).toEqual({ synced: 0, failed: 1 })
+  })
 
   it("pushes subscribed rows with ensureContact(false) and marks synced", async () => {
     const { service, logger } = mk()
@@ -224,6 +323,7 @@ describe("syncImportedRows", () => {
     const service = {
       markSynced: jest.fn().mockRejectedValue(new Error("db down")),
       markSyncError: jest.fn().mockRejectedValue(new Error("db down")),
+      retrieveNewsletterSubscriber: retrieve(),
     }
     const resend = { ensureContact: jest.fn().mockResolvedValue({ ok: true, contactId: "c" }) }
     await expect(

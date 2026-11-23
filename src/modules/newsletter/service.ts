@@ -187,11 +187,28 @@ class NewsletterModuleService extends MedusaService({
 
   async markUnsubscribed(id: string): Promise<SubscriberDTO> {
     const svc = this as any
+    const current = (await svc.retrieveNewsletterSubscriber(id)) as SubscriberDTO
+    // Already unsubscribed: keep the original unsubscribed_at.
+    if (current.status === "unsubscribed") return current
     return (await svc.updateNewsletterSubscribers({
       id,
       status: "unsubscribed",
       unsubscribed_at: new Date(),
     })) as SubscriberDTO
+  }
+
+  /** Normalised emails of every unsubscribed row on the list (pushed to Resend before a send). */
+  async unsubscribedEmails(list: NewsletterList): Promise<string[]> {
+    const svc = this as any
+    const rows = (await svc.listNewsletterSubscribers(
+      { list, status: "unsubscribed" },
+      { select: ["email"], take: null }
+    )) as Array<Pick<SubscriberDTO, "email">>
+    return [
+      ...new Set(
+        rows.map((r) => normalizeEmail(r.email)).filter((e): e is string => !!e)
+      ),
+    ]
   }
 
   async markUnsubscribedByEmails(
