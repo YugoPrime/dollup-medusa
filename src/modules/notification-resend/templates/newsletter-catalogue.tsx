@@ -30,7 +30,7 @@ const CHAMPAGNE = "#FBF3E8"
 const SERIF = "Georgia, 'Times New Roman', serif"
 
 const stackCss =
-  "@media only screen and (max-width: 480px){.dub-col{display:block !important;width:100% !important;max-width:100% !important}}"
+  "@media only screen and (max-width: 480px){.dub-col{display:block !important;box-sizing:border-box !important;width:100% !important;max-width:100% !important;padding-left:0 !important;padding-right:0 !important}.dub-fill{display:none !important}}"
 
 const s = {
   body: {
@@ -229,7 +229,7 @@ export default function NewsletterCatalogueEmail({
                       </td>
                     ))}
                     {pair.length === 1 && (
-                      <td className="dub-col" style={s.cell} />
+                      <td className="dub-fill" style={s.cell} />
                     )}
                   </tr>
                 ))}
@@ -243,7 +243,9 @@ export default function NewsletterCatalogueEmail({
             </Link>
           </Section>
 
-          <Hr style={{ borderColor: GOLD, margin: "24px 32px" }} />
+          <Section style={{ padding: "24px 32px" }}>
+            <Hr style={{ borderColor: GOLD, margin: 0 }} />
+          </Section>
 
           <Section style={s.footer}>
             <Text style={{ ...s.small, margin: 0 }}>
@@ -254,7 +256,7 @@ export default function NewsletterCatalogueEmail({
             <Text style={s.small}>
               Questions? Reply to this email or message us on{" "}
               <Link
-                href="https://wa.me/2305941 6359"
+                href="https://wa.me/23059416359"
                 style={{ color: BRAND.coral }}
               >
                 WhatsApp

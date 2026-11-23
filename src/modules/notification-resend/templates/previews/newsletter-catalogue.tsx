@@ -10,7 +10,7 @@ const images = [
   `${cdn}/IS2389-01KSNHT7M6G0ENTGCD9S2RBRNP.jpg`,
 ]
 
-export const sampleCards = Array.from({ length: 6 }, (_, i) => ({
+export const sampleCards = Array.from({ length: 7 }, (_, i) => ({
   id: `p${i}`,
   title:
     i === 2
