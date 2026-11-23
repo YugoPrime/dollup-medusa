@@ -53,9 +53,13 @@ export async function uploadPublicObject(input: {
   return `${publicBase.replace(/\/$/, "")}/${input.key}`
 }
 
-export async function uploadDraftImage(
-  input: UploadInput,
-): Promise<UploadResult> {
+/** Puts an image under `<prefix>/<random>/<safeName>` and returns its key and public URL. */
+export async function uploadPublicImage(input: {
+  prefix: string
+  filename: string
+  contentType: string
+  body: Buffer
+}): Promise<UploadResult> {
   const bucket = process.env.R2_BUCKET
   const publicBase = process.env.R2_PUBLIC_URL
   if (!bucket || !publicBase) {
@@ -66,7 +70,7 @@ export async function uploadDraftImage(
     .replace(/[^a-z0-9._-]/g, "_")
     .replace(/_{2,}/g, "_")
   const random = randomBytes(6).toString("hex")
-  const key = `sourcing/${input.draftId}/${random}/${safeName}`
+  const key = `${input.prefix}/${random}/${safeName}`
   await getClient().send(
     new PutObjectCommand({
       Bucket: bucket,
@@ -80,4 +84,15 @@ export async function uploadDraftImage(
     key,
     url: `${publicBase.replace(/\/$/, "")}/${key}`,
   }
+}
+
+export async function uploadDraftImage(
+  input: UploadInput,
+): Promise<UploadResult> {
+  return uploadPublicImage({
+    prefix: `sourcing/${input.draftId}`,
+    filename: input.filename,
+    contentType: input.contentType,
+    body: input.body,
+  })
 }

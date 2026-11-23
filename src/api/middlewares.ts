@@ -87,6 +87,18 @@ export default defineMiddlewares({
       bodyParser: { sizeLimit: "4mb" },
     },
     {
+      // Newsletter banner upload: base64 JPEG/PNG (<= 1.5 MB decoded) in a JSON body.
+      matcher: "/admin/newsletter/uploads",
+      methods: ["POST"],
+      bodyParser: { sizeLimit: "2mb" },
+    },
+    {
+      // Newsletter CSV import: CSV text (<= 1,000,000 chars) in a JSON body.
+      matcher: "/admin/newsletter/subscribers/import",
+      methods: ["POST"],
+      bodyParser: { sizeLimit: "2mb" },
+    },
+    {
       // Bookmarklet route lives under /hooks/* because /admin/* and /store/*
       // both have global per-namespace middleware (admin-auth + publishable-
       // key check) registered by Medusa that can't be opted out per-route.
