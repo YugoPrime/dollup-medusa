@@ -4,7 +4,6 @@ import type {
 } from "@medusajs/framework/http"
 import {
   ContainerRegistrationKeys,
-  QueryContext,
 } from "@medusajs/framework/utils"
 
 import { STORIES_MODULE } from "../../../../../modules/stories"
@@ -15,6 +14,7 @@ import {
   toProductLike,
 } from "../../../../../modules/stories/product-source"
 import { gridProductIdsForDate } from "../../../../../lib/story-pick-deps"
+import { murPriceContext } from "../../../../../lib/pricing-context"
 
 /**
  * Batch-create N daily plans with shared anti-repeat. Reuses the same
@@ -65,7 +65,7 @@ export const POST = async (req: AuthenticatedMedusaRequest, res: MedusaResponse)
       filters,
       pagination: { take: 500 },
       context: {
-        variants: { calculated_price: QueryContext({ currency_code: "mur" }) },
+        variants: { calculated_price: await murPriceContext(query) },
       },
     })
     return products.filter((p: any) => !isSocialExcluded(p)).map(toProductLike)
