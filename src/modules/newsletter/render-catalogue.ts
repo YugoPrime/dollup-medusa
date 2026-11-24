@@ -11,6 +11,10 @@ export type CatalogueEmailInput = {
   preheader: string | null
   introText: string | null
   bannerUrl: string | null
+  /** Where the banner opens; null falls back to the storefront home. */
+  bannerLink: string | null
+  /** Tags the header's category links (utm_campaign), like the product links. */
+  campaignId: string
   cards: CatalogueCard[]
   storefrontUrl: string
   unsubscribeUrl: string

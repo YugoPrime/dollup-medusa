@@ -20,6 +20,8 @@ export type NewsletterCatalogueProps = {
   preheader: string | null
   introText: string | null
   bannerUrl: string | null
+  bannerLink: string | null
+  campaignId: string
   cards: CatalogueCard[]
   storefrontUrl: string
   unsubscribeUrl: string

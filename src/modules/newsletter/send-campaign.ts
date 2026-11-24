@@ -64,6 +64,8 @@ export async function prepareCampaign(
     preheader: c.preheader,
     introText: c.intro_text,
     bannerUrl: c.banner_url,
+    bannerLink: c.banner_link,
+    campaignId: c.id,
     cards,
     storefrontUrl: deps.config.storefrontUrl,
     unsubscribeUrl,

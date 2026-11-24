@@ -19,6 +19,8 @@ const base: CatalogueEmailInput = {
   preheader: "Fresh party pieces",
   introText: "Line one\nLine two",
   bannerUrl: "https://cdn.dollupboutique.com/newsletter/b.jpg",
+  bannerLink: null,
+  campaignId: "nlcamp_1",
   cards: Array.from({ length: 24 }, (_, i) => card(i)),
   storefrontUrl: "https://dollupboutique.com",
   unsubscribeUrl: UNSUBSCRIBE_PLACEHOLDER,
