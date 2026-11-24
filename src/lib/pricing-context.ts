@@ -21,5 +21,8 @@ export async function murPriceContext(query: GraphQuery) {
     filters: { currency_code: "mur" },
   })
   const regionId: string | undefined = data?.[0]?.id
+  if (!regionId) {
+    console.warn("[pricing] no MUR region found: pricing with the currency only, so sale prices may show as full price")
+  }
   return QueryContext(regionId ? { region_id: regionId, currency_code: "mur" } : { currency_code: "mur" })
 }
