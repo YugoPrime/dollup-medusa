@@ -36,6 +36,7 @@ const baseCampaign = (o: Partial<CampaignDTO> = {}): CampaignDTO => ({
   preheader: "Fresh in",
   intro_text: null,
   banner_url: null,
+  banner_link: null,
   product_ids: ["a", "b"],
   status: "draft",
   resend_broadcast_id: null,
