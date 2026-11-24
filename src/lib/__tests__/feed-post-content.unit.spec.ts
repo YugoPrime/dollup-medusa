@@ -142,4 +142,12 @@ describe("buildFeedCaption", () => {
     const cap = buildFeedCaption({ ...snap, compare_at_price_mur: 1290 })
     expect(cap).not.toContain("was Rs")
   })
+
+  it("lists the sizes from small to large", () => {
+    const cap = buildFeedCaption({
+      ...snap,
+      variants_in_stock: [{ ...snap.variants_in_stock[0], sizes: ["S", "M", "L", "XS"] }],
+    })
+    expect(cap).toContain("📏 Sizes: XS · S · M · L")
+  })
 })
