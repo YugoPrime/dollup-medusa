@@ -1382,8 +1382,17 @@ class SourcingModuleService extends MedusaService({
    * Flip a pushed draft item's Medusa product from `draft` to `published`.
    * Idempotent: re-running on an already-published product is a no-op.
    * Throws if the item has no published_product_id (i.e. not pushed yet).
+   *
+   * `container` MUST be the request-scope container (`req.scope`), exactly
+   * like pushDraftToMedusa: updateProductsWorkflow resolves `remoteQuery`,
+   * which the module's own `this.__container__` cannot resolve. Using it
+   * made every Go Live fail in prod with "Could not resolve 'remoteQuery'"
+   * (found 25 Nov 2026 when collection 30 went live).
    */
-  async goLive(itemId: string): Promise<{ product_id: string }> {
+  async goLive(
+    itemId: string,
+    container: RequestContainer,
+  ): Promise<{ product_id: string }> {
     const svc = this as unknown as {
       retrieveDraftItem: (id: string) => Promise<{
         id: string
@@ -1400,8 +1409,6 @@ class SourcingModuleService extends MedusaService({
         "item has not been pushed yet",
       )
     }
-    const container = (this as unknown as { __container__: unknown })
-      .__container__ as { resolve: (key: string) => unknown }
     await updateProductsWorkflow(container as never).run({
       input: {
         products: [
