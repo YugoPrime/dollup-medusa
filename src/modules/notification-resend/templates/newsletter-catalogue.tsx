@@ -192,6 +192,27 @@ function categoryUrl(storefrontUrl: string, handle: string, campaignId: string):
   return `${storefrontUrl}/shop?category=${handle}&utm_source=newsletter&utm_medium=email&utm_campaign=${encodeURIComponent(campaignId)}`
 }
 
+/**
+ * Where the banner opens. Storefront links get the newsletter's UTM tags (unless they
+ * already carry some), so sale clicks count for the email; other sites are left as typed.
+ */
+function bannerHref(link: string | null, storefrontUrl: string, campaignId: string): string {
+  const target = link ?? `${storefrontUrl}/`
+  let url: URL
+  try {
+    url = new URL(target)
+  } catch {
+    return target
+  }
+  if (url.host !== new URL(storefrontUrl).host || url.searchParams.has("utm_source")) {
+    return target
+  }
+  url.searchParams.set("utm_source", "newsletter")
+  url.searchParams.set("utm_medium", "email")
+  url.searchParams.set("utm_campaign", campaignId)
+  return url.toString()
+}
+
 function Intro({ text }: { text: string }) {
   const { title, body } = splitIntro(text)
   if (!title) return null
@@ -218,7 +239,8 @@ function CardCell({ card }: { card: CatalogueCard }) {
     <td className="dub-col" width="48%" valign="top" style={s.cardCell}>
       {card.imageUrl ? (
         <Link href={card.url}>
-          <Img src={card.imageUrl} alt={card.title} width="100%" style={s.img} />
+          {/* Pixel width for Outlook desktop, which ignores a percentage; other clients follow the inline 100%. */}
+          <Img src={card.imageUrl} alt={card.title} width="270" style={s.img} />
         </Link>
       ) : (
         <div style={s.noImg}>&nbsp;</div>
@@ -265,7 +287,7 @@ export default function NewsletterCatalogueEmail({
   const bannerRow = bannerUrl ? (
     <tr>
       <td colSpan={3} style={s.bannerCell}>
-        <Link href={bannerLink ?? storefrontUrl}>
+        <Link href={bannerHref(bannerLink, storefrontUrl, campaignId)}>
           <Img src={bannerUrl} alt={subject} width="568" style={s.bannerImg} />
         </Link>
       </td>

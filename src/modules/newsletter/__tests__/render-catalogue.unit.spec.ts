@@ -118,10 +118,31 @@ describe("catalogue email layout", () => {
     const banner = html.indexOf("newsletter/b.jpg")
     expect(banner).toBeGreaterThan(html.lastIndexOf("products/p3?"))
     expect(banner).toBeLessThan(html.indexOf("products/p4?"))
-    expect(html).toMatch(/<a href="https:\/\/dollupboutique\.com\/sale"[^>]*><img[^>]+newsletter\/b\.jpg/)
+    expect(html).toMatch(/<a href="https:\/\/dollupboutique\.com\/sale\?[^"]*"[^>]*><img[^>]+newsletter\/b\.jpg/)
 
     const home = await renderCatalogueEmail(base)
-    expect(home).toMatch(/<a href="https:\/\/dollupboutique\.com"[^>]*><img[^>]+newsletter\/b\.jpg/)
+    expect(home).toMatch(/<a href="https:\/\/dollupboutique\.com\/\?[^"]*"[^>]*><img[^>]+newsletter\/b\.jpg/)
+  })
+
+  it("tags a storefront banner link with the newsletter UTM params and leaves other sites alone", async () => {
+    const utm = "utm_source=newsletter&amp;utm_medium=email&amp;utm_campaign=nlcamp_1"
+    const sale = await renderCatalogueEmail({ ...base, bannerLink: "https://dollupboutique.com/sale" })
+    expect(sale).toContain(`href="https://dollupboutique.com/sale?${utm}"`)
+    const filtered = await renderCatalogueEmail({
+      ...base,
+      bannerLink: "https://dollupboutique.com/shop?on_sale=1",
+    })
+    expect(filtered).toContain(`href="https://dollupboutique.com/shop?on_sale=1&amp;${utm}"`)
+    const home = await renderCatalogueEmail(base)
+    expect(home).toContain(`href="https://dollupboutique.com/?${utm}"`)
+    const other = await renderCatalogueEmail({ ...base, bannerLink: "https://www.instagram.com/dollup" })
+    expect(other).toContain('href="https://www.instagram.com/dollup"')
+  })
+
+  it("gives card photos a fixed pixel width that Outlook desktop honours", async () => {
+    const html = await renderCatalogueEmail(base)
+    expect(html).toMatch(/<img[^>]*src="https:\/\/cdn\.dollupboutique\.com\/p3\.jpg"[^>]*width="270"/)
+    expect(html).not.toMatch(/<img[^>]*src="https:\/\/cdn\.dollupboutique\.com\/p3\.jpg"[^>]*width="100%"/)
   })
 
   it("puts the banner after the grid with 4 or fewer products and keeps an odd row's filler", async () => {
