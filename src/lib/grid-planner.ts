@@ -1,5 +1,5 @@
 import type { MedusaContainer } from "@medusajs/framework/types"
-import { ContainerRegistrationKeys, QueryContext } from "@medusajs/framework/utils"
+import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
 
 import { FEED_POSTS_MODULE } from "../modules/feed-posts"
 import type FeedPostsModuleService from "../modules/feed-posts/service"
@@ -32,6 +32,7 @@ import {
 import { addDaysToMauritiusDate } from "./mauritius-date"
 import { isUniqueViolation } from "./db-errors"
 import { createStoryPickDeps } from "./story-pick-deps"
+import { murPriceContext } from "./pricing-context"
 
 /** Days of grid-post history considered when ordering repeats. */
 const HISTORY_DAYS = 400
@@ -275,7 +276,7 @@ export async function loadGridProduct(
     filters: { id: productId },
     pagination: { take: 1 },
     context: {
-      variants: { calculated_price: QueryContext({ currency_code: "mur" }) },
+      variants: { calculated_price: await murPriceContext(query) },
     },
   })
   const raw = (data as any[])[0]

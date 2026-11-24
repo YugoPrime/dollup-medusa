@@ -4,7 +4,6 @@ import type {
 } from "@medusajs/framework/http"
 import {
   ContainerRegistrationKeys,
-  QueryContext,
 } from "@medusajs/framework/utils"
 
 import { STORIES_MODULE } from "../../../../../../modules/stories"
@@ -17,6 +16,7 @@ import {
   gridProductIdsForPlan,
   gridSwapConflict,
 } from "../../../../../../lib/story-pick-deps"
+import { murPriceContext } from "../../../../../../lib/pricing-context"
 
 /**
  * Manually swap the product picked for a slot. Rejects posted slots.
@@ -58,7 +58,7 @@ export const PUT = async (req: AuthenticatedMedusaRequest, res: MedusaResponse) 
     filters: { id: productId },
     pagination: { take: 1 },
     context: {
-      variants: { calculated_price: QueryContext({ currency_code: "mur" }) },
+      variants: { calculated_price: await murPriceContext(query) },
     },
   })
   const p = (products as any[])[0]

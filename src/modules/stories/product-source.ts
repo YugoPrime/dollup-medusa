@@ -1,5 +1,6 @@
-import { ContainerRegistrationKeys, QueryContext } from "@medusajs/framework/utils"
+import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
 
+import { murPriceContext } from "../../lib/pricing-context"
 import type { ProductLike } from "./snapshot"
 
 /**
@@ -102,6 +103,8 @@ export function createMedusaProductSource(scope: {
     // cap meant the latest import could be neither auto-picked nor manually
     // planned). Page size is modest because each row carries nested
     // variant/inventory/price data.
+    // Region, not currency alone: see murPriceContext (Medusa 2.13.1 drops sale prices otherwise).
+    const priceContext = await murPriceContext(query)
     const PAGE = 200
     const MAX_SKIP = 20000 // safety bound (~100 pages) against an unbounded loop
     const products: any[] = []
@@ -116,7 +119,7 @@ export function createMedusaProductSource(scope: {
         pagination: { take: PAGE, skip, order: { id: "ASC" } },
         context: {
           variants: {
-            calculated_price: QueryContext({ currency_code: "mur" }),
+            calculated_price: priceContext,
           },
         },
       })

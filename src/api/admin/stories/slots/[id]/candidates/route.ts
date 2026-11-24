@@ -4,13 +4,13 @@ import type {
 } from "@medusajs/framework/http"
 import {
   ContainerRegistrationKeys,
-  QueryContext,
 } from "@medusajs/framework/utils"
 
 import { STORIES_MODULE } from "../../../../../../modules/stories"
 import type StoriesModuleService from "../../../../../../modules/stories/service"
 import { isSocialExcluded } from "../../../../../../modules/stories/product-source"
 import { gridProductIdsForPlan } from "../../../../../../lib/story-pick-deps"
+import { murPriceContext } from "../../../../../../lib/pricing-context"
 
 /**
  * Returns swap candidates for a slot: in-stock published products in the
@@ -62,7 +62,7 @@ export const GET = async (req: AuthenticatedMedusaRequest, res: MedusaResponse) 
     filters,
     pagination: { take: 200 },
     context: {
-      variants: { calculated_price: QueryContext({ currency_code: "mur" }) },
+      variants: { calculated_price: await murPriceContext(query) },
     },
   })
 

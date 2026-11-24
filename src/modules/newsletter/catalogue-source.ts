@@ -1,7 +1,6 @@
 import {
   ContainerRegistrationKeys,
   Modules,
-  QueryContext,
 } from "@medusajs/framework/utils"
 
 import { collectCategoryAndDescendants } from "../stories/product-source"
@@ -13,6 +12,7 @@ import {
   type PickerRow,
 } from "./lib/catalogue"
 import type { NewsletterList } from "./types"
+import { murPriceContext } from "../../lib/pricing-context"
 
 type Scope = { resolve(key: any): any }
 
@@ -50,7 +50,7 @@ export async function loadCatalogueProducts(
     pagination: { take: unique.length },
     context: {
       variants: {
-        calculated_price: QueryContext({ currency_code: "mur" }),
+        calculated_price: await murPriceContext(query),
       },
     },
   })

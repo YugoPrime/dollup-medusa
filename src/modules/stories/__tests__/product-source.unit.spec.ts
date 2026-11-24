@@ -1,4 +1,9 @@
-import { collectCategoryAndDescendants, isSocialExcluded, toProductLike } from "../product-source"
+import {
+  collectCategoryAndDescendants,
+  createMedusaProductSource,
+  isSocialExcluded,
+  toProductLike,
+} from "../product-source"
 
 const SAMPLE = {
   id: "prod_1",
@@ -279,5 +284,23 @@ describe("toProductLike tags and categories", () => {
     const p = toProductLike({ id: "p2", title: "T", handle: "is2", images: [], variants: [] })
     expect(p.tags).toEqual([])
     expect(p.category_ids).toEqual([])
+  })
+})
+
+describe("createMedusaProductSource pricing", () => {
+  it("prices variants with the Mauritius region (a currency-only context returns the full price during a sale)", async () => {
+    const graph = jest.fn(async (args: { entity: string }) =>
+      args.entity === "region" ? { data: [{ id: "reg_mu" }] } : { data: [] },
+    )
+    const source = createMedusaProductSource({ resolve: () => ({ graph }) })
+
+    await source({})
+
+    const productCall = graph.mock.calls.find(([args]) => args.entity === "product")
+    expect(productCall).toBeDefined()
+    expect((productCall![0] as any).context.variants.calculated_price).toMatchObject({
+      region_id: "reg_mu",
+      currency_code: "mur",
+    })
   })
 })
