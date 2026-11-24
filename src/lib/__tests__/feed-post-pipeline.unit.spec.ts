@@ -75,4 +75,25 @@ describe("publishFeedPostRow", () => {
     expect(publishFeedImages).not.toHaveBeenCalled()
     expect(publishFbPhotoPost).not.toHaveBeenCalled()
   })
+
+  it("gives each photo its colour's sizes", async () => {
+    prepareFeedImages.mockResolvedValue(["https://cdn/feed/x.jpg"])
+    publishFeedImages.mockResolvedValue("ig_1")
+    const { scope } = fakeScope({
+      ...row,
+      image_urls: ["w.jpg", "r.jpg"],
+      product_snapshot: {
+        variants_in_stock: [
+          { color: "White", sizes: ["M", "S"], image_urls: ["w.jpg"] },
+          { color: "Red", sizes: ["L"], image_urls: ["r.jpg"] },
+        ],
+      },
+    })
+
+    await publishFeedPostRow({ scope, feedPostId: "fp_1" })
+
+    const deps = prepareFeedImages.mock.calls[0][1] as { sizesFor?: (u: string) => string[] }
+    expect(deps.sizesFor?.("w.jpg")).toEqual(["S", "M"])
+    expect(deps.sizesFor?.("r.jpg")).toEqual(["L"])
+  })
 })
