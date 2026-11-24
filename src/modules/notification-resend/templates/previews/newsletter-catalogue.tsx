@@ -29,6 +29,8 @@ export default function NewsletterCataloguePreview() {
       preheader="Fresh party pieces, just landed"
       introText={"Our newest pieces are here.\nPicked for your next night out."}
       bannerUrl={`${cdn}/homepage/babe-essentials/is1361.jpg`}
+      bannerLink="https://dollupboutique.com/sale"
+      campaignId="preview"
       cards={sampleCards}
       storefrontUrl="https://dollupboutique.com"
       unsubscribeUrl="#"

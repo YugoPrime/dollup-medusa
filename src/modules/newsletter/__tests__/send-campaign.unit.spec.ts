@@ -36,6 +36,7 @@ const baseCampaign = (o: Partial<CampaignDTO> = {}): CampaignDTO => ({
   preheader: "Fresh in",
   intro_text: null,
   banner_url: null,
+  banner_link: null,
   product_ids: ["a", "b"],
   status: "draft",
   resend_broadcast_id: null,
@@ -268,6 +269,8 @@ describe("sendCampaign", () => {
     const input = t.render.mock.calls[0][0] as any
     expect(input.cards.map((c: { id: string }) => c.id)).toEqual(["a"])
     expect(input.unsubscribeUrl).toBe("{{{RESEND_UNSUBSCRIBE_URL}}}")
+    expect(input.campaignId).toBe("nlcamp_1")
+    expect(input.bannerLink).toBe(null)
     expect(sent).toMatchObject({
       status: "sent",
       sent_by: "rahvi",
@@ -446,6 +449,19 @@ describe("previewCampaign", () => {
     expect(t.resend.listSegmentEmails).not.toHaveBeenCalled()
     expect(t.resend.setUnsubscribed).not.toHaveBeenCalled()
     expect(t.resend.ensureContact).not.toHaveBeenCalled()
+  })
+
+  it("passes the campaign's banner link and id to the email", async () => {
+    const t = setup()
+    t.store.campaign = baseCampaign({
+      banner_url: "https://cdn.dollupboutique.com/newsletter/b.jpg",
+      banner_link: "https://dollupboutique.com/sale",
+    })
+    await previewCampaign(t.deps, "nlcamp_1")
+    const input = t.render.mock.calls[0][0] as any
+    expect(input.bannerLink).toBe("https://dollupboutique.com/sale")
+    expect(input.bannerUrl).toBe("https://cdn.dollupboutique.com/newsletter/b.jpg")
+    expect(input.campaignId).toBe("nlcamp_1")
   })
 })
 

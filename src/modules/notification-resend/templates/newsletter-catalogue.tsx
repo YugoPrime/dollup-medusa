@@ -20,23 +20,45 @@ export type NewsletterCatalogueProps = {
   preheader: string | null
   introText: string | null
   bannerUrl: string | null
+  bannerLink: string | null
+  campaignId: string
   cards: CatalogueCard[]
   storefrontUrl: string
   unsubscribeUrl: string
 }
 
+/** Satin + logo, one baked image so it looks the same in every mail app (spec 2026-11-25). */
+export const NEWSLETTER_HEADER_URL =
+  "https://cdn.dollupboutique.com/newsletter/28244b2470bc/header-satin.jpg"
+
+export const CATEGORY_BUTTONS: ReadonlyArray<{ label: string; handle: string }> = [
+  { label: "Dresses", handle: "dresses" },
+  { label: "Beachwear", handle: "beachwear" },
+  { label: "Lingerie", handle: "lingerie" },
+]
+
+/** The promo banner goes after this many products (or after the grid when there are fewer). */
+const BANNER_AFTER_CARDS = 4
+
 const GOLD = "#C9A96E"
 const CHAMPAGNE = "#FBF3E8"
+const STRIP = "#F3EADF"
+const HEADER_FALLBACK = "#E9DDD3"
 const SERIF = "Georgia, 'Times New Roman', serif"
+// Gmail drops web fonts and shows Georgia; Apple Mail shows Playfair, the storefront's display font.
+const DISPLAY = "'Playfair Display', Georgia, 'Times New Roman', serif"
+const SANS = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+const FONT_CSS =
+  "https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600&display=swap"
 
+// Phones stack the cards. The gap cell turns into a 16px spacer; a filler cell disappears.
 const stackCss =
-  "@media only screen and (max-width: 480px){.dub-col{display:block !important;box-sizing:border-box !important;width:100% !important;max-width:100% !important;padding-left:0 !important;padding-right:0 !important}.dub-fill{display:none !important}}"
+  "@media only screen and (max-width: 480px){.dub-col{display:block !important;box-sizing:border-box !important;width:100% !important;max-width:100% !important}.dub-gap{display:block !important;width:100% !important;height:16px !important}.dub-fill{display:none !important}}"
 
 const s = {
   body: {
     backgroundColor: BRAND.cream,
-    fontFamily:
-      '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    fontFamily: SANS,
     color: BRAND.ink,
     margin: 0,
     padding: "24px 12px",
@@ -47,28 +69,69 @@ const s = {
     maxWidth: "600px",
     overflow: "hidden",
   },
-  header: {
-    backgroundColor: BRAND.coral,
-    padding: "24px",
-    textAlign: "center" as const,
-  },
-  banner: { display: "block", width: "100%", height: "auto" },
-  intro: {
-    color: BRAND.inkSoft,
+  header: { backgroundColor: HEADER_FALLBACK },
+  headerImg: {
+    display: "block",
+    width: "100%",
+    height: "auto",
+    color: BRAND.ink,
     fontFamily: SERIF,
-    fontSize: "16px",
-    lineHeight: "26px",
-    margin: 0,
-    padding: "28px 32px 8px 32px",
+    fontSize: "20px",
     textAlign: "center" as const,
   },
-  gridWrap: { backgroundColor: CHAMPAGNE, padding: "20px 10px" },
-  cell: { padding: "10px", verticalAlign: "top" as const, width: "50%" },
-  card: {
+  strip: { backgroundColor: STRIP, padding: "14px 22px" },
+  navCell: { padding: "0 5px" },
+  navBtn: {
+    backgroundColor: "#ffffff",
+    border: `1px solid ${GOLD}`,
+    color: BRAND.ink,
+    display: "block",
+    fontFamily: SANS,
+    fontSize: "12px",
+    letterSpacing: "0.16em",
+    lineHeight: "16px",
+    padding: "10px 0",
+    textAlign: "center" as const,
+    textDecoration: "none",
+    textTransform: "uppercase" as const,
+  },
+  introWrap: { padding: "34px 36px 26px 36px", textAlign: "center" as const },
+  introTitle: {
+    color: BRAND.ink,
+    fontFamily: DISPLAY,
+    fontSize: "32px",
+    fontWeight: 400,
+    lineHeight: "40px",
+    margin: 0,
+    textAlign: "center" as const,
+  },
+  introRule: {
+    backgroundColor: GOLD,
+    fontSize: "1px",
+    height: "1px",
+    lineHeight: "1px",
+    margin: "18px auto",
+    width: "60px",
+  },
+  introBody: {
+    color: "#5C4D4D",
+    fontFamily: SANS,
+    fontSize: "15px",
+    lineHeight: "25px",
+    margin: 0,
+    textAlign: "center" as const,
+  },
+  gridWrap: { backgroundColor: CHAMPAGNE, padding: "20px 16px" },
+  cardCell: {
     backgroundColor: "#ffffff",
     border: `1px solid ${BRAND.border}`,
-    borderCollapse: "collapse" as const,
+    padding: 0,
+    verticalAlign: "top" as const,
+    width: "48%",
   },
+  gapCell: { fontSize: "1px", lineHeight: "1px", width: "4%" },
+  fillCell: { width: "48%" },
+  spacer: { fontSize: "1px", height: "16px", lineHeight: "16px" },
   img: { display: "block", width: "100%", height: "auto" },
   noImg: { height: "24px", lineHeight: "24px", fontSize: "1px" },
   info: { padding: "14px 12px 16px 12px", textAlign: "center" as const },
@@ -76,8 +139,11 @@ const s = {
     color: BRAND.ink,
     fontFamily: SERIF,
     fontSize: "15px",
+    // Two lines high whatever the title, so prices and buttons line up across a row.
+    height: "42px",
     lineHeight: "21px",
     margin: "0 0 6px 0",
+    overflow: "hidden",
   },
   price: {
     color: BRAND.ink,
@@ -101,6 +167,8 @@ const s = {
     textDecoration: "none",
     textTransform: "uppercase" as const,
   },
+  bannerCell: { paddingTop: "16px" },
+  bannerImg: { display: "block", width: "100%", height: "auto" },
   footer: { padding: "0 32px 28px 32px", textAlign: "center" as const },
   small: {
     color: BRAND.inkMuted,
@@ -111,56 +179,83 @@ const s = {
   link: { color: BRAND.inkMuted, textDecoration: "underline" },
 }
 
-function IntroText({ text }: { text: string }) {
-  const lines = text.split("\n")
+/** First non-blank line is the title; the other non-blank lines are the body. */
+export function splitIntro(text: string): { title: string; body: string[] } {
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+  return { title: lines[0] ?? "", body: lines.slice(1) }
+}
+
+function categoryUrl(storefrontUrl: string, handle: string, campaignId: string): string {
+  return `${storefrontUrl}/shop?category=${handle}&utm_source=newsletter&utm_medium=email&utm_campaign=${encodeURIComponent(campaignId)}`
+}
+
+/**
+ * Where the banner opens. Storefront links get the newsletter's UTM tags (unless they
+ * already carry some), so sale clicks count for the email; other sites are left as typed.
+ */
+function bannerHref(link: string | null, storefrontUrl: string, campaignId: string): string {
+  const target = link ?? `${storefrontUrl}/`
+  let url: URL
+  try {
+    url = new URL(target)
+  } catch {
+    return target
+  }
+  if (url.host !== new URL(storefrontUrl).host || url.searchParams.has("utm_source")) {
+    return target
+  }
+  url.searchParams.set("utm_source", "newsletter")
+  url.searchParams.set("utm_medium", "email")
+  url.searchParams.set("utm_campaign", campaignId)
+  return url.toString()
+}
+
+function Intro({ text }: { text: string }) {
+  const { title, body } = splitIntro(text)
+  if (!title) return null
   return (
-    <Text style={s.intro}>
-      {lines.map((line, i) => (
-        <React.Fragment key={i}>
-          {i > 0 && <br />}
-          {line}
-        </React.Fragment>
-      ))}
-    </Text>
+    <Section style={s.introWrap}>
+      <Text style={s.introTitle}>{title}</Text>
+      <div style={s.introRule}>&nbsp;</div>
+      {body.length > 0 && (
+        <Text style={s.introBody}>
+          {body.map((line, i) => (
+            <React.Fragment key={i}>
+              {i > 0 && <br />}
+              {line}
+            </React.Fragment>
+          ))}
+        </Text>
+      )}
+    </Section>
   )
 }
 
-function ProductCard({ card }: { card: CatalogueCard }) {
+function CardCell({ card }: { card: CatalogueCard }) {
   return (
-    <table width="100%" role="presentation" style={s.card}>
-      <tbody>
-        <tr>
-          <td>
-            {card.imageUrl ? (
-              <Link href={card.url}>
-                <Img
-                  src={card.imageUrl}
-                  alt={card.title}
-                  width="100%"
-                  style={s.img}
-                />
-              </Link>
-            ) : (
-              <div style={s.noImg}>&nbsp;</div>
-            )}
-          </td>
-        </tr>
-        <tr>
-          <td style={s.info}>
-            <Text style={s.title}>{card.title}</Text>
-            <Text style={s.price}>
-              {card.price}
-              {card.originalPrice && (
-                <span style={s.was}>{card.originalPrice}</span>
-              )}
-            </Text>
-            <Link href={card.url} style={s.shop}>
-              Shop
-            </Link>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+    <td className="dub-col" width="48%" valign="top" style={s.cardCell}>
+      {card.imageUrl ? (
+        <Link href={card.url}>
+          {/* Pixel width for Outlook desktop, which ignores a percentage; other clients follow the inline 100%. */}
+          <Img src={card.imageUrl} alt={card.title} width="270" style={s.img} />
+        </Link>
+      ) : (
+        <div style={s.noImg}>&nbsp;</div>
+      )}
+      <div style={s.info}>
+        <Text style={s.title}>{card.title}</Text>
+        <Text style={s.price}>
+          {card.price}
+          {card.originalPrice && <span style={s.was}>{card.originalPrice}</span>}
+        </Text>
+        <Link href={card.url} style={s.shop}>
+          Shop
+        </Link>
+      </div>
+    </td>
   )
 }
 
@@ -177,16 +272,33 @@ export default function NewsletterCatalogueEmail({
   preheader,
   introText,
   bannerUrl,
+  bannerLink,
+  campaignId,
   cards,
   storefrontUrl: rawStorefrontUrl,
   unsubscribeUrl,
 }: NewsletterCatalogueProps) {
-  // Defensive: a trailing slash would give `//logo.png`.
+  // Defensive: a trailing slash would give `//shop`.
   const storefrontUrl = rawStorefrontUrl.replace(/\/+$/, "")
+  const rows = chunk(cards, 2)
+  // Cards sit two per row, so "after card 4" is after row index 1.
+  const bannerAfterRow =
+    cards.length > BANNER_AFTER_CARDS ? BANNER_AFTER_CARDS / 2 - 1 : rows.length - 1
+  const bannerRow = bannerUrl ? (
+    <tr>
+      <td colSpan={3} style={s.bannerCell}>
+        <Link href={bannerHref(bannerLink, storefrontUrl, campaignId)}>
+          <Img src={bannerUrl} alt={subject} width="568" style={s.bannerImg} />
+        </Link>
+      </td>
+    </tr>
+  ) : null
+
   return (
     <Html>
       <Head>
         <title>{subject}</title>
+        <link rel="stylesheet" href={FONT_CSS} />
         <style>{stackCss}</style>
       </Head>
       {preheader && <Preview>{preheader}</Preview>}
@@ -195,46 +307,63 @@ export default function NewsletterCatalogueEmail({
           <Section style={s.header}>
             <Link href={storefrontUrl}>
               <Img
-                src={`${storefrontUrl}/logo.png`}
+                src={NEWSLETTER_HEADER_URL}
                 alt="Doll Up Boutique"
-                width="120"
-                style={{ display: "inline-block", margin: 0 }}
+                width="600"
+                style={s.headerImg}
               />
             </Link>
           </Section>
 
-          {bannerUrl && (
-            <Link href={storefrontUrl}>
-              <Img
-                src={bannerUrl}
-                alt="Doll Up Boutique"
-                width="600"
-                style={s.banner}
-              />
-            </Link>
-          )}
+          <Section style={s.strip}>
+            <table width="100%" role="presentation" style={{ borderCollapse: "collapse" }}>
+              <tbody>
+                <tr>
+                  {CATEGORY_BUTTONS.map((b) => (
+                    <td key={b.handle} align="center" width="33%" style={s.navCell}>
+                      <Link href={categoryUrl(storefrontUrl, b.handle, campaignId)} style={s.navBtn}>
+                        {b.label}
+                      </Link>
+                    </td>
+                  ))}
+                </tr>
+              </tbody>
+            </table>
+          </Section>
 
-          {introText && <IntroText text={introText} />}
+          {introText && <Intro text={introText} />}
 
           <Section style={s.gridWrap}>
-            <table
-              width="100%"
-              role="presentation"
-              style={{ borderCollapse: "collapse" }}
-            >
+            <table width="100%" role="presentation" style={{ borderCollapse: "collapse" }}>
               <tbody>
-                {chunk(cards, 2).map((pair) => (
-                  <tr key={pair[0].id}>
-                    {pair.map((c) => (
-                      <td key={c.id} className="dub-col" style={s.cell}>
-                        <ProductCard card={c} />
-                      </td>
-                    ))}
-                    {pair.length === 1 && (
-                      <td className="dub-fill" style={s.cell} />
+                {rows.map((pair, i) => (
+                  <React.Fragment key={pair[0].id}>
+                    {i > 0 && (
+                      <tr>
+                        <td colSpan={3} style={s.spacer}>
+                          &nbsp;
+                        </td>
+                      </tr>
                     )}
-                  </tr>
+                    <tr>
+                      <CardCell card={pair[0]} />
+                      <td
+                        className={pair.length === 1 ? "dub-gap dub-fill" : "dub-gap"}
+                        width="4%"
+                        style={s.gapCell}
+                      >
+                        &nbsp;
+                      </td>
+                      {pair[1] ? (
+                        <CardCell card={pair[1]} />
+                      ) : (
+                        <td className="dub-fill" width="48%" style={s.fillCell} />
+                      )}
+                    </tr>
+                    {i === bannerAfterRow && bannerRow}
+                  </React.Fragment>
                 ))}
+                {rows.length === 0 && bannerRow}
               </tbody>
             </table>
           </Section>
@@ -266,7 +395,7 @@ export default function NewsletterCatalogueEmail({
               .
             </Text>
             <Text style={s.small}>
-              You&apos;re receiving this because you signed up for Doll Up news.{" "}
+              You&apos;re receiving this because you shopped with Doll Up or signed up for our news.{" "}
               <Link href={unsubscribeUrl} style={s.link}>
                 Unsubscribe
               </Link>

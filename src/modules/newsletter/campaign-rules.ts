@@ -4,10 +4,14 @@ import { MAX_PRODUCTS } from "./lib/catalogue"
 import { NEWSLETTER_LISTS, type CampaignDTO, type NewsletterList } from "./types"
 
 export type CampaignPatch = Partial<
-  Pick<CampaignDTO, "list" | "subject" | "preheader" | "intro_text" | "banner_url" | "product_ids">
+  Pick<
+    CampaignDTO,
+    "list" | "subject" | "preheader" | "intro_text" | "banner_url" | "banner_link" | "product_ids"
+  >
 >
 
 const BANNER_RE = /^https:\/\/\S+\.(jpe?g|png)$/i
+const LINK_RE = /^https:\/\/\S+$/
 
 const invalid = (msg: string) => new MedusaError(MedusaError.Types.INVALID_DATA, msg)
 
@@ -44,6 +48,14 @@ export function parseCampaignPatch(body: unknown): CampaignPatch {
         throw invalid("banner_url must be an https .jpg, .jpeg or .png URL")
       }
       out.banner_url = v || null
+    }
+  }
+  if ("banner_link" in b) {
+    if (b.banner_link === null) out.banner_link = null
+    else {
+      const v = text(b.banner_link, "banner_link", 2000)
+      if (v !== "" && !LINK_RE.test(v)) throw invalid("banner_link must be an https URL")
+      out.banner_link = v || null
     }
   }
   if ("product_ids" in b) {

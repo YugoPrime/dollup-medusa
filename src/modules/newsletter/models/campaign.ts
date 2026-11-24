@@ -7,6 +7,7 @@ const NewsletterCampaign = model.define("NewsletterCampaign", {
   preheader: model.text().nullable(),
   intro_text: model.text().nullable(),
   banner_url: model.text().nullable(),
+  banner_link: model.text().nullable(),
   product_ids: model.json(),
   status: model.enum(["draft", "sending", "sent", "failed"]).default("draft"),
   resend_broadcast_id: model.text().nullable(),

@@ -32,6 +32,7 @@ export type CampaignDTO = {
   preheader: string | null
   intro_text: string | null
   banner_url: string | null
+  banner_link: string | null
   product_ids: string[]
   status: CampaignStatus
   resend_broadcast_id: string | null

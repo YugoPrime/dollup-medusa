@@ -8,6 +8,7 @@ const campaign = (o: Partial<CampaignDTO> = {}): CampaignDTO => ({
   preheader: null,
   intro_text: null,
   banner_url: null,
+  banner_link: null,
   product_ids: ["a"],
   status: "draft",
   resend_broadcast_id: null,
@@ -44,6 +45,22 @@ describe("parseCampaignPatch", () => {
     expect(parseCampaignPatch({ banner_url: "https://cdn.dollupboutique.com/n/b.JPG" })).toEqual({
       banner_url: "https://cdn.dollupboutique.com/n/b.JPG",
     })
+  })
+
+  it("accepts an https banner_link and nulls an empty one", () => {
+    expect(parseCampaignPatch({ banner_link: " https://dollupboutique.com/sale " })).toEqual({
+      banner_link: "https://dollupboutique.com/sale",
+    })
+    expect(parseCampaignPatch({ banner_link: "  " })).toEqual({ banner_link: null })
+    expect(parseCampaignPatch({ banner_link: null })).toEqual({ banner_link: null })
+  })
+
+  it("rejects a banner_link that is not https, has spaces, is too long or not a string", () => {
+    expect(() => parseCampaignPatch({ banner_link: "http://dollupboutique.com/sale" })).toThrow("banner_link")
+    expect(() => parseCampaignPatch({ banner_link: "javascript:alert(1)" })).toThrow("banner_link")
+    expect(() => parseCampaignPatch({ banner_link: "https://x.com/a b" })).toThrow("banner_link")
+    expect(() => parseCampaignPatch({ banner_link: "https://x.com/" + "a".repeat(2000) })).toThrow("banner_link")
+    expect(() => parseCampaignPatch({ banner_link: 5 })).toThrow("banner_link")
   })
 
   it("rejects an unknown list", () => {
