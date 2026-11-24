@@ -11,7 +11,7 @@ export const POST = async (
 ) => {
   try {
     const service = req.scope.resolve<SourcingModuleService>(SOURCING_MODULE)
-    const result = await service.goLive(req.params.id)
+    const result = await service.goLive(req.params.id, req.scope)
     res.json(result)
   } catch (err) {
     const e = err as Error

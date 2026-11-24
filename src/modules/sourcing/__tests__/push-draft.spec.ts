@@ -102,7 +102,7 @@ medusaIntegrationTestRunner({
         expect(aProductId).toBeDefined()
         const before = await api.get(`/admin/products/${aProductId}`)
         expect(before.data.product.status).toBe("draft")
-        await service.goLive(itemAId)
+        await service.goLive(itemAId, container)
         const after = await api.get(`/admin/products/${aProductId}`)
         expect(after.data.product.status).toBe("published")
       })
