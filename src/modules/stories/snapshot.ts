@@ -72,7 +72,11 @@ export function buildSnapshot(product: ProductLike): ProductSnapshot {
     const color = (v.options?.color as string) ?? null
     const colorCode = (v.options?.color_code as string) ?? null
     const size = (v.options?.size as string) ?? ""
-    const key = color ?? `__solo_${v.id}`
+    // No Color option (227 size-only products, e.g. IS2503 S/M/L/XL): all its
+    // variants are the same piece in different sizes, so they share ONE group.
+    // A group per variant made every size look like a colour, and stories put
+    // one size on each picture of a multi-colour template.
+    const key = color ?? "__no_color"
     if (!byColor.has(key)) {
       byColor.set(key, {
         id: v.id,

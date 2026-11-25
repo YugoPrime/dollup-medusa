@@ -160,4 +160,34 @@ describe("buildSnapshot", () => {
     const snap = buildSnapshot(product)
     expect(snap.price_mur).toBe(1290)
   })
+
+  it("keeps a size-only product (no Color option) as ONE colour with all its in-stock sizes", () => {
+    // Regression (Rahvi, 25 Nov, IS2503 Strapless Bikini Set: options = Size only).
+    // Each size used to become its own "colour", so stories picked a
+    // multi-colour template and showed S on one picture and M on the next.
+    const size = (s: string, qty: number) => ({
+      id: `var_${s}`,
+      sku: `IS2503-${s}`,
+      title: s,
+      inventory_quantity: qty,
+      prices: [{ amount: 75000, currency_code: "mur" }],
+      options: { size: s },
+      images: [{ url: "https://r2/is2503-1.jpg" }, { url: "https://r2/is2503-2.jpg" }],
+    })
+    const product: ProductLike = {
+      id: "prod_is2503",
+      title: "Strapless Bikini Set",
+      handle: "is2503",
+      variants: [size("S", 2), size("M", 1), size("L", 3), size("XL", 0)],
+    }
+    const snap = buildSnapshot(product)
+    expect(snap.variant_in_stock_count).toBe(1)
+    expect(snap.variants_in_stock).toHaveLength(1)
+    expect(snap.variants_in_stock[0].color).toBeNull()
+    expect(snap.variants_in_stock[0].sizes).toEqual(["S", "M", "L"])
+    expect(snap.variants_in_stock[0].image_urls).toEqual([
+      "https://r2/is2503-1.jpg",
+      "https://r2/is2503-2.jpg",
+    ])
+  })
 })
