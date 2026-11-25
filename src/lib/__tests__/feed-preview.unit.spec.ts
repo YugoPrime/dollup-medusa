@@ -8,9 +8,10 @@ const whitePng = () =>
     .toBuffer()
 
 const snapshot = {
+  handle: "is2462",
   variants_in_stock: [
-    { color: "White", sizes: ["M", "S"], image_urls: ["w.jpg"] },
-    { color: "Red", sizes: ["L"], image_urls: ["r.jpg"] },
+    { color: "White", sizes: ["M", "S"], image_urls: ["w.jpg"], price_mur: 975, price_max_mur: 975 },
+    { color: "Red", sizes: ["L"], image_urls: ["r.jpg"], price_mur: 1050, price_max_mur: 1050 },
   ],
 }
 
@@ -27,9 +28,9 @@ describe("buildFeedPreviewImages", () => {
       fetchImage: async () => png,
     })
 
-    expect(images.map((i) => [i.source_url, i.sizes])).toEqual([
-      ["w.jpg", ["S", "M"]],
-      ["r.jpg", ["L"]],
+    expect(images.map((i) => [i.source_url, i.sizes, i.price?.price_mur, i.sku])).toEqual([
+      ["w.jpg", ["S", "M"], 975, "IS2462"],
+      ["r.jpg", ["L"], 1050, "IS2462"],
     ])
     for (const image of images) {
       expect(image.data_url).toMatch(/^data:image\/jpeg;base64,/)

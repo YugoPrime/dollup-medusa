@@ -58,6 +58,21 @@ describe("buildSnapshot", () => {
     expect(blue.sku).toBe("IS2328-BLUE-S")
   })
 
+  it("gives each colour its own price: lowest, highest and the lowest one's pre-sale price", () => {
+    const snap = buildSnapshot({
+      ...baseProduct,
+      variants: [
+        { ...baseProduct.variants[0], prices: [{ amount: 77000, currency_code: "mur" }], compare_at_amount: 110000 },
+        { ...baseProduct.variants[1], inventory_quantity: 4, prices: [{ amount: 99000, currency_code: "mur" }] },
+        baseProduct.variants[2],
+      ],
+    })
+    const pink = snap.variants_in_stock.find((v) => v.color === "Pink")!
+    expect([pink.price_mur, pink.price_max_mur, pink.compare_at_price_mur]).toEqual([770, 990, 1100])
+    const blue = snap.variants_in_stock.find((v) => v.color === "Blue")!
+    expect([blue.price_mur, blue.price_max_mur, blue.compare_at_price_mur]).toEqual([1290, 1290, null])
+  })
+
   it("excludes products entirely if no variant is in stock", () => {
     const allOut: ProductLike = {
       ...baseProduct,

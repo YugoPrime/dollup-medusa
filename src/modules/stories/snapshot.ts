@@ -34,6 +34,13 @@ export type SnapshotVariant = {
   color_code: string | null
   sizes: string[]
   image_urls: string[]
+  /** Lowest price (MUR) a customer pays now for this colour's in-stock sizes.
+   *  Optional: snapshots saved before 2026-11-26 don't have it. */
+  price_mur?: number | null
+  /** Highest such price; above `price_mur` when sizes are priced differently. */
+  price_max_mur?: number | null
+  /** The pre-sale price of the `price_mur` size, only when strictly above it. */
+  compare_at_price_mur?: number | null
 }
 
 export type ProductSnapshot = {
@@ -52,6 +59,13 @@ export type ProductSnapshot = {
 
 const NEW_ARRIVAL_WINDOW_DAYS = 30
 const DAY_MS = 24 * 60 * 60 * 1000
+
+/** Minor units (cents) → whole rupees; null when absent or not a number. */
+function murOf(amount: number | null | undefined): number | null {
+  if (amount == null) return null
+  const n = Number(amount)
+  return Number.isFinite(n) ? Math.round(n / 100) : null
+}
 
 /**
  * Pure function. Given a Medusa product, returns the slot snapshot:
@@ -91,6 +105,16 @@ export function buildSnapshot(product: ProductLike): ProductSnapshot {
     if (size && !entry.sizes.includes(size)) entry.sizes.push(size)
     for (const img of v.images ?? []) {
       if (!entry.image_urls.includes(img.url)) entry.image_urls.push(img.url)
+    }
+    // The grid post prints each colour's own price on its photos.
+    const price = murOf(v.prices.find((p) => p.currency_code === "mur")?.amount)
+    if (price != null && price > 0) {
+      const was = murOf(v.compare_at_amount)
+      if (entry.price_mur == null || price < entry.price_mur) {
+        entry.price_mur = price
+        entry.compare_at_price_mur = was != null && was > price ? was : null
+      }
+      if (entry.price_max_mur == null || price > entry.price_max_mur) entry.price_max_mur = price
     }
   }
 

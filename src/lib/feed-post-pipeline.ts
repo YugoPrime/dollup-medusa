@@ -12,6 +12,7 @@ import {
 } from "./feed-post-content"
 import { isUniqueViolation } from "./db-errors"
 import { prepareFeedImages } from "./feed-image-prep"
+import { priceForPhoto, productCode } from "./feed-price-label"
 import { sizesForPhoto } from "./feed-size-label"
 import { isMetaIgConfigured, publishFeedImages } from "./meta-ig"
 import { isFeedFbCrosspostEnabled, publishFbPhotoPost } from "./meta-fb"
@@ -110,8 +111,8 @@ export async function publishFeedPostRow(args: {
   }
 
   // IG only takes 4:5–1.91:1 JPEGs: post 1080x1350 JPEG copies, never the originals.
-  // Each copy carries its photo's in-stock sizes (the daily job refreshed the
-  // snapshot from the live product just before this).
+  // Each copy carries its photo's in-stock sizes and price, and the product code
+  // (the daily job refreshed the snapshot from the live product just before this).
   const snapshot = row.product_snapshot as Parameters<typeof sizesForPhoto>[0]
   let postImages: string[]
   let igMediaId: string
@@ -119,6 +120,8 @@ export async function publishFeedPostRow(args: {
     postImages = await prepareFeedImages(images, {
       postDate: row.post_date,
       sizesFor: (url) => sizesForPhoto(snapshot, url),
+      priceFor: (url) => priceForPhoto(snapshot, url),
+      sku: productCode(snapshot),
     })
     igMediaId = await publishFeedImages({ imageUrls: postImages, caption })
   } catch (err) {

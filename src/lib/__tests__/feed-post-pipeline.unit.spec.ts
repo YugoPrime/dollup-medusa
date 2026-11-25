@@ -96,4 +96,31 @@ describe("publishFeedPostRow", () => {
     expect(deps.sizesFor?.("w.jpg")).toEqual(["S", "M"])
     expect(deps.sizesFor?.("r.jpg")).toEqual(["L"])
   })
+
+  it("gives each photo its colour's price, and every photo the product code", async () => {
+    prepareFeedImages.mockResolvedValue(["https://cdn/feed/x.jpg"])
+    publishFeedImages.mockResolvedValue("ig_1")
+    const { scope } = fakeScope({
+      ...row,
+      image_urls: ["w.jpg", "r.jpg"],
+      product_snapshot: {
+        handle: "is2462",
+        price_mur: 975,
+        variants_in_stock: [
+          { color: "White", sizes: ["S"], image_urls: ["w.jpg"], price_mur: 975, price_max_mur: 975 },
+          { color: "Red", sizes: ["L"], image_urls: ["r.jpg"], price_mur: 690, price_max_mur: 690, compare_at_price_mur: 975 },
+        ],
+      },
+    })
+
+    await publishFeedPostRow({ scope, feedPostId: "fp_1" })
+
+    const deps = prepareFeedImages.mock.calls[0][1] as {
+      priceFor?: (u: string) => unknown
+      sku?: string | null
+    }
+    expect(deps.sku).toBe("IS2462")
+    expect(deps.priceFor?.("w.jpg")).toEqual({ price_mur: 975, from: false, was_mur: null })
+    expect(deps.priceFor?.("r.jpg")).toEqual({ price_mur: 690, from: false, was_mur: 975 })
+  })
 })
