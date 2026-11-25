@@ -1136,6 +1136,14 @@ class SourcingModuleService extends MedusaService({
     const stockLocationId =
       process.env.MEDUSA_DEFAULT_STOCK_LOCATION_ID ??
       "sloc_01KN48PYHQ0DTXXN2N0JWZSAYV"
+    // Every product needs a shipping profile. Without one, Medusa's
+    // validateShippingStep rejects any cart holding it at "Place order"
+    // ("The cart items require shipping profiles that are not satisfied by
+    // the current shipping methods"). The 24 Nov 2026 push blocked checkout
+    // for all 126 collection30 products this way.
+    const shippingProfileId =
+      process.env.MEDUSA_DEFAULT_SHIPPING_PROFILE_ID ??
+      "sp_01KN07JARKWGN9ZRHK9ABB5EGM"
     const r2PublicUrl = process.env.R2_PUBLIC_URL ?? ""
 
     for (const item of items) {
@@ -1261,6 +1269,7 @@ class SourcingModuleService extends MedusaService({
           options: productOptions,
           variants: productVariants,
           sales_channels: [{ id: salesChannelId }],
+          shipping_profile_id: shippingProfileId,
           ...(item.category_id
             ? { categories: [{ id: item.category_id }] }
             : {}),
