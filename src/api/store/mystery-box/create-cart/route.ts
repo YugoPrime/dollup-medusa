@@ -18,6 +18,10 @@ import {
   MYSTERY_BOX_FLAT_PRICE_MUR,
   type MysteryBoxMetadata,
 } from "../../../../workflows/apply-mystery-box-discount"
+import {
+  isSalePricedLine,
+  mysteryBoxExclusion,
+} from "../../../../workflows/mystery-box-eligibility"
 
 const SLOT_COUNT = 5
 const MAX_SIZE_LENGTH = 8
@@ -40,6 +44,9 @@ type ProductVariantForBox = {
     id: string
     title?: string | null
     discountable?: boolean | null
+    metadata?: Record<string, unknown> | null
+    tags?: Array<{ value?: string | null } | null> | null
+    categories?: Array<{ handle?: string | null } | null> | null
   } | null
 }
 
@@ -123,6 +130,9 @@ export const POST = async (req: MedusaStoreRequest, res: MedusaResponse) => {
       "id",
       "title",
       "discountable",
+      "metadata",
+      "tags.value",
+      "categories.handle",
       "variants.id",
       "variants.sku",
       "variants.title",
@@ -140,6 +150,9 @@ export const POST = async (req: MedusaStoreRequest, res: MedusaResponse) => {
     id: string
     title?: string | null
     discountable?: boolean | null
+    metadata?: Record<string, unknown> | null
+    tags?: Array<{ value?: string | null } | null> | null
+    categories?: Array<{ handle?: string | null } | null> | null
     variants?: Array<{
       id: string
       sku?: string | null
@@ -164,6 +177,9 @@ export const POST = async (req: MedusaStoreRequest, res: MedusaResponse) => {
           id: product.id,
           title: product.title ?? null,
           discountable: product.discountable ?? null,
+          metadata: product.metadata ?? null,
+          tags: product.tags ?? null,
+          categories: product.categories ?? null,
         },
       })
     }
@@ -177,6 +193,9 @@ export const POST = async (req: MedusaStoreRequest, res: MedusaResponse) => {
   const requestedSizeUpper = size.toUpperCase()
   const wrongSize: string[] = []
   const notDiscountable: string[] = []
+  // Ali30, After Dark and unlisted pieces never go in a box, even if a
+  // request names them directly (the storefront pool already skips them).
+  const ineligible: string[] = []
 
   // Stock is enforced by addToCartWorkflow further down — that is Medusa's
   // canonical stock check and uses the inventory module directly. Pre-checking
@@ -185,8 +204,13 @@ export const POST = async (req: MedusaStoreRequest, res: MedusaResponse) => {
   // graph traversal, leading to false 409s even when the storefront listing
   // showed the variants in stock.
   for (const variant of variants) {
-    if (variant.product?.discountable === false) {
+    const exclusion = variant.product
+      ? mysteryBoxExclusion(variant.product)
+      : null
+    if (exclusion === "not_discountable") {
       notDiscountable.push(variant.id)
+    } else if (exclusion) {
+      ineligible.push(variant.id)
     }
 
     const matchesSize = (variant.options ?? []).some((option) => {
@@ -208,6 +232,13 @@ export const POST = async (req: MedusaStoreRequest, res: MedusaResponse) => {
     res.status(400).json({
       message: "Some items are not discountable",
       not_discountable_variant_ids: notDiscountable,
+    })
+    return
+  }
+  if (ineligible.length > 0) {
+    res.status(400).json({
+      message: "Some items can't go in a Mystery Box. Spin again for a fresh box.",
+      ineligible_variant_ids: ineligible,
     })
     return
   }
@@ -234,16 +265,38 @@ export const POST = async (req: MedusaStoreRequest, res: MedusaResponse) => {
 
     const { data: carts } = await query.graph({
       entity: "cart",
-      fields: ["id", "subtotal", "metadata"],
+      fields: [
+        "id",
+        "subtotal",
+        "metadata",
+        "items.unit_price",
+        "items.compare_at_unit_price",
+      ],
       filters: { id: cartId },
     })
+    type Money = number | string | { value?: string | number } | null
     const cart = carts?.[0] as
       | {
           id: string
-          subtotal?: number | string | { value?: string | number } | null
+          subtotal?: Money
           metadata?: Record<string, unknown> | null
+          items?: Array<{
+            unit_price?: Money
+            compare_at_unit_price?: Money
+          } | null> | null
         }
       | undefined
+
+    // Off while a sale runs: a sale price list cuts the pieces' prices and
+    // 5 of them can be worth less than the box. Medusa marks those lines
+    // with compare_at_unit_price, so no sale dates are needed here.
+    if ((cart?.items ?? []).some((item) => item && isSalePricedLine(item))) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        "The Mystery Box is paused while the sale is on.",
+      )
+    }
+
     const originalSubtotal = Math.floor(moneyNumber(cart?.subtotal))
 
     if (!cart || originalSubtotal <= 0) {
