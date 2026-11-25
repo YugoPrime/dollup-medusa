@@ -62,6 +62,13 @@ export default defineMiddlewares({
       middlewares: [raw({ type: "*/*", limit: "1mb" })],
     },
     {
+      // Resend webhook: Svix signature over the raw body (same pattern as rapido).
+      matcher: "/hooks/resend",
+      methods: ["POST"],
+      bodyParser: false,
+      middlewares: [raw({ type: "*/*", limit: "1mb" })],
+    },
+    {
       // Render-service callback: HMAC over the raw body (same pattern as rapido).
       matcher: "/hooks/story-render",
       methods: ["POST"],

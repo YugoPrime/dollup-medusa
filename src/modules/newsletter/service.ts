@@ -3,7 +3,10 @@ import { MedusaError, MedusaService } from "@medusajs/framework/utils"
 
 import { normalizeEmail } from "./lib/email"
 import { decideAdd, decideImport } from "./lib/subscriber-rules"
+import type { NewEventRow } from "./handle-resend-event"
+import type { ResultsEvent } from "./lib/results"
 import NewsletterCampaign from "./models/campaign"
+import NewsletterEvent from "./models/event"
 import NewsletterSubscriber from "./models/subscriber"
 import type {
   CampaignDTO,
@@ -16,6 +19,7 @@ import type {
 class NewsletterModuleService extends MedusaService({
   NewsletterSubscriber,
   NewsletterCampaign,
+  NewsletterEvent,
 }) {
   private async findSubscriber(
     email: string,
@@ -213,7 +217,9 @@ class NewsletterModuleService extends MedusaService({
 
   async markUnsubscribedByEmails(
     list: NewsletterList,
-    emails: string[]
+    emails: string[],
+    /** Only rows subscribed (or re-subscribed) before this moment change. */
+    subscribedBefore?: Date
   ): Promise<number> {
     const normalized = [
       ...new Set(
@@ -222,10 +228,12 @@ class NewsletterModuleService extends MedusaService({
     ]
     if (normalized.length === 0) return 0
     const svc = this as any
-    const rows = (await svc.listNewsletterSubscribers(
-      { list, status: "subscribed", email: normalized },
-      { select: ["id"], take: null }
-    )) as Array<{ id: string }>
+    const filters: Record<string, unknown> = { list, status: "subscribed", email: normalized }
+    if (subscribedBefore) filters.subscribed_at = { $lt: subscribedBefore }
+    const rows = (await svc.listNewsletterSubscribers(filters, {
+      select: ["id"],
+      take: null,
+    })) as Array<{ id: string }>
     if (rows.length === 0) return 0
     const now = new Date()
     await svc.updateNewsletterSubscribers(
@@ -236,6 +244,69 @@ class NewsletterModuleService extends MedusaService({
       }))
     )
     return rows.length
+  }
+
+  async findCampaignByBroadcast(
+    broadcastId: string
+  ): Promise<{ id: string; list: NewsletterList } | null> {
+    const svc = this as any
+    const rows = (await svc.listNewsletterCampaigns(
+      { resend_broadcast_id: broadcastId },
+      { select: ["id", "list"], take: 1 }
+    )) as Array<{ id: string; list: NewsletterList }>
+    return rows[0] ?? null
+  }
+
+  /** Idempotent on svix_id: Resend retries deliver the same message id. */
+  async recordEvent(row: NewEventRow): Promise<"created" | "duplicate"> {
+    const svc = this as any
+    const existing = (await svc.listNewsletterEvents(
+      { svix_id: row.svix_id },
+      { select: ["id"], take: 1 }
+    )) as Array<{ id: string }>
+    if (existing.length > 0) return "duplicate"
+    try {
+      await svc.createNewsletterEvents(row)
+    } catch (e) {
+      // Two deliveries of the same message racing: the unique index keeps one.
+      // Medusa's error mapper turns Postgres 23505 into "... already exists".
+      if (/unique|duplicate|already exists/i.test(e instanceof Error ? e.message : String(e))) return "duplicate"
+      throw e
+    }
+    return "created"
+  }
+
+  async listCampaignEvents(campaignId: string): Promise<ResultsEvent[]> {
+    const svc = this as any
+    return (await svc.listNewsletterEvents(
+      { campaign_id: campaignId },
+      { select: ["type", "email", "link", "occurred_at"], take: null }
+    )) as ResultsEvent[]
+  }
+
+  /** Emails that were subscribed to the list when the campaign went out. */
+  async recipientsAtSend(list: NewsletterList, sentAt: Date): Promise<string[]> {
+    const svc = this as any
+    const rows = (await svc.listNewsletterSubscribers(
+      { list, subscribed_at: { $lte: sentAt } },
+      { select: ["email", "status", "unsubscribed_at"], take: null }
+    )) as Array<Pick<SubscriberDTO, "email" | "status" | "unsubscribed_at">>
+    return rows
+      .filter(
+        (r) =>
+          r.status === "subscribed" ||
+          (r.unsubscribed_at !== null && new Date(r.unsubscribed_at) > sentAt)
+      )
+      .map((r) => r.email)
+  }
+
+  async unsubscribedBetween(list: NewsletterList, from: Date, to: Date): Promise<string[]> {
+    const svc = this as any
+    const rows = (await svc.listNewsletterSubscribers(
+      { list, status: "unsubscribed", unsubscribed_at: { $gte: from, $lte: to } },
+      { select: ["email"], take: null }
+    )) as Array<Pick<SubscriberDTO, "email">>
+    return rows.map((r) => r.email)
   }
 
   async createDraft(list: NewsletterList): Promise<CampaignDTO> {
