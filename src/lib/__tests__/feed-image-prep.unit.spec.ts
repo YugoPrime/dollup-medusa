@@ -62,16 +62,28 @@ describe("feedImageKey", () => {
   it("is stable per source photo and post date, so retries overwrite the same file", () => {
     const a = feedImageKey("2026-11-10", "https://cdn/x/is2449.png")
     expect(a).toBe(feedImageKey("2026-11-10", "https://cdn/x/is2449.png"))
-    expect(a).toMatch(/^feed\/2026-11-10\/[a-f0-9]{16}-v2\.jpg$/)
+    expect(a).toMatch(/^feed\/2026-11-10\/[a-f0-9]{16}-v3\.jpg$/)
     expect(a).not.toBe(feedImageKey("2026-11-10", "https://cdn/x/is2449-b.png"))
+  })
+
+  it("changes when the price or the product code drawn on the photo change", () => {
+    const base = feedImageKey("2026-11-10", "https://cdn/x/is2449.png", ["S"])
+    const priced = feedImageKey("2026-11-10", "https://cdn/x/is2449.png", ["S"], {
+      price: { price_mur: 975, from: false, was_mur: null },
+    })
+    const sale = feedImageKey("2026-11-10", "https://cdn/x/is2449.png", ["S"], {
+      price: { price_mur: 690, from: false, was_mur: 975 },
+    })
+    const coded = feedImageKey("2026-11-10", "https://cdn/x/is2449.png", ["S"], { sku: "IS2449" })
+    expect(new Set([base, priced, sale, coded]).size).toBe(4)
   })
 
   it("changes when the sizes drawn on the photo change", () => {
     const one = feedImageKey("2026-11-10", "https://cdn/x/is2449.png", ["S"])
     const two = feedImageKey("2026-11-10", "https://cdn/x/is2449.png", ["S", "M"])
     expect(one).not.toBe(two)
-    expect(one).toMatch(/-v2\.jpg$/)
-    expect(two).toMatch(/-v2\.jpg$/)
+    expect(one).toMatch(/-v3\.jpg$/)
+    expect(two).toMatch(/-v3\.jpg$/)
     expect(feedImageKey("2026-11-10", "https://cdn/x/is2449.png")).toBe(
       feedImageKey("2026-11-10", "https://cdn/x/is2449.png", []),
     )
@@ -172,6 +184,52 @@ describe("normalizeFeedImage with sizes", () => {
     const out = await isolated!.normalizeFeedImage(await black(), { sizes: ["S", "M"] })
     expect((await regionLuma(out, 210, 1214, 90, 66)).max).toBeGreaterThan(230)
     jest.dontMock("node:fs")
+  })
+})
+
+describe("normalizeFeedImage with the price and the product code", () => {
+  const white = () => solid(1200, 1600, "png", { r: 255, g: 255, b: 255 })
+  const black = () => solid(1200, 1600, "png", { r: 0, g: 0, b: 0 })
+  const price = { price_mur: 975, from: false, was_mur: null }
+
+  it("draws a dark pill with the code in the top-right corner", async () => {
+    const out = await normalizeFeedImage(await white(), { sku: "IS2462" })
+    // The pill's dark fill on a white photo, inside the 44 px margin.
+    expect((await regionLuma(out, FEED_IMAGE_WIDTH - 120, 60, 40, 30)).mean).toBeLessThan(200)
+    // Nothing in the opposite corner.
+    expect((await regionLuma(out, 40, 40, 80, 60)).mean).toBeGreaterThan(245)
+  })
+
+  it("draws the price in white above the gold line", async () => {
+    const out = await normalizeFeedImage(await black(), { sizes: ["S", "M"], price })
+    // "Rs 975" ends 40 px above the gold line (y 1184): white ink in that band.
+    expect((await regionLuma(out, 52, 1060, 300, 80)).max).toBeGreaterThan(230)
+  })
+
+  it("darkens a light photo further up when there is a price", async () => {
+    const sizesOnly = await normalizeFeedImage(await white(), { sizes: ["S"] })
+    const withPrice = await normalizeFeedImage(await white(), { sizes: ["S"], price })
+    // Right of the price text, at the price's height: only the fade is there.
+    expect((await regionLuma(withPrice, 700, 1050, 300, 60)).mean).toBeLessThan(
+      (await regionLuma(sizesOnly, 700, 1050, 300, 60)).mean - 20,
+    )
+  })
+
+  it("draws the price and the pill without a size row", async () => {
+    const out = await normalizeFeedImage(await black(), { price, sku: "IS2462" })
+    expect((await regionLuma(out, 52, 1150, 400, 110)).max).toBeGreaterThan(230)
+    expect((await regionLuma(out, FEED_IMAGE_WIDTH - 200, 50, 150, 50)).max).toBeGreaterThan(230)
+  })
+
+  it("keeps the sizes and the price when the code can't be drawn", async () => {
+    const out = await normalizeFeedImage(await black(), { sizes: ["S", "M"], price, sku: "​" })
+    expect((await regionLuma(out, 210, 1214, 90, 66)).max).toBeGreaterThan(230)
+    expect((await regionLuma(out, 52, 1060, 300, 80)).max).toBeGreaterThan(230)
+  })
+
+  it("ignores a zero price", async () => {
+    const out = await normalizeFeedImage(await black(), { price: { price_mur: 0, from: false, was_mur: null } })
+    expect((await regionLuma(out, 0, 900, FEED_IMAGE_WIDTH, 450)).max).toBeLessThan(10)
   })
 })
 
