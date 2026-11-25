@@ -21,6 +21,9 @@ export type OrderShippedEmailData = {
   shippingMethodLabel?: string | null
   deliveryDate?: string | null
   trackingNumber?: string | null
+  // The follow-up sent when staff add the Mauritius Post number after the
+  // shipped email went out without one (dm.order.tracking_added).
+  isTrackingUpdate?: boolean
   // True when the order is marked paid in the backend (admin set
   // metadata.sale_type === "paid" or Medusa captured the payment).
   // When false, the email shows bank-transfer instructions for the
@@ -143,6 +146,7 @@ export default function OrderShippedEmail(data: OrderShippedEmailData) {
     shippingMethodLabel,
     deliveryDate,
     trackingNumber,
+    isTrackingUpdate,
     isPaid,
     items,
     subtotal,
@@ -154,19 +158,25 @@ export default function OrderShippedEmail(data: OrderShippedEmailData) {
   const isPostage = isPostageMethod(shippingMethodLabel, deliveryMethod)
   const isHomeDelivery = isHomeDeliveryMethod(shippingMethodLabel, deliveryMethod)
 
-  const heading = getHeading(shippingMethodLabel, deliveryMethod, customerFirstName)
+  // Copy OK'd by Rahvi, 26 Nov 2026.
+  const trackingUpdate = Boolean(isTrackingUpdate && isPostage && trackingNumber)
+  const heading = trackingUpdate
+    ? `Hi ${customerFirstName || "there"}, here's your tracking number`
+    : getHeading(shippingMethodLabel, deliveryMethod, customerFirstName)
   const preview = getPreview(
     shippingMethodLabel,
     deliveryMethod,
     deliveryDate,
     trackingNumber,
   )
-  const intro = getIntro(
-    shippingMethodLabel,
-    deliveryMethod,
-    deliveryDate,
-    trackingNumber,
-  )
+  const intro = trackingUpdate
+    ? "Your parcel is with Mauritius Post. Tap the button to follow it."
+    : getIntro(
+        shippingMethodLabel,
+        deliveryMethod,
+        deliveryDate,
+        trackingNumber,
+      )
 
   const whatsappPickupHref = `${WHATSAPP_LINK_BASE}?text=${encodeURIComponent(
     `Hi Doll Up Boutique, I'd like to confirm a pickup time for order #${displayId}.`,

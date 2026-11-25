@@ -8,6 +8,7 @@ import {
 } from "@medusajs/framework/utils"
 
 import { ORDER_SHIPPED_EVENT } from "../../../../../subscribers/email-on-order-shipped"
+import { normalizeTrackingNumber } from "../../../../../lib/tracking-email"
 
 /**
  * Admin route that fires the shipped-customer email for a DM order.
@@ -53,10 +54,17 @@ export const POST = async (
   }
 
   const orderModule = req.scope.resolve(Modules.ORDER)
+  const oldMetadata = (order.metadata ?? {}) as Record<string, unknown>
+  // The shipped email carries the number when there is one already, so
+  // mark it sent: saving the same number later must not email it again.
+  const carriedNumber = normalizeTrackingNumber(
+    trackingNumber ?? oldMetadata.tracking_number,
+  )
   const newMetadata = {
-    ...((order.metadata ?? {}) as Record<string, unknown>),
+    ...oldMetadata,
     shipped_at: new Date().toISOString(),
     ...(trackingNumber ? { tracking_number: trackingNumber } : {}),
+    ...(carriedNumber ? { tracking_emailed: carriedNumber } : {}),
   }
 
   await orderModule.updateOrders(orderId, { metadata: newMetadata })

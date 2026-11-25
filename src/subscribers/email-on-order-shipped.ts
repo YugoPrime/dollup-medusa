@@ -10,6 +10,10 @@ import type { INotificationModuleService } from "@medusajs/framework/types"
 
 import { EmailTemplate } from "../modules/notification-resend/service"
 import type { OrderShippedEmailData } from "../modules/notification-resend/templates/order-shipped"
+import {
+  normalizeTrackingNumber,
+  ORDER_TRACKING_EVENT,
+} from "../lib/tracking-email"
 
 export const ORDER_SHIPPED_EVENT = "dm.order.shipped"
 
@@ -113,10 +117,15 @@ export default async function emailOnOrderShipped({
       typeof metadata.delivery_date === "string"
         ? metadata.delivery_date
         : null
-    const trackingNumber =
-      typeof metadata.tracking_number === "string"
-        ? metadata.tracking_number
-        : null
+    const trackingNumber = normalizeTrackingNumber(metadata.tracking_number)
+    // dm.order.tracking_added: the follow-up that only gives the number.
+    const isTrackingUpdate = event.name === ORDER_TRACKING_EVENT
+    if (isTrackingUpdate && !trackingNumber) {
+      logger.warn(
+        `[email] ${ORDER_TRACKING_EVENT}: no tracking number on ${orderId}, skipping`,
+      )
+      return
+    }
 
     const isPaid = detectIsPaid(
       metadata,
@@ -135,6 +144,7 @@ export default async function emailOnOrderShipped({
           : null,
       deliveryDate,
       trackingNumber,
+      isTrackingUpdate,
       isPaid,
       items: (order.items ?? [])
         .filter((item): item is NonNullable<typeof item> => item != null)
@@ -165,16 +175,16 @@ export default async function emailOnOrderShipped({
       data: data as unknown as Record<string, unknown>,
     })
 
-    logger.info(`[email] dm.order.shipped → ${order.email} (${orderId})`)
+    logger.info(`[email] ${event.name} → ${order.email} (${orderId})`)
   } catch (err) {
     logger.error(
-      `[email] dm.order.shipped failed for ${orderId}: ${(err as Error).message}`,
+      `[email] ${event.name} failed for ${orderId}: ${(err as Error).message}`,
     )
   }
 }
 
 export const config: SubscriberConfig = {
-  event: ORDER_SHIPPED_EVENT,
+  event: [ORDER_SHIPPED_EVENT, ORDER_TRACKING_EVENT],
   context: {
     subscriberId: "email-on-dm-order-shipped",
   },

@@ -101,6 +101,9 @@ const defaultSubjects: Record<EmailTemplate, (data: unknown) => string> = {
   },
   [EmailTemplate.ORDER_SHIPPED]: (data) => {
     const d = data as OrderShippedEmailData
+    if (d.isTrackingUpdate && d.trackingNumber) {
+      return `Order #${d.displayId} · your tracking number`
+    }
     if (d.deliveryMethod === "pickup") {
       return `Order #${d.displayId} ready for pickup`
     }
