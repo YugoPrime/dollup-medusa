@@ -34,6 +34,10 @@ describe("sortSizes", () => {
   it("drops empty labels", () => {
     expect(sortSizes(["", "  ", "S"])).toEqual(["S"])
   })
+
+  it("strips invisible and control characters", () => {
+    expect(sortSizes(["S\u200b", "\u200b", "M\u0000", "\ufeffL"])).toEqual(["S", "M", "L"])
+  })
 })
 
 describe("sizesForPhoto", () => {

@@ -29,6 +29,9 @@ const LADDER: Record<string, number> = {
 
 const CUP_RE = /^(A|B|C|D|DD|E|F)$/
 const NUMBER_RE = /^\d+(\.\d+)?$/
+/** Control, zero-width and other invisible characters: Pango can't draw a label made of them. */
+// eslint-disable-next-line no-control-regex
+const INVISIBLE_RE = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202f\u2060-\u206f\ufeff]/g
 
 type Rank = [band: number, sub: number]
 
@@ -49,7 +52,7 @@ function rankOf(label: string): Rank {
 export function sortSizes(sizes: string[]): string[] {
   const seen = new Map<string, string>()
   for (const raw of sizes) {
-    const clean = String(raw ?? "").trim().replace(/\s+/g, " ")
+    const clean = String(raw ?? "").replace(INVISIBLE_RE, "").trim().replace(/\s+/g, " ")
     if (!clean) continue
     const label = ONE_SIZE_RE.test(clean) ? ONE_SIZE : clean
     const key = label.toLowerCase().replace(/\s+/g, "")

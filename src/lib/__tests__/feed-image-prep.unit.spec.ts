@@ -148,6 +148,15 @@ describe("normalizeFeedImage with sizes", () => {
     expect(ink).toBeGreaterThan(100)
   })
 
+  it("falls back to the plain photo when the size row can't be drawn", async () => {
+    // Pango refuses these: "no text to render" / "invalid markup in text".
+    for (const sizes of [["\u200b"], ["S\u0000M"]]) {
+      const out = await normalizeFeedImage(await white(), { sizes })
+      const meta = await sharp(out).metadata()
+      expect([meta.format, meta.width, meta.height]).toEqual(["jpeg", FEED_IMAGE_WIDTH, FEED_IMAGE_HEIGHT])
+    }
+  })
+
   it("escapes markup characters in a size", async () => {
     const out = await normalizeFeedImage(await black(), { sizes: ["S&M", "<L>"] })
     expect((await regionLuma(out, 210, 1214, 90, 66)).max).toBeGreaterThan(230)

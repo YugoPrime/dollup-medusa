@@ -77,10 +77,16 @@ export async function normalizeFeedImage(
   }
   // sharp runs one composite per pipeline: settle the photo first, then draw the row.
   const base = await framed.png().toBuffer()
-  return sharp(base)
-    .composite(await sizeRowLayers(sizes))
-    .jpeg({ quality: JPEG_QUALITY, mozjpeg: true })
-    .toBuffer()
+  try {
+    return await sharp(base)
+      .composite(await sizeRowLayers(sizes))
+      .jpeg({ quality: JPEG_QUALITY, mozjpeg: true })
+      .toBuffer()
+  } catch (err) {
+    // The size row is extra: a label Pango can't draw must never cost the post.
+    console.warn(`[feed-image] size row skipped (${sizes.join(", ")}): ${(err as Error)?.message ?? err}`)
+    return sharp(base).jpeg({ quality: JPEG_QUALITY, mozjpeg: true }).toBuffer()
+  }
 }
 
 type TextImage = { input: Buffer; width: number; height: number }
