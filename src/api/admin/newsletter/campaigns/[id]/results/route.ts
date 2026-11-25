@@ -12,21 +12,30 @@ import {
   type ResultsProduct,
 } from "../../../../../../modules/newsletter/lib/results"
 import { normalizeEmail } from "../../../../../../modules/newsletter/lib/email"
+import { netRevenueMur } from "../../../../../../lib/daily-sales-report"
 import { sendError } from "../../../../../../modules/newsletter/route-deps"
 import { NEWSLETTER_MODULE } from "../../../../../../modules/newsletter"
 import type NewsletterModuleService from "../../../../../../modules/newsletter/service"
 import type { CampaignDTO } from "../../../../../../modules/newsletter/types"
 
 const DAY_MS = 24 * 60 * 60 * 1000
-// Sales after a click can land up to 7 days after a late click, so read orders a bit past the window.
-const ORDER_LOOKAHEAD_DAYS = SALES_WINDOW_DAYS * 2
 const MAX_ORDERS = 5000
 
 type OrderService = {
   listOrders: (
     filters: Record<string, unknown>,
     config?: Record<string, unknown>
-  ) => Promise<Array<{ id: string; display_id?: number | null; email?: string | null; created_at: Date | string; status?: string; total?: unknown }>>
+  ) => Promise<
+    Array<{
+      id: string
+      display_id?: number | null
+      email?: string | null
+      created_at: Date | string
+      status?: string
+      total?: unknown
+      metadata?: Record<string, unknown> | null
+    }>
+  >
 }
 type ProductService = {
   listProducts: (
@@ -58,11 +67,19 @@ export const GET = async (req: AuthenticatedMedusaRequest, res: MedusaResponse) 
 
     // Orders: `total` must be selected or the order module skips its totals calculator (Rs 0).
     const orderService = req.scope.resolve(Modules.ORDER) as OrderService
-    const until = new Date(Math.min(now.getTime(), sentAt.getTime() + ORDER_LOOKAHEAD_DAYS * DAY_MS))
+    // Read orders up to 7 days after the send AND 7 days after the latest click (a late click keeps its full window).
+    const lastClick = events.reduce(
+      (t, e) => (e.type === "clicked" ? Math.max(t, new Date(e.occurred_at).getTime()) : t),
+      sentAt.getTime()
+    )
+    const until = new Date(Math.min(now.getTime(), lastClick + SALES_WINDOW_DAYS * DAY_MS))
     const rawOrders = (
       await orderService.listOrders(
         { created_at: { $gte: sentAt, $lte: until } },
-        { select: ["id", "display_id", "email", "created_at", "status", "total"], take: MAX_ORDERS }
+        {
+          select: ["id", "display_id", "email", "created_at", "status", "total", "metadata"],
+          take: MAX_ORDERS,
+        }
       )
     ).filter((o) => o.status !== "canceled" && o.status !== "draft")
 
@@ -86,8 +103,8 @@ export const GET = async (req: AuthenticatedMedusaRequest, res: MedusaResponse) 
       display_id: o.display_id ?? null,
       email: normalizeEmail(o.email ?? ""),
       created_at: new Date(o.created_at),
-      // Number() calls BigNumber.valueOf(); reading `.value` would give 0.
-      total: Number(o.total ?? 0) || 0,
+      // Net of exchange credit, like the daily sales report (BigNumber read via valueOf, never `.value`).
+      total: netRevenueMur({ id: o.id, created_at: o.created_at, total: o.total, metadata: o.metadata ?? null }),
       product_ids: productIdsByOrder.get(o.id) ?? [],
     }))
 

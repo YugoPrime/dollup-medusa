@@ -30,7 +30,7 @@ export type ParsedResendEvent =
       bounceType: string | null
       occurredAt: Date
     }
-  | { kind: "contact_unsubscribed"; email: string }
+  | { kind: "contact_unsubscribed"; email: string; occurredAt: Date }
   | { kind: "ignored"; reason: string }
 
 const str = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null)
@@ -55,7 +55,9 @@ export function parseResendEvent(body: unknown): ParsedResendEvent {
 
   if (type === "contact.updated") {
     const email = normalizeEmail(str(data.email) ?? "")
-    if (data.unsubscribed === true && email) return { kind: "contact_unsubscribed", email }
+    if (data.unsubscribed === true && email) {
+      return { kind: "contact_unsubscribed", email, occurredAt: date(data.updated_at, b.created_at) }
+    }
     return { kind: "ignored", reason: "contact still subscribed" }
   }
 

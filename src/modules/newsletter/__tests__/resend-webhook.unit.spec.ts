@@ -68,9 +68,16 @@ describe("parseResendEvent", () => {
   })
 
   it("only treats contact.updated with unsubscribed: true as an unsubscribe", () => {
-    expect(parseResendEvent({ type: "contact.updated", data: { email: "A@b.com", unsubscribed: true } })).toEqual({
+    expect(
+      parseResendEvent({
+        type: "contact.updated",
+        created_at: "2026-11-27T10:00:09Z",
+        data: { email: "A@b.com", unsubscribed: true, updated_at: "2026-11-27T10:00:00Z" },
+      })
+    ).toEqual({
       kind: "contact_unsubscribed",
       email: "a@b.com",
+      occurredAt: new Date("2026-11-27T10:00:00Z"),
     })
     expect(parseResendEvent({ type: "contact.updated", data: { email: "a@b.com", unsubscribed: false } }).kind).toBe("ignored")
     expect(parseResendEvent({ type: "email.sent", data: { email_id: "e" } }).kind).toBe("ignored")
@@ -150,11 +157,40 @@ describe("handleResendEvent", () => {
     expect(unsubs).toHaveLength(1)
   })
 
-  it("mirrors an unsubscribe from Resend onto every list", async () => {
-    const { d, unsubs } = deps()
-    const e = parseResendEvent({ type: "contact.updated", data: { email: "a@b.com", unsubscribed: true } })
+  it("mirrors an unsubscribe from Resend onto every list, only for rows subscribed before it", async () => {
+    const seen: Array<[string | null, string, Date]> = []
+    const { d } = deps({
+      unsubscribe: async (list, email, before) => {
+        seen.push([list, email, before])
+        return 1
+      },
+    })
+    const e = parseResendEvent({
+      type: "contact.updated",
+      data: { email: "a@b.com", unsubscribed: true, updated_at: "2026-11-27T10:00:00Z" },
+    })
     expect(await handleResendEvent(d, e, "m1")).toBe("unsubscribed")
-    expect(unsubs).toEqual([[null, "a@b.com"]])
+    expect(seen).toEqual([[null, "a@b.com", new Date("2026-11-27T10:00:00Z")]])
+  })
+
+  it("re-runs the unsubscribe on a retry after it failed the first time", async () => {
+    let fail = true
+    const done: string[] = []
+    const { d, rows } = deps({
+      unsubscribe: async (_list, email) => {
+        if (fail) {
+          fail = false
+          throw new Error("db hiccup")
+        }
+        done.push(email)
+        return 1
+      },
+    })
+    const e = email("complained")
+    await expect(handleResendEvent(d, e, "m1")).rejects.toThrow("db hiccup")
+    expect(rows).toHaveLength(0) // nothing recorded, so the retry is not a duplicate
+    expect(await handleResendEvent(d, e, "m1")).toBe("recorded complained, unsubscribed")
+    expect(done).toEqual(["a@b.com"])
   })
 
   it("lets a database failure throw so the route answers 500 and Resend retries", async () => {

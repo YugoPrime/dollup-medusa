@@ -59,10 +59,10 @@ export const POST = async (req: MedusaRequest, res: MedusaResponse) => {
       {
         findCampaignByBroadcast: (id) => service.findCampaignByBroadcast(id),
         recordEvent: (row) => service.recordEvent(row),
-        unsubscribe: async (list: NewsletterList | null, email: string) => {
+        unsubscribe: async (list: NewsletterList | null, email: string, before: Date) => {
           let n = 0
           for (const l of list ? [list] : NEWSLETTER_LISTS) {
-            n += await service.markUnsubscribedByEmails(l, [email])
+            n += await service.markUnsubscribedByEmails(l, [email], before)
           }
           return n
         },

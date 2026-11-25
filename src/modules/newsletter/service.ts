@@ -217,7 +217,9 @@ class NewsletterModuleService extends MedusaService({
 
   async markUnsubscribedByEmails(
     list: NewsletterList,
-    emails: string[]
+    emails: string[],
+    /** Only rows subscribed (or re-subscribed) before this moment change. */
+    subscribedBefore?: Date
   ): Promise<number> {
     const normalized = [
       ...new Set(
@@ -226,10 +228,12 @@ class NewsletterModuleService extends MedusaService({
     ]
     if (normalized.length === 0) return 0
     const svc = this as any
-    const rows = (await svc.listNewsletterSubscribers(
-      { list, status: "subscribed", email: normalized },
-      { select: ["id"], take: null }
-    )) as Array<{ id: string }>
+    const filters: Record<string, unknown> = { list, status: "subscribed", email: normalized }
+    if (subscribedBefore) filters.subscribed_at = { $lt: subscribedBefore }
+    const rows = (await svc.listNewsletterSubscribers(filters, {
+      select: ["id"],
+      take: null,
+    })) as Array<{ id: string }>
     if (rows.length === 0) return 0
     const now = new Date()
     await svc.updateNewsletterSubscribers(
@@ -265,7 +269,8 @@ class NewsletterModuleService extends MedusaService({
       await svc.createNewsletterEvents(row)
     } catch (e) {
       // Two deliveries of the same message racing: the unique index keeps one.
-      if (/unique|duplicate/i.test(e instanceof Error ? e.message : String(e))) return "duplicate"
+      // Medusa's error mapper turns Postgres 23505 into "... already exists".
+      if (/unique|duplicate|already exists/i.test(e instanceof Error ? e.message : String(e))) return "duplicate"
       throw e
     }
     return "created"

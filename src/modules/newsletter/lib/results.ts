@@ -1,10 +1,11 @@
 import { classifyLink } from "./resend-event"
 
 /**
- * Resend open + click tracking went live on dollupboutique.com at this moment (26 Nov 2026).
+ * Resend open + click tracking went live on dollupboutique.com at this moment
+ * (Resend verified the links.dollupboutique.com record at 00:58 on 26 Nov, Mauritius time).
  * Sends before it have delivery data only: opens, clicks and unsubscribes show as "not tracked".
  */
-export const OPEN_CLICK_TRACKING_SINCE = new Date("2026-11-26T20:55:00Z")
+export const OPEN_CLICK_TRACKING_SINCE = new Date("2026-11-26T00:58:00+04:00")
 export const SALES_WINDOW_DAYS = 7
 const DAY_MS = 24 * 60 * 60 * 1000
 
