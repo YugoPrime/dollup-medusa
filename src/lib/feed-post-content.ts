@@ -1,4 +1,5 @@
 import type { ProductSnapshot } from "../modules/stories/snapshot"
+import { sortSizes } from "./feed-size-label"
 
 /**
  * Builds the media list + caption for a daily IG/FB *feed* post from a product
@@ -71,9 +72,7 @@ export function buildFeedCaption(
   >,
   opts: FeedCaptionOptions = {},
 ): string {
-  const sizes = Array.from(
-    new Set((snapshot.variants_in_stock ?? []).flatMap((v) => v.sizes ?? [])),
-  ).filter(Boolean)
+  const sizes = sortSizes((snapshot.variants_in_stock ?? []).flatMap((v) => v.sizes ?? []))
   const colors = Array.from(
     new Set(
       (snapshot.variants_in_stock ?? [])

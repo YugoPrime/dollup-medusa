@@ -62,8 +62,116 @@ describe("feedImageKey", () => {
   it("is stable per source photo and post date, so retries overwrite the same file", () => {
     const a = feedImageKey("2026-11-10", "https://cdn/x/is2449.png")
     expect(a).toBe(feedImageKey("2026-11-10", "https://cdn/x/is2449.png"))
-    expect(a).toMatch(/^feed\/2026-11-10\/[a-f0-9]{16}-v1\.jpg$/)
+    expect(a).toMatch(/^feed\/2026-11-10\/[a-f0-9]{16}-v2\.jpg$/)
     expect(a).not.toBe(feedImageKey("2026-11-10", "https://cdn/x/is2449-b.png"))
+  })
+
+  it("changes when the sizes drawn on the photo change", () => {
+    const one = feedImageKey("2026-11-10", "https://cdn/x/is2449.png", ["S"])
+    const two = feedImageKey("2026-11-10", "https://cdn/x/is2449.png", ["S", "M"])
+    expect(one).not.toBe(two)
+    expect(one).toMatch(/-v2\.jpg$/)
+    expect(two).toMatch(/-v2\.jpg$/)
+    expect(feedImageKey("2026-11-10", "https://cdn/x/is2449.png")).toBe(
+      feedImageKey("2026-11-10", "https://cdn/x/is2449.png", []),
+    )
+  })
+})
+
+/** Mean and max luma (0-255) of a region of a JPEG/PNG buffer. */
+async function regionLuma(
+  img: Buffer,
+  left: number,
+  top: number,
+  width: number,
+  height: number,
+): Promise<{ mean: number; max: number }> {
+  const { data, info } = await sharp(img)
+    .extract({ left, top, width, height })
+    .removeAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true })
+  let sum = 0
+  let max = 0
+  for (let i = 0; i < data.length; i += info.channels) {
+    const l = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]
+    sum += l
+    if (l > max) max = l
+  }
+  return { mean: sum / (data.length / info.channels), max }
+}
+
+describe("normalizeFeedImage with sizes", () => {
+  const white = () => solid(1200, 1600, "png", { r: 255, g: 255, b: 255 })
+  const black = () => solid(1200, 1600, "png", { r: 0, g: 0, b: 0 })
+
+  it("draws a dark fade at the bottom", async () => {
+    const withSizes = await normalizeFeedImage(await white(), { sizes: ["S", "M"] })
+    const without = await normalizeFeedImage(await white())
+    expect((await regionLuma(withSizes, 600, 1300, 450, 50)).mean).toBeLessThan(120)
+    expect((await regionLuma(without, 600, 1300, 450, 50)).mean).toBeGreaterThan(240)
+  })
+
+  it("draws cream chips where the sizes go, and only there", async () => {
+    const out = await normalizeFeedImage(await black(), { sizes: ["S", "M"] })
+    expect((await regionLuma(out, 210, 1214, 90, 66)).max).toBeGreaterThan(230)
+    expect((await regionLuma(out, 600, 1214, 450, 66)).max).toBeLessThan(60)
+  })
+
+  it("draws nothing when there are no sizes", async () => {
+    const out = await normalizeFeedImage(await white(), { sizes: [] })
+    const meta = await sharp(out).metadata()
+    expect([meta.width, meta.height]).toEqual([FEED_IMAGE_WIDTH, FEED_IMAGE_HEIGHT])
+    expect((await regionLuma(out, 0, 1200, 1080, 150)).mean).toBeGreaterThan(240)
+  })
+
+  it("keeps 10 long sizes inside the photo", async () => {
+    const out = await normalizeFeedImage(await black(), {
+      sizes: ["XXS", "XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL", "One size"],
+    })
+    const meta = await sharp(out).metadata()
+    expect([meta.width, meta.height]).toEqual([FEED_IMAGE_WIDTH, FEED_IMAGE_HEIGHT])
+    expect((await regionLuma(out, 210, 1136, 90, 144)).max).toBeGreaterThan(230)
+    expect((await regionLuma(out, 1058, 1100, 22, 250)).max).toBeLessThan(100)
+  })
+
+  it("draws the whole letter in a one-letter chip (an L keeps its foot)", async () => {
+    const out = await normalizeFeedImage(await black(), { sizes: ["L"] })
+    const { data, info } = await sharp(out)
+      .extract({ left: 225, top: 1225, width: 30, height: 44 })
+      .raw()
+      .toBuffer({ resolveWithObject: true })
+    let ink = 0
+    for (let i = 0; i < data.length; i += info.channels) {
+      if (0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2] < 100) ink++
+    }
+    expect(ink).toBeGreaterThan(100)
+  })
+
+  it("falls back to the plain photo when the size row can't be drawn", async () => {
+    // Pango refuses these: "no text to render" / "invalid markup in text".
+    for (const sizes of [["\u200b"], ["S\u0000M"]]) {
+      const out = await normalizeFeedImage(await white(), { sizes })
+      const meta = await sharp(out).metadata()
+      expect([meta.format, meta.width, meta.height]).toEqual(["jpeg", FEED_IMAGE_WIDTH, FEED_IMAGE_HEIGHT])
+    }
+  })
+
+  it("escapes markup characters in a size", async () => {
+    const out = await normalizeFeedImage(await black(), { sizes: ["S&M", "<L>"] })
+    expect((await regionLuma(out, 210, 1214, 90, 66)).max).toBeGreaterThan(230)
+  })
+
+  it("draws the row even when the font file is missing", async () => {
+    let isolated: typeof import("../feed-image-prep") | undefined
+    jest.isolateModules(() => {
+      jest.doMock("node:fs", () => ({ ...jest.requireActual("node:fs"), existsSync: () => false }))
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      isolated = require("../feed-image-prep")
+    })
+    const out = await isolated!.normalizeFeedImage(await black(), { sizes: ["S", "M"] })
+    expect((await regionLuma(out, 210, 1214, 90, 66)).max).toBeGreaterThan(230)
+    jest.dontMock("node:fs")
   })
 })
 
@@ -104,6 +212,23 @@ describe("prepareFeedImages", () => {
     })
     expect(urls).toEqual([
       `https://cdn.example/${feedImageKey("2026-11-10", "https://cdn/ok.png")}`,
+    ])
+  })
+
+  it("draws each photo's own sizes and keys the copy by them", async () => {
+    const keys: string[] = []
+    await prepareFeedImages(["a", "b"], {
+      postDate: "2026-11-10",
+      fetchImage: async () => png,
+      sizesFor: (u) => (u === "a" ? ["S"] : ["M"]),
+      upload: async ({ key }) => {
+        keys.push(key)
+        return key
+      },
+    })
+    expect(keys).toEqual([
+      feedImageKey("2026-11-10", "a", ["S"]),
+      feedImageKey("2026-11-10", "b", ["M"]),
     ])
   })
 
