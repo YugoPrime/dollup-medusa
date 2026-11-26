@@ -44,7 +44,7 @@ const FIXTURES: Record<string, Record<string, unknown>[]> = {
 
 function fakePg() {
   return {
-    raw: jest.fn(async (sql: string) => {
+    raw: jest.fn(async (sql: string, _bindings?: unknown[]) => {
       const marker = /\/\* (\w+) \*\//.exec(sql)?.[1] ?? ""
       return { rows: FIXTURES[marker] ?? [] }
     }),
