@@ -1,5 +1,6 @@
 import {
   buildFeedCaption,
+  isRealPhoto,
   selectFeedImages,
   IG_CAROUSEL_MAX,
 } from "../feed-post-content"
@@ -41,6 +42,25 @@ const snap: Pick<
 }
 
 describe("selectFeedImages", () => {
+  it("never takes the real photos, only the model and back shots", () => {
+    const urls = selectFeedImages({
+      variants_in_stock: [
+        {
+          ...snap.variants_in_stock[0],
+          image_urls: [
+            "https://cdn.dollupboutique.com/IS2454-black-01M87JJZ63RE3HSZ2PAN6829HP.jpg",
+            "https://cdn.dollupboutique.com/IS2454-black-b-01M87JK03EB3343V5X6SWST03V.jpg",
+            "https://cdn.dollupboutique.com/IS2454-Black-r-01M8AA4DM7SV0XW6NJBM3KK4DD.jpg",
+          ],
+        },
+      ],
+    })
+    expect(urls).toEqual([
+      "https://cdn.dollupboutique.com/IS2454-black-01M87JJZ63RE3HSZ2PAN6829HP.jpg",
+      "https://cdn.dollupboutique.com/IS2454-black-b-01M87JK03EB3343V5X6SWST03V.jpg",
+    ])
+  })
+
   it("collects color-by-color, drops cutouts and dedupes", () => {
     const imgs = selectFeedImages(snap)
     expect(imgs).toEqual([
@@ -109,6 +129,34 @@ describe("selectFeedImages", () => {
       "https://cdn/x-front.webp",
       "https://cdn/x-back.png",
     ])
+  })
+})
+
+describe("isRealPhoto (Rahvi, 26 Nov: the real photos are never posted)", () => {
+  it("spots the real photos, as uploaded (name + upload id) or by their bare name", () => {
+    for (const url of [
+      "https://cdn.dollupboutique.com/IS2454-Black-r-01M8AA4DM7SV0XW6NJBM3KK4DD.jpg",
+      "https://cdn.dollupboutique.com/IS2454-Red-rr-01M8AA4EGD0MVWJHZSFS7SJAVT.jpg",
+      "https://cdn.dollupboutique.com/IS2454-Red-rrr-01M8AA4EGD0MVWJHZSFS7SJAVT.JPG",
+      "https://cdn/is1587-r.jpg",
+      "https://cdn/is2448-pink-real.jpg",
+      "https://cdn/is2448-pink-real-01M8AA4DM7SV0XW6NJBM3KK4DD.webp?v=2",
+    ]) {
+      expect(isRealPhoto(url)).toBe(true)
+    }
+  })
+
+  it("leaves the model, back and plain shots alone", () => {
+    for (const url of [
+      "https://cdn.dollupboutique.com/IS2454-black-01M87JJZ63RE3HSZ2PAN6829HP.jpg",
+      "https://cdn.dollupboutique.com/IS2454-black-b-01M87JK03EB3343V5X6SWST03V.jpg",
+      "https://cdn.dollupboutique.com/IS2450-Rose-Red-01M87JJZ63RE3HSZ2PAN6829HP.jpg",
+      "https://cdn/is2448-pink-front.jpg",
+      "https://cdn/is2497.jpg",
+      "",
+    ]) {
+      expect(isRealPhoto(url)).toBe(false)
+    }
   })
 })
 

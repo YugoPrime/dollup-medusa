@@ -14,14 +14,39 @@ export const IG_CAROUSEL_MAX = 10
 
 const MUR = new Intl.NumberFormat("en-US", { useGrouping: true })
 
+/** The id the upload adds before the extension: `-` + a 26-character ULID. */
+const UPLOAD_ID = /-[0-9a-hjkmnp-tv-z]{26}$/
+
 /**
- * A real product photo for the feed: drops the transparent `-cutout` PNGs
- * (used only by story templates) and anything that isn't an image URL.
+ * Rahvi's real (mannequin) photos: they stay on the product page and are
+ * never posted on the grid (Rahvi, 26 Nov 2026: "the real picture doesn't
+ * need to be posted ever"). Named `<ref>-<colour>-r` (more of the same: -rr,
+ * -rrr) or `…-real`, plus the upload id, e.g.
+ * `IS2454-Black-r-01M8AA4DM7SV0XW6NJBM3KK4DD.jpg`.
+ */
+export function isRealPhoto(url: string): boolean {
+  if (!url) return false
+  const file = url.split("?")[0].split("#")[0].toLowerCase()
+  const name = file
+    .slice(file.lastIndexOf("/") + 1)
+    .replace(/[.](jpe?g|png|webp)$/, "")
+    .replace(UPLOAD_ID, "")
+  const tokens = name.split("-")
+  if (tokens.length < 2) return false
+  const last = tokens[tokens.length - 1]
+  return /^r+$/.test(last) || last === "real"
+}
+
+/**
+ * A product photo the feed may post: drops the transparent `-cutout` PNGs
+ * (used only by story templates), Rahvi's real photos (never posted) and
+ * anything that isn't an image URL.
  */
 function isFeedPhoto(url: string): boolean {
   if (!url) return false
   const file = url.split("?")[0].split("#")[0].toLowerCase()
   if (file.includes("cutout")) return false
+  if (isRealPhoto(file)) return false
   return /\.(jpe?g|png|webp)$/.test(file)
 }
 

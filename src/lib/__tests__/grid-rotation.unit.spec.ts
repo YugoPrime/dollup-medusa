@@ -193,6 +193,12 @@ describe("refreshGridContent", () => {
     expect(r?.image_urls).toEqual(["https://cdn/b.jpg", "https://cdn/a.jpg"])
   })
 
+  it("drops a real photo from a row planned before the rule, at publish", () => {
+    const real = "https://cdn.dollupboutique.com/IS2451-Red-r-01M8AA4DM7SV0XW6NJBM3KK4DD.jpg"
+    const r = refreshGridContent(["https://cdn/a.jpg", real], withImages(990, ["https://cdn/a.jpg", real]))
+    expect(r?.image_urls).toEqual(["https://cdn/a.jpg"])
+  })
+
   it("returns null when none of the reviewed photos is left", () => {
     expect(refreshGridContent(["https://cdn/gone.jpg"], withImages(990, ["https://cdn/a.jpg"]))).toBeNull()
   })
