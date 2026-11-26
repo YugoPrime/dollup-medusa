@@ -4,17 +4,23 @@ import type {
 } from "@medusajs/framework/subscribers"
 import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
 
+import { findGuestPointRows, moveGuestPoints, type PgRaw } from "../lib/loyalty-maintenance"
 import { LOYALTY_MODULE } from "../modules/loyalty"
 import type LoyaltyModuleService from "../modules/loyalty/service"
 
 /**
- * Award the configured welcome bonus the first time a customer registers.
+ * When a customer registers:
+ *   1. Award the configured welcome bonus (first time only).
+ *   2. Move in any points sitting on guest checkout records with the same
+ *      email (web orders placed before signing up or while logged out).
  *
  *   - Only registered customers (has_account=true), not guest checkout records.
- *   - Idempotent through the loyalty service: awardPoints with order_id=null
- *     will create a fresh transaction every call, so we guard with a metadata
- *     flag on the loyalty account itself.
- *   - Skipped if welcome_bonus_points is 0 in settings.
+ *   - Welcome is guarded by the account balance: a re-fired event finds the
+ *     balance above zero and awards nothing. It runs before the move so the
+ *     moved points never block the bonus.
+ *   - The move is idempotent: moved guest records are at zero, and
+ *     moveGuestPoints debits before it credits.
+ *   - Each step has its own try/catch: a failing move never costs the bonus.
  */
 export default async function loyaltyWelcomeBonusSubscriber({
   event,
@@ -24,6 +30,7 @@ export default async function loyaltyWelcomeBonusSubscriber({
   const customerId = event.data?.id
   if (!customerId) return
 
+  let loyaltyService: LoyaltyModuleService
   try {
     const query = container.resolve(ContainerRegistrationKeys.QUERY)
     const { data: customers } = await query.graph({
@@ -33,30 +40,44 @@ export default async function loyaltyWelcomeBonusSubscriber({
     })
     const customer = customers?.[0]
     if (!customer || !customer.has_account) return
-
-    const loyaltyService = container.resolve<LoyaltyModuleService>(
-      LOYALTY_MODULE,
-    )
-    const settings = await loyaltyService.getSettings()
-    const bonus = settings.welcome_bonus_points
-    if (!bonus || bonus <= 0) return
-
-    const account = await loyaltyService.getAccount(customerId)
-    // Guard against double-awarding if the subscriber re-fires.
-    if (account.lifetime_earned > 0 || account.points_balance > 0) {
-      return
-    }
-
-    await loyaltyService.awardPoints(customerId, bonus, {
-      reason: `Welcome bonus on signup`,
-    })
-
-    logger.info(
-      `[loyalty] awarded ${bonus} welcome pts to customer ${customerId}`,
-    )
+    loyaltyService = container.resolve<LoyaltyModuleService>(LOYALTY_MODULE)
   } catch (err) {
     logger.error(
       `[loyalty] welcome bonus failed for ${customerId}: ${(err as Error).message}`,
+    )
+    return
+  }
+
+  try {
+    const settings = await loyaltyService.getSettings()
+    const bonus = settings.welcome_bonus_points
+    const account = await loyaltyService.getAccount(customerId)
+    if (bonus > 0 && account.lifetime_earned <= 0 && account.points_balance <= 0) {
+      await loyaltyService.awardPoints(customerId, bonus, {
+        reason: `Welcome bonus on signup`,
+      })
+      logger.info(
+        `[loyalty] awarded ${bonus} welcome pts to customer ${customerId}`,
+      )
+    }
+  } catch (err) {
+    logger.error(
+      `[loyalty] welcome bonus failed for ${customerId}: ${(err as Error).message}`,
+    )
+  }
+
+  try {
+    const pg = container.resolve<PgRaw>(ContainerRegistrationKeys.PG_CONNECTION)
+    const rows = await findGuestPointRows(pg, customerId)
+    const moved = await moveGuestPoints(loyaltyService, rows)
+    if (moved.points > 0) {
+      logger.info(
+        `[loyalty] moved ${moved.points} guest pts into customer ${customerId}`,
+      )
+    }
+  } catch (err) {
+    logger.error(
+      `[loyalty] guest points move failed for ${customerId}: ${(err as Error).message}`,
     )
   }
 }

@@ -52,6 +52,79 @@ export async function findUnreversedCanceledEarns(pg: PgRaw): Promise<CanceledEa
   }))
 }
 
+type AdjustService = {
+  adjustPoints: (customerId: string, delta: number, options: { reason: string }) => Promise<unknown>
+}
+
+export type GuestPointRow = {
+  target_customer_id: string
+  source_customer_id: string
+  points: number
+}
+
+/**
+ * Guest checkout records (same email as an account, any letter case) that
+ * still hold points. Web orders placed before signing up, or while logged
+ * out, credit these records, which the customer can never see.
+ */
+export async function findGuestPointRows(
+  pg: PgRaw,
+  targetCustomerId?: string,
+): Promise<GuestPointRow[]> {
+  const sql = `
+select r.id as target_customer_id, g.id as source_customer_id, a.points_balance as points
+from customer r
+join customer g on lower(g.email) = lower(r.email)
+  and g.has_account = false and g.deleted_at is null and g.id <> r.id
+join loyalty_account a on a.customer_id = g.id and a.deleted_at is null and a.points_balance > 0
+where r.has_account = true and r.deleted_at is null${targetCustomerId ? "\n  and r.id = ?" : ""}
+order by r.id, g.id`
+  const { rows } = await pg.raw(sql, targetCustomerId ? [targetCustomerId] : [])
+  return rows.map((r) => ({
+    target_customer_id: String(r.target_customer_id),
+    source_customer_id: String(r.source_customer_id),
+    points: Number(r.points),
+  }))
+}
+
+/**
+ * Move each guest balance into its account: debit the guest record first
+ * (adjustPoints refuses to go below zero, so a second run moves nothing),
+ * then credit the account. If the credit fails, the guest debit is undone.
+ */
+export async function moveGuestPoints(
+  loyalty: AdjustService,
+  rows: GuestPointRow[],
+): Promise<{ people: number; points: number }> {
+  const people = new Set<string>()
+  let points = 0
+  for (const row of rows) {
+    const amount = Math.floor(Number(row.points))
+    if (!(amount > 0)) continue
+    try {
+      await loyalty.adjustPoints(row.source_customer_id, -amount, {
+        reason: `Moved to account ${row.target_customer_id}`,
+      })
+    } catch {
+      continue
+    }
+    try {
+      await loyalty.adjustPoints(row.target_customer_id, amount, {
+        reason: "Points from orders before your account",
+      })
+      people.add(row.target_customer_id)
+      points += amount
+    } catch {
+      await loyalty
+        .adjustPoints(row.source_customer_id, amount, {
+          reason: `Move to account ${row.target_customer_id} failed, points restored`,
+        })
+        .catch(() => undefined)
+    }
+  }
+  return { people: people.size, points }
+}
+
 /** Take back the points of each cancelled order. One failure never stops the rest. */
 export async function reverseCanceled(
   loyalty: ReverseService,
