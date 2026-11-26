@@ -66,6 +66,14 @@ describe("loyalty maintenance: guest points", () => {
   })
 })
 
+// Account at zero after the take-back: nothing moved, nothing to follow.
+const settled = {
+  ensureAccount: async () => ({ id: "acc", points_balance: 0, lifetime_earned: 0, lifetime_redeemed: 0 }),
+  listLoyaltyTransactions: async () => [],
+  updateLoyaltyAccounts: async () => ({}),
+  createLoyaltyTransactions: async () => ({}),
+}
+
 describe("loyalty maintenance: cancelled orders", () => {
   it("finds earn rows on cancelled orders that were never taken back", async () => {
     const raw = jest.fn().mockResolvedValue({
@@ -81,7 +89,7 @@ describe("loyalty maintenance: cancelled orders", () => {
 
   it("reverses each row and counts what was taken back", async () => {
     const reversePointsForOrder = jest.fn().mockResolvedValue({ reversed: 30, balance: 0 })
-    const result = await reverseCanceled({ reversePointsForOrder }, [
+    const result = await reverseCanceled({ ...settled, reversePointsForOrder }, [
       { customer_id: "cus_1", order_id: "o1", display_id: 7, points: "30" as unknown as number },
     ])
     expect(reversePointsForOrder).toHaveBeenCalledWith("cus_1", "o1", {
@@ -95,7 +103,7 @@ describe("loyalty maintenance: cancelled orders", () => {
       .fn()
       .mockRejectedValueOnce(new Error("boom"))
       .mockResolvedValueOnce({ reversed: 12, balance: 0 })
-    const result = await reverseCanceled({ reversePointsForOrder }, [
+    const result = await reverseCanceled({ ...settled, reversePointsForOrder }, [
       { customer_id: "cus_1", order_id: "o1", display_id: 7, points: 30 },
       { customer_id: "cus_2", order_id: "o2", display_id: null, points: 12 },
     ])

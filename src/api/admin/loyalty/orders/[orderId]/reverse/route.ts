@@ -4,6 +4,7 @@ import type {
 } from "@medusajs/framework/http"
 import { Modules } from "@medusajs/framework/utils"
 
+import { reverseOrderPoints } from "../../../../../../lib/loyalty-maintenance"
 import { LOYALTY_MODULE } from "../../../../../../modules/loyalty"
 import type LoyaltyModuleService from "../../../../../../modules/loyalty/service"
 
@@ -60,10 +61,12 @@ export const POST = async (
     req.scope.resolve<LoyaltyModuleService>(LOYALTY_MODULE)
 
   try {
-    const result = await loyaltyService.reversePointsForOrder(
+    // Follows the points to the account they moved to, if they moved.
+    const result = await reverseOrderPoints(
+      loyaltyService as unknown as Parameters<typeof reverseOrderPoints>[0],
       order.customer_id,
       orderId,
-      { reason },
+      reason,
     )
     res.json({ ...result, customer_id: order.customer_id })
   } catch (err) {

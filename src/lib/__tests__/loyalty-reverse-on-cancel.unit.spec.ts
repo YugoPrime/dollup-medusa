@@ -10,7 +10,13 @@ describe("loyalty-reverse-on-cancel subscriber", () => {
     resolve: (key: unknown) => {
       if (key === ContainerRegistrationKeys.LOGGER) return logger
       if (key === Modules.ORDER) return { retrieveOrder: async () => order }
-      return { reversePointsForOrder }
+      return {
+        reversePointsForOrder,
+        ensureAccount: async () => ({ id: "acc", points_balance: 0, lifetime_earned: 0, lifetime_redeemed: 0 }),
+        listLoyaltyTransactions: async () => [],
+        updateLoyaltyAccounts: async () => ({}),
+        createLoyaltyTransactions: async () => ({}),
+      }
     },
   }
   const run = () =>
@@ -32,6 +38,7 @@ describe("loyalty-reverse-on-cancel subscriber", () => {
     expect(reversePointsForOrder).toHaveBeenCalledWith("cus_1", "order_1", {
       reason: "Order #101 cancelled",
     })
+    expect(logger.error).not.toHaveBeenCalled()
   })
 
   it("does nothing for an order without a customer", async () => {

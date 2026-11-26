@@ -125,18 +125,112 @@ export async function moveGuestPoints(
   return { people: people.size, points }
 }
 
+type LedgerAccount = {
+  id: string
+  points_balance: number
+  lifetime_earned: number
+  lifetime_redeemed: number
+}
+
+/** The loyalty service methods followMovedPoints writes through. */
+export type FollowService = {
+  ensureAccount: (customerId: string) => Promise<LedgerAccount>
+  listLoyaltyTransactions: (
+    filters: Record<string, unknown>,
+    config?: Record<string, unknown>,
+  ) => Promise<{ reason: string; created_at: Date | string }[]>
+  updateLoyaltyAccounts: (data: Record<string, unknown>) => Promise<unknown>
+  createLoyaltyTransactions: (data: Record<string, unknown>) => Promise<unknown>
+}
+
+const MOVED_PREFIX = "Moved to account "
+
+/**
+ * A take-back (cancel or refund) runs against the record that earned the
+ * points. If that is a guest record whose points already moved to an account
+ * (moveGuestPoints), the guest record goes below zero while the account keeps
+ * the points. This moves the deficit onto that account instead; the account
+ * may go below zero, like any order take-back.
+ *
+ * Safe to repeat: once the guest record is back at zero there is nothing to do.
+ */
+export async function followMovedPoints(
+  loyalty: FollowService,
+  customerId: string,
+  options: { orderId: string; reason: string },
+): Promise<{ moved: number; target: string | null }> {
+  const guest = await loyalty.ensureAccount(customerId)
+  if (!(guest.points_balance < 0)) return { moved: 0, target: null }
+
+  const adjustments = await loyalty.listLoyaltyTransactions(
+    { account_id: guest.id, type: "adjustment" },
+    { order: { created_at: "DESC" } },
+  )
+  const move = adjustments.find((t) => t.reason?.startsWith(MOVED_PREFIX))
+  if (!move) return { moved: 0, target: null }
+  const target = move.reason.slice(MOVED_PREFIX.length).trim()
+  if (!target || target === customerId) return { moved: 0, target: null }
+
+  const deficit = -guest.points_balance
+  await loyalty.updateLoyaltyAccounts({
+    id: guest.id,
+    points_balance: 0,
+    lifetime_earned: guest.lifetime_earned + deficit,
+  })
+  await loyalty.createLoyaltyTransactions({
+    account_id: guest.id,
+    type: "adjustment",
+    points: deficit,
+    reason: `${options.reason}: taken from account ${target} instead`,
+    order_id: options.orderId,
+  })
+
+  const account = await loyalty.ensureAccount(target)
+  await loyalty.updateLoyaltyAccounts({
+    id: account.id,
+    points_balance: account.points_balance - deficit,
+    lifetime_redeemed: account.lifetime_redeemed + deficit,
+  })
+  await loyalty.createLoyaltyTransactions({
+    account_id: account.id,
+    type: "adjustment",
+    points: -deficit,
+    reason: options.reason,
+    order_id: options.orderId,
+  })
+  return { moved: deficit, target }
+}
+
+/**
+ * Take back an order's points (cancel or refund), following them to the
+ * account they moved to if needed. Returns reversePointsForOrder's result.
+ */
+export async function reverseOrderPoints(
+  loyalty: ReverseService & FollowService,
+  customerId: string,
+  orderId: string,
+  reason: string,
+): Promise<{ reversed: number; balance: number }> {
+  const result = await loyalty.reversePointsForOrder(customerId, orderId, { reason })
+  await followMovedPoints(loyalty, customerId, { orderId, reason })
+  return result
+}
+
 /** Take back the points of each cancelled order. One failure never stops the rest. */
 export async function reverseCanceled(
-  loyalty: ReverseService,
+  loyalty: ReverseService & FollowService,
   rows: CanceledEarnRow[],
 ): Promise<{ orders: number; points: number }> {
   let orders = 0
   let points = 0
   for (const row of rows) {
     try {
-      const { reversed } = await loyalty.reversePointsForOrder(row.customer_id, row.order_id, {
-        reason: `Order #${row.display_id ?? row.order_id} cancelled`,
-      })
+      const { reversed } = await reverseOrderPoints(
+        loyalty,
+        row.customer_id,
+        row.order_id,
+        `Order #${row.display_id ?? row.order_id} cancelled`,
+      )
       if (reversed > 0) {
         orders += 1
         points += Number(reversed)

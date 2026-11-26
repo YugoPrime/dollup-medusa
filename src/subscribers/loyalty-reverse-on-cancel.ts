@@ -4,6 +4,7 @@ import type {
 } from "@medusajs/framework/subscribers"
 import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils"
 
+import { reverseOrderPoints } from "../lib/loyalty-maintenance"
 import { LOYALTY_MODULE } from "../modules/loyalty"
 import type LoyaltyModuleService from "../modules/loyalty/service"
 
@@ -29,9 +30,12 @@ export default async function loyaltyReverseOnCancel({
     if (!order.customer_id) return
 
     const loyalty = container.resolve<LoyaltyModuleService>(LOYALTY_MODULE)
-    const { reversed } = await loyalty.reversePointsForOrder(order.customer_id, order.id, {
-      reason: `Order #${order.display_id ?? order.id} cancelled`,
-    })
+    const { reversed } = await reverseOrderPoints(
+      loyalty as unknown as Parameters<typeof reverseOrderPoints>[0],
+      order.customer_id,
+      order.id,
+      `Order #${order.display_id ?? order.id} cancelled`,
+    )
     if (reversed > 0) {
       logger.info(`[loyalty] took back ${reversed} pts for cancelled order ${order.id}`)
     }
