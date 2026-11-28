@@ -46,12 +46,17 @@ export default async function emailOnCustomerCreated({
     }
 
     let welcomeBonusPoints = 0
+    // Fallbacks = the rules live from 1 Dec 2026, used only if settings can't be read.
+    let earnRatePer100 = 5
+    let minRedeemPoints = 150
     try {
       const loyaltyService = container.resolve<LoyaltyModuleService>(
         LOYALTY_MODULE,
       )
       const settings = await loyaltyService.getSettings()
       welcomeBonusPoints = settings.welcome_bonus_points ?? 0
+      earnRatePer100 = settings.earn_rate_per_100_mur ?? earnRatePer100
+      minRedeemPoints = settings.min_redeem_points ?? minRedeemPoints
     } catch (err) {
       logger.warn(
         `[email] customer.created: could not read loyalty settings (${(err as Error).message})`,
@@ -62,6 +67,8 @@ export default async function emailOnCustomerCreated({
       storefrontUrl: STOREFRONT_URL,
       customerFirstName: (customer.first_name as string | null) ?? "",
       welcomeBonusPoints,
+      earnRatePer100,
+      minRedeemPoints,
     }
 
     const notificationService = container.resolve<INotificationModuleService>(

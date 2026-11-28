@@ -7,7 +7,9 @@ export default function WelcomePreview() {
     <WelcomeEmail
       storefrontUrl="https://shop.dollupboutique.com"
       customerFirstName="Sarah"
-      welcomeBonusPoints={50}
+      welcomeBonusPoints={100}
+      earnRatePer100={5}
+      minRedeemPoints={150}
     />
   )
 }

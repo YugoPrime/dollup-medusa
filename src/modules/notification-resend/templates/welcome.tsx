@@ -13,10 +13,12 @@ export type WelcomeEmailData = {
   storefrontUrl: string
   customerFirstName: string
   welcomeBonusPoints: number
+  earnRatePer100: number
+  minRedeemPoints: number
 }
 
 export default function WelcomeEmail(data: WelcomeEmailData) {
-  const { storefrontUrl, customerFirstName, welcomeBonusPoints } = data
+  const { storefrontUrl, customerFirstName, welcomeBonusPoints, earnRatePer100, minRedeemPoints } = data
 
   return (
     <EmailLayout
@@ -80,9 +82,8 @@ export default function WelcomeEmail(data: WelcomeEmailData) {
       ) : null}
 
       <Paragraph>
-        Earn 2 points per Rs 100 spent. 1 point = Rs 1 off your next order,
-        from 150 points minimum. Birthday bonus, early access drops, and
-        member-only offers — that's the deal.
+        Earn {earnRatePer100} points per Rs 100 spent. 1 point = Rs 1 off your next order,
+        from {minRedeemPoints} points. Early access drops and member-only offers too.
       </Paragraph>
 
       <Section style={{ padding: "16px 0 8px 0" }}>
